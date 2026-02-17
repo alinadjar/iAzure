@@ -44,7 +44,7 @@ stages:
       parameters:
         TARGET_CHANNEL: "${{ parameters.TARGET_CHANNEL }}"
         VERSION: "${{  parameters.VERSION  }}"
-        ProjPath: "SadganErp/WinSetup"
+        ProjPath: "SadganErp/Sadgan.Erp.Panel"
         Collection: "SadganErp"
         Repo: "SadganErp/_git/Sadgan.Erp.Panel"
         BranchName: "cicd"
