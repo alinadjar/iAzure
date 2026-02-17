@@ -58,51 +58,51 @@ steps:
       echo "##vso[task.setvariable variable=VERSION_INPUT;isOutput=true]$VERSION_INPUT"
 
 
-- bash: |
-    # Test URL accessibility
-    COLLECTION="${{ parameters.Collection }}"
-    PROJECT="Sadgan.Erp.Panel" 
-    REPO="Sadgan.Erp.Panel"
+# - bash: |
+#     # Test URL accessibility
+#     COLLECTION="${{ parameters.Collection }}"
+#     PROJECT="Sadgan.Erp.Panel" 
+#     REPO="Sadgan.Erp.Panel"
     
-    TEST_URL="http://azure.sadgan.int/WebApp/$COLLECTION/$PROJECT/_git/CICD"
+#     TEST_URL="http://azure.sadgan.int/WebApp/$COLLECTION/$PROJECT/_git/CICD"
     
-    echo "Testing URL: $TEST_URL"
+#     echo "Testing URL: $TEST_URL"
     
-    # Test with curl to see the response
-    curl -I -k -H "Authorization: bearer $(System.AccessToken)" "$TEST_URL"        
+#     # Test with curl to see the response
+#     curl -I -k -H "Authorization: bearer $(System.AccessToken)" "$TEST_URL"        
 
-    echo "=== Debug Information ==="
-    echo "System.AccessToken length: ${#SYSTEM_ACCESSTOKEN}"
-    echo "System.AccessToken first 10 chars: ${SYSTEM_ACCESSTOKEN:0:10}..."
+#     echo "=== Debug Information ==="
+#     echo "System.AccessToken length: ${#SYSTEM_ACCESSTOKEN}"
+#     echo "System.AccessToken first 10 chars: ${SYSTEM_ACCESSTOKEN:0:10}..."
     
 
-    git config --global http.sslVerify false
-    git config --global --add safe.directory '*'
+#     git config --global http.sslVerify false
+#     git config --global --add safe.directory '*'
     
-    COLLECTION="${{ parameters.Collection }}"
-    PROJECT="Sadgan.Erp.Panel"
+#     COLLECTION="${{ parameters.Collection }}"
+#     PROJECT="Sadgan.Erp.Panel"
     
-    # Method 1: Embedded credentials in URL (works best for Azure DevOps Server)
-    echo "=== Cloning with embedded credentials ==="
-    git clone --single-branch --branch "cicd" \
-        "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp/$COLLECTION/$PROJECT/_git/CICD" \
-        "$(System.DefaultWorkingDirectory)/CICD_test"
+#     # Method 1: Embedded credentials in URL (works best for Azure DevOps Server)
+#     echo "=== Cloning with embedded credentials ==="
+#     git clone --single-branch --branch "cicd" \
+#         "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp/$COLLECTION/$PROJECT/_git/CICD" \
+#         "$(System.DefaultWorkingDirectory)/CICD_test"
 
 
-    git clone --single-branch --branch "cicd" \
-        "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp/SadganErp/_git/CICD" \
-        "$(System.DefaultWorkingDirectory)/CICD_xxx"    
+#     git clone --single-branch --branch "cicd" \
+#         "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp/SadganErp/_git/CICD" \
+#         "$(System.DefaultWorkingDirectory)/CICD_xxx"    
     
-    if [ $? -eq 0 ]; then
-        echo "✅ Clone successful!"
-    else
-        echo "❌ Clone failed with embedded credentials"
-        exit 1
-    fi    
-    echo "=== Test complete ==="
-  displayName: 'Debug Repository URLs'
-  env:
-    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+#     if [ $? -eq 0 ]; then
+#         echo "✅ Clone successful!"
+#     else
+#         echo "❌ Clone failed with embedded credentials"
+#         exit 1
+#     fi    
+#     echo "=== Test complete ==="
+#   displayName: 'Debug Repository URLs'
+#   env:
+#     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
 
 
