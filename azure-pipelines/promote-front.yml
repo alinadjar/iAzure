@@ -46,5 +46,5 @@ stages:
         VERSION: "${{  parameters.VERSION  }}"
         ProjPath: "DevOps/WinSetup"
         Repo: "SadganErp/_git/Sadgan.Erp.Panel"
-        BranchName: "cicd"
+        BranchName: "master"
         side: "frontend"
