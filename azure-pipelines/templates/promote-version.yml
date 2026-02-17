@@ -1,0 +1,448 @@
+parameters:
+- name: TARGET_CHANNEL
+  displayName: "Promote from/to:"
+  type: string
+  values:
+      - dev_to_alpha
+      - alpha_to_beta
+      - beta_to_master
+- name: VERSION
+  displayName: "Target Version"
+  type: string
+  default: '0.0.0'
+- name: ProjPath
+  displayName: "Proj Path"
+  type: string  
+- name: Collection
+  type: string  
+- name: Repo
+  displayName: "Repo"
+  type: string  
+- name: BranchName
+  displayName: "Branch Name"
+  type: string  
+- name: side
+  type: string
+  values:
+    - frontend
+    - backend
+
+
+
+steps:
+- checkout: none
+
+- task: Bash@3
+  name: init
+  displayName: 'init: '
+  env:
+    VERSION_INPUT: ${{ parameters.VERSION }}
+    TARGET_CHANNEL: ${{ parameters.TARGET_CHANNEL }}
+  inputs:
+    targetType: 'inline'
+    script: |
+      SOURCE_BRANCH=$(echo "$TARGET_CHANNEL" | cut -d_ -f1)
+      TARGET_BRANCH=$(echo "$TARGET_CHANNEL" | cut -d_ -f3)
+      
+      echo "SOURCE_BRANCH: $SOURCE_BRANCH"
+      echo "TARGET_BRANCH: $TARGET_BRANCH"
+      echo "VERSION_INPUT: $VERSION_INPUT"
+      
+      if [ $VERSION_INPUT == "0.0.0"  ]; then
+          echo "❌ Version is required !"
+          exit 1
+      fi
+
+      echo "##vso[task.setvariable variable=SOURCE_BRANCH;isOutput=true]$SOURCE_BRANCH"
+      echo "##vso[task.setvariable variable=TARGET_BRANCH;isOutput=true]$TARGET_BRANCH"
+      echo "##vso[task.setvariable variable=VERSION_INPUT;isOutput=true]$VERSION_INPUT"
+
+
+# - bash: |
+#     # Test URL accessibility
+#     COLLECTION="${{ parameters.Collection }}"
+#     PROJECT="Sadgan.Erp.Panel"  # Extract from your Repo parameter
+#     REPO="Sadgan.Erp.Panel"
+    
+#     TEST_URL="http://azure.sadgan.int/WebApp/$COLLECTION/$PROJECT/_git/CICD"
+    
+#     echo "Testing URL: $TEST_URL"
+    
+#     # Test with curl to see the response
+#     curl -I -k -H "Authorization: bearer $(System.AccessToken)" "$TEST_URL"        
+
+#     echo "=== Debug Information ==="
+#     echo "System.AccessToken length: ${#SYSTEM_ACCESSTOKEN}"
+#     echo "System.AccessToken first 10 chars: ${SYSTEM_ACCESSTOKEN:0:10}..."
+    
+
+#     git config --global http.sslVerify false
+#     git config --global --add safe.directory '*'
+    
+#     COLLECTION="${{ parameters.Collection }}"
+#     PROJECT="Sadgan.Erp.Panel"
+    
+#     # Method 1: Embedded credentials in URL (works best for Azure DevOps Server)
+#     echo "=== Cloning with embedded credentials ==="
+#     git clone --single-branch --branch "cicd" \
+#         "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp/$COLLECTION/$PROJECT/_git/CICD" \
+#         "$(System.DefaultWorkingDirectory)/CICD_test"
+    
+#     if [ $? -eq 0 ]; then
+#         echo "✅ Clone successful!"
+#     else
+#         echo "❌ Clone failed with embedded credentials"
+#         exit 1
+#     fi    
+#     echo "=== Test complete ==="
+#   displayName: 'Debug Repository URLs'
+#   env:
+#     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+
+
+
+
+
+# - task: Bash@3
+#   name: create_pr
+#   displayName: 'Create and Complete PR'
+#   env:
+#     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+#   inputs:
+#     targetType: 'inline'
+#     script: |
+#       set -e
+      
+#       SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
+#       TARGET_BRANCH="$(init.TARGET_BRANCH)"
+#       REPO_NAME="${{ parameters.Repo }}"
+#       VERSION="$(init.VERSION_INPUT)"
+      
+#       echo "Creating PR from $SOURCE_BRANCH to $TARGET_BRANCH for version $VERSION"
+      
+#       # Base URL
+#       BASE_URL="http://azure.sadgan.int/WebApp"
+#       API_URL="$BASE_URL/_apis"
+      
+#       # Get repo ID
+#       SIMPLE_REPO_NAME=$(basename "$REPO_NAME")
+#       REPOS_URL="$API_URL/git/repositories?api-version=6.0"
+#       REPOS_RESPONSE=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$REPOS_URL")
+#       REPO_ID=$(echo "$REPOS_RESPONSE" | jq -r ".value[] | select(.name==\"$SIMPLE_REPO_NAME\") | .id")
+      
+#       if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
+#         echo "❌ Could not find repository: $SIMPLE_REPO_NAME"
+#         exit 1
+#       fi
+#       echo "✅ Found repository ID: $REPO_ID"
+      
+#       # Check for existing PR
+#       PR_SEARCH_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=6.0"
+#       PR_SEARCH=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$PR_SEARCH_URL")
+#       EXISTING_PR=$(echo "$PR_SEARCH" | jq -r ".value[] | select(.sourceRefName==\"refs/heads/$SOURCE_BRANCH\" and .targetRefName==\"refs/heads/$TARGET_BRANCH\") | .pullRequestId")
+      
+#       if [ -n "$EXISTING_PR" ] && [ "$EXISTING_PR" != "null" ]; then
+#         echo "⚠️ Active PR exists: $EXISTING_PR"
+#         PR_ID=$EXISTING_PR
+#       else
+#         # Create new PR
+#         PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?api-version=6.0"
+#         PR_TITLE="Promote $VERSION from $SOURCE_BRANCH to $TARGET_BRANCH"
+#         PR_BODY="{
+#           \"sourceRefName\": \"refs/heads/$SOURCE_BRANCH\",
+#           \"targetRefName\": \"refs/heads/$TARGET_BRANCH\",
+#           \"title\": \"$PR_TITLE\"
+#         }"
+        
+#         PR_RESPONSE=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" -H "Content-Type: application/json" -d "$PR_BODY" "$PR_URL")
+#         PR_ID=$(echo "$PR_RESPONSE" | jq -r '.pullRequestId')
+        
+#         if [ -z "$PR_ID" ] || [ "$PR_ID" = "null" ]; then
+#           echo "❌ Failed to create PR"
+#           exit 1
+#         fi
+#         echo "✅ PR created with ID: $PR_ID"
+#       fi
+      
+#       # Wait for merge to be ready
+#       echo "Waiting for merge to be ready..."
+#       MAX_ATTEMPTS=30
+#       ATTEMPT=0
+#       MERGE_READY=false
+      
+#       while [ $ATTEMPT -lt $MAX_ATTEMPTS ] && [ "$MERGE_READY" = false ]; do
+#         sleep 5
+        
+#         PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
+#         PR_DETAILS=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$PR_URL")
+        
+#         MERGE_STATUS=$(echo "$PR_DETAILS" | jq -r '.mergeStatus')
+#         echo "Merge status: $MERGE_STATUS (attempt $((ATTEMPT+1))/$MAX_ATTEMPTS)"
+        
+#         if [ "$MERGE_STATUS" = "succeeded" ]; then
+#           MERGE_READY=true
+#           echo "✅ Merge is ready"
+#         elif [ "$MERGE_STATUS" = "conflicts" ]; then
+#           echo "❌ Merge conflicts detected"
+#           exit 1
+#         elif [ "$MERGE_STATUS" = "failure" ]; then
+#           echo "❌ Merge failed"
+#           exit 1
+#         fi
+        
+#         ATTEMPT=$((ATTEMPT + 1))
+#       done
+      
+#       if [ "$MERGE_READY" = false ]; then
+#         echo "❌ Timeout waiting for merge to be ready"
+#         exit 1
+#       fi
+      
+#       # Get the source commit
+#       SOURCE_COMMIT=$(echo "$PR_DETAILS" | jq -r '.lastMergeSourceCommit.commitId')
+      
+#       # Add current user as reviewer and approve
+#       echo "Adding current user as reviewer and approving..."
+      
+#       # Get current user identity from the PR creator (since it's the build service)
+#       CURRENT_USER_ID=$(echo "$PR_DETAILS" | jq -r '.createdBy.id')
+#       echo "Current user ID: $CURRENT_USER_ID"
+      
+#       # Add as reviewer and vote +10
+#       REVIEWER_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID/reviewers/$CURRENT_USER_ID?api-version=6.0"
+#       REVIEWER_BODY="{
+#         \"vote\": 10
+#       }"
+      
+#       curl -s -u ":$SYSTEM_ACCESSTOKEN" \
+#         -H "Content-Type: application/json" \
+#         -X PUT \
+#         -d "$REVIEWER_BODY" \
+#         "$REVIEWER_URL" > /dev/null
+      
+#       echo "✅ PR approved"
+      
+#       # Complete the PR with bypass
+#       echo "Completing PR $PR_ID with bypass..."
+#       COMPLETE_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
+      
+#       COMPLETE_BODY="{
+#         \"status\": \"completed\",
+#         \"lastMergeSourceCommit\": {
+#           \"commitId\": \"$SOURCE_COMMIT\"
+#         },
+#         \"completionOptions\": {
+#           \"bypassPolicy\": true,
+#           \"bypassReason\": \"Automated promotion for version $VERSION\",
+#           \"mergeStrategy\": \"squash\",
+#           \"deleteSourceBranch\": false
+#         }
+#       }"
+      
+#       COMPLETE_RESPONSE=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" \
+#         -H "Content-Type: application/json" \
+#         -X PATCH \
+#         -d "$COMPLETE_BODY" \
+#         "$COMPLETE_URL")
+      
+#       # Check for successful completion - look for completionQueueTime or closedBy
+#       HAS_COMPLETION_QUEUE=$(echo "$COMPLETE_RESPONSE" | jq -r 'has("completionQueueTime")')
+#       HAS_CLOSED_BY=$(echo "$COMPLETE_RESPONSE" | jq -r 'has("closedBy")')
+#       CURRENT_STATUS=$(echo "$COMPLETE_RESPONSE" | jq -r '.status // "unknown"')
+      
+#       echo "PR status after completion attempt: $CURRENT_STATUS"
+      
+#       if [ "$HAS_COMPLETION_QUEUE" = "true" ] || [ "$HAS_CLOSED_BY" = "true" ] || [ "$CURRENT_STATUS" = "completed" ]; then
+#         echo "✅ PR $PR_ID completed successfully"
+#         echo "##vso[task.setvariable variable=PR_ID;isOutput=true]$PR_ID"
+#         echo "##vso[task.setvariable variable=MERGE_SUCCESS;isOutput=true]true"
+        
+#         # Wait a moment for the merge to fully complete
+#         echo "Waiting for merge to complete..."
+#         sleep 5
+        
+#         # Verify final status
+#         FINAL_CHECK=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$COMPLETE_URL")
+#         FINAL_STATUS=$(echo "$FINAL_CHECK" | jq -r '.status')
+#         echo "Final PR status: $FINAL_STATUS"
+#       else
+#         echo "❌ Failed to complete PR"
+#         echo "Response: $COMPLETE_RESPONSE"
+#         exit 1
+#       fi
+
+
+- bash: |
+    set -e
+    echo "username:S_Bot_Azure" >> ~/.git-credentials
+    echo "password:$(System.AccessToken)" >> ~/.git-credentials
+
+    # Configure Git
+    git config --global credential.helper store
+    git config --global credential.useHttpPath true
+    git config --global user.email "S_Bot_Azure@sadgan.int"
+    git config --global user.name "S_Bot_Azure"
+    git config --global http.sslVerify false
+    git config --global --add safe.directory '*'
+    git config --global core.compression 0
+    git config --global http.postBuffer 1048576000
+    git config --global pack.threads 1
+    git config --global pull.rebase false
+    
+    
+    BASE_URL="http://$(System.AccessToken)@azure.sadgan.int/WebApp"
+    
+    function clone_or_pull {
+        branch_name=$1
+        repo_url=$2
+        target_dir=$3
+    
+        echo "$repo_url" > ~/.git-credentials
+
+        echo "Cleaning up previous checkout ($target_dir)..."
+        if [ -d "$target_dir" ]; then
+            echo "Removing directory..."
+            rm -rf "$target_dir"
+        fi
+    
+  
+        echo "Cloning $target_dir from branch $branch_name..."
+        
+  
+        # Clone using environment variable for credentials
+        echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
+        # git clone --branch "$branch_name" "$repo_url" "$target_dir"
+
+        git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" clone --single-branch --branch "$branch_name"     "$repo_url"    "$target_dir"
+            
+              
+        if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
+            cd "$target_dir"
+            echo "Current directory: $pwd"
+            echo "✅ Repository cloned to: $target_dir"
+            echo "📁 Directory contents:"
+            ls -la
+        else
+            echo "❌ Clone failed"
+            exit 1
+        fi
+    }     
+
+    # git clone --single-branch --branch "cicd" "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp/$COLLECTION/$PROJECT/_git/CICD"     "$(System.DefaultWorkingDirectory)/CICD"
+
+
+    clone_or_pull  "${{ parameters.BranchName }}"  "$BASE_URL/${{ parameters.Collection }}/_git/CICD"  "$(System.DefaultWorkingDirectory)/CICD"    
+    clone_or_pull  $(init.TARGET_BRANCH)           "$BASE_URL/${{ parameters.Repo }}"                  "$(System.DefaultWorkingDirectory)/${{ parameters.ProjPath }}/$(init.TARGET_BRANCH)" 
+    clone_or_pull  $(init.SOURCE_BRANCH)           "$BASE_URL/${{ parameters.Repo }}"                  "$(System.DefaultWorkingDirectory)/${{ parameters.ProjPath }}/$(init.SOURCE_BRANCH)"
+    # git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" clone --single-branch --branch "alpha" "http://$(System.AccessToken)@azure.sadgan.int/WebApp/DevOps/_git/WinSetup"      
+                  
+    
+    echo "Final directory structure:"
+    ls -R | head -15
+  displayName: 'Git Checkout'
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+
+- task: Bash@3
+  displayName: 'Verify Version'
+  env:
+    TARGET_CHANNEL: ${{ parameters.TARGET_CHANNEL }}
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+  inputs:
+    targetType: 'inline'
+    script: |
+      echo "======== TARGET_CHANNEL: $TARGET_CHANNEL"
+      compare_versions() {
+            local v1="$1" v2="$2"
+        
+            # 1. Strip leading “v” (case‑insensitive) & validate
+            for v in v1 v2; do
+                local val=${!v}
+                [[ $val =~ ^[vV]?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
+                    echo "Error – $val is not a valid semantic version (vMAJOR.MINOR.PATCH)" >&2
+                    return 3
+                }
+                # Save only the numeric parts
+                eval "${v}=(${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]})"
+            done
+        
+            # 2. Compare major, then minor, then patch
+            local i
+            for i in 0 1 2; do
+                if    (( v1[i] > v2[i] )); then printf "%s > %s\n" "$v1" "$v2"; return 1
+                elif (( v1[i] < v2[i] )); then printf "%s < %s\n" "$v1" "$v2"; return 2
+                fi
+            done
+        
+            # 3. All components equal
+            printf "%s == %s\n" "$v1" "$v2"
+            return 0
+      }
+      
+      json_file="$(System.DefaultWorkingDirectory)/CICD/branch-versions/${{ parameters.side }}/version.$(init.TARGET_BRANCH).json"
+      #  echo $json_file
+      IFS=, read -r major minor patch < <(
+        jq -r '.major + "," + .minor + "," + .patch' "$json_file"
+      )
+      baseVersion="v$major.$minor.$patch"
+      inputVersion="$(init.VERSION_INPUT)"
+      VERSION=${inputVersion:-0.0.0}
+      if ! [[ $VERSION =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+        echo "VERSION '$VERSION' is not a valid semantic version" >&2
+        exit 1
+      fi
+      _MAJOR="${BASH_REMATCH[1]}"
+      _MINOR="${BASH_REMATCH[2]}"
+      _PATCH="${BASH_REMATCH[3]}"
+      echo "_MAJOR= $_MAJOR"
+      echo "inputVersion = $inputVersion"
+      SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
+        
+      # 0) ensure inputVersion already exists on source branch:
+      if [[ "$SOURCE_BRANCH" != "dev" && "$SOURCE_BRANCH" != "4_dev" && "$SOURCE_BRANCH" != "developweb1" ]]; then
+        echo "=================================>> $inputVersion-$SOURCE_BRANCH*"
+        cd "${{ parameters.ProjPath }}"/$SOURCE_BRANCH
+        pwd
+        git tag -l | xargs git tag -d && git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" fetch --tags
+        TAGS=$(git tag -l "v$inputVersion-$SOURCE_BRANCH*")
+        LAST_TAG=$(git tag -l "v$inputVersion-$SOURCE_BRANCH*" | sort -V | tail -n1)
+        echo "LAST_TAG = $LAST_TAG"
+        if [[ -z "$LAST_TAG" ]]; then
+            echo "❌ Version not exists on source branch !!!"
+            exit 1
+        fi
+      fi
+        
+      # 1) verify the input version to be not lower than target branch version
+      if compare_versions "$baseVersion" "$inputVersion"; then # in case versions are equal
+        echo "EQUAL: input version matches base version;"
+      elif [[ $? -eq 1 ]]; then # in case inputVersion is lower
+        echo "❌ Version cannot be lower than baseVesion !!!"
+        exit 1
+      fi
+        
+        
+      # 2) create pr and perform merge using the bot user account
+      # ---
+      # 3) apply version to target channel
+      cat > "$json_file" <<EOF
+          {
+              "major": "$_MAJOR",
+              "minor": "$_MINOR",
+              "patch": "$_PATCH"
+          }
+      EOF
+       #  Commit & push if the file changed
+       cd $(System.DefaultWorkingDirectory)/CICD/
+       git status
+       if git diff --quiet -- "$json_file"; then
+         echo "No changes to $json_file – nothing committed."
+       else
+         # git config --local user.email "ci-build@example.com"
+         # git config --local user.name  "CI Build"
+         git add "$json_file"
+         git commit -m "[BOT] $(init.SOURCE_BRANCH) --> $(init.TARGET_BRANCH) : version promoted to v$inputVersion by ${{ variables['Build.RequestedFor'] }}"
+         git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push origin HEAD
+       fi
