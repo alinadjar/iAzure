@@ -344,7 +344,6 @@ steps:
     clone_or_pull  "${{ parameters.BranchName }}"  "$BASE_URL/${{ parameters.Collection }}/_git/CICD"  "$(System.DefaultWorkingDirectory)/CICD"    
     clone_or_pull  $(init.TARGET_BRANCH)           "$BASE_URL/${{ parameters.Repo }}"                  "$(System.DefaultWorkingDirectory)/${{ parameters.ProjPath }}/$(init.TARGET_BRANCH)" 
     clone_or_pull  $(init.SOURCE_BRANCH)           "$BASE_URL/${{ parameters.Repo }}"                  "$(System.DefaultWorkingDirectory)/${{ parameters.ProjPath }}/$(init.SOURCE_BRANCH)"
-    # git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" clone --single-branch --branch "alpha" "http://$(System.AccessToken)@azure.sadgan.int/WebApp/DevOps/_git/WinSetup"      
                   
     
     echo "Final directory structure:"
@@ -414,7 +413,7 @@ steps:
         echo "=================================>> $inputVersion-$SOURCE_BRANCH*"
         cd "${{ parameters.ProjPath }}"/$SOURCE_BRANCH
         pwd
-        git tag -l | xargs git tag -d && git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" fetch --tags
+        git tag -l | xargs git tag -d && git fetch --tags
         TAGS=$(git tag -l "v$inputVersion-$SOURCE_BRANCH*")
         LAST_TAG=$(git tag -l "v$inputVersion-$SOURCE_BRANCH*" | sort -V | tail -n1)
         echo "LAST_TAG = $LAST_TAG"
@@ -453,5 +452,5 @@ steps:
          # git config --local user.name  "CI Build"
          git add "$json_file"
          git commit -m "[BOT] $(init.SOURCE_BRANCH) --> $(init.TARGET_BRANCH) : version promoted to v$inputVersion by ${{ variables['Build.RequestedFor'] }}"
-         git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push origin HEAD
+         git push origin HEAD
        fi
