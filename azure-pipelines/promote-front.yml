@@ -1,0 +1,50 @@
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+parameters:
+- name: TARGET_CHANNEL
+  displayName: "Promote from/to:"
+  type: string
+  values:
+      - dev_to_alpha
+      - alpha_to_beta
+      - beta_to_master
+- name: VERSION
+  displayName: "Target Version"
+  type: string
+  default: '0.0.0'
+
+
+trigger: none
+pr: none
+pool:
+  name: 'WEB-1'
+
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: DevOps/Settings
+      ref: tmp
+
+
+stages:
+- stage: promote
+  displayName: 'promote version'
+  jobs:
+  - job: Promot
+    displayName: 'promot version'
+    steps:
+    - script: |
+        if [ "$(Build.SourceBranch)" != "refs/heads/cicd" ]; then
+          echo "❌ This pipeline is locked to cicd only"
+          exit 1
+        fi
+      displayName: "Enforce cicd execution"
+    - template: pipelines/promote-version.yaml@templates
+      parameters:
+        TARGET_CHANNEL: "${{ parameters.TARGET_CHANNEL }}"
+        VERSION: "${{  parameters.VERSION  }}"
+        ProjPath: "DevOps/WinSetup"
+        Repo: "SadganErp/_git/Sadgan.Erp.Panel"
+        BranchName: "cicd"
+        side: "frontend"

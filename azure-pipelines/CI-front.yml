@@ -1,0 +1,775 @@
+trigger: none
+pool:
+  name: 'WEB-1'
+
+
+parameters:
+- name: CREATE_PR
+  displayName: "Create PR ?"
+  type: string
+  default: 'YES'
+  values:
+    - YES
+    - NO
+- name: SHOULD_RELEASE
+  type: string
+  default: 'true'
+  values:
+    - 'true'
+    - 'false'
+- name: BRANCH
+  type: string
+  default: 'alpha'
+  displayName: "Select Branch"
+  values:
+    - 'dev'
+    - 'devops'
+    - 'alpha'
+    - 'beta'
+    - 'master'    
+
+
+
+variables:  
+  solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
+  buildPlatform: 'Any CPU'
+  buildConfiguration: 'Release'
+  DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
+  isTagDuplicate: 'false'
+  orgUrl: 'http://azure.sadgan.int/WebApp'
+  project: 'SadganErp'
+  baseProjPath: $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel
+  wikiId: 'SadganErp.wiki'
+  isBranchDevelop: ${{ eq(parameters.BRANCH, 'dev') }}
+  isBranchDevOps:  ${{ eq(parameters.BRANCH, 'devops') }}
+  isBranchALPHA:   ${{ eq(parameters.BRANCH, 'alpha') }}
+  isBranchBETA:    ${{ eq(parameters.BRANCH, 'beta') }}
+  isBranchMASTER:  ${{ eq(parameters.BRANCH, 'master') }} 
+  isCreatePR:      ${{ eq(parameters.CREATE_PR, 'YES') }} 
+  CURRENT_BRANCH:  ${{ parameters.BRANCH }}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 1. Resources – this pulls in the *other* Git repo
+# ──────────────────────────────────────────────────────────────────────
+resources:
+  repositories:
+  - repository: versionRepo   # alias you’ll use in checkout / path
+    type: git
+    name: SadganErp/CICD
+    ref: refs/heads/cicd      # or refs/tags/v1.2.3, whatever branch you want
+    # project: CICD
+
+# ──────────────────────────────────────────────────────────────────────
+# 2. Check out *both* repos
+# ──────────────────────────────────────────────────────────────────────
+jobs:
+  - job: CI
+    displayName: 'CI'
+    steps:
+    - checkout: none
+    
+    # - bash: sudo apt-get update && sudo apt-get install -y jq
+    #   displayName: 'Install jq'
+    #   condition: eq(variables['Agent.OS'], 'Linux')
+    
+    # - task: Cache@2
+    #   displayName: 'Cache .NET SDK'
+    #   inputs:
+    #     key: 'dotnet-sdk | "$(Agent.OS)" | 9.x'  # Use a unique key for the cache
+    #     path: '$(Agent.ToolsDirectory)/dotnet'   # Path to the SDK installation
+    #     restoreKeys: |
+    #       dotnet-sdk | "$(Agent.OS)"  # Restore key for fallback
+    
+    # - task: UseDotNet@2
+    #   displayName: 'Install .NET SDK'
+    #   inputs:
+    #     packageType: 'sdk'
+    #     version: '9.x' 
+    #     installationPath: $(Agent.ToolsDirectory)/dotnet
+    
+    
+    - task: Bash@3
+      name: init
+      displayName: 'init'
+      env:
+        CURRENT_BRANCH: ${{ parameters.BRANCH }}
+      inputs:
+        targetType: 'inline'
+        script: |    
+          # Determine source branch based on current branch
+          case "$CURRENT_BRANCH" in
+              "dev")
+                  SOURCE_BRANCH="dev"
+                  ;;
+              "devops")
+                  SOURCE_BRANCH="dev"
+                  ;;
+              "alpha")
+                  SOURCE_BRANCH="dev"
+                  ;;
+              "beta")
+                  SOURCE_BRANCH="alpha"
+                  ;;
+              "master")
+                  SOURCE_BRANCH="beta"
+                  ;;
+              *)
+                  echo "Error: Current branch '$CURRENT_BRANCH' is not valid for promotion"
+                  echo "Expected: alpha, beta, or master"
+                  exit 1
+                  ;;
+          esac
+          
+          echo "Current branch: $CURRENT_BRANCH"
+          echo "Source branch: $SOURCE_BRANCH"
+          
+          # Export for use in pipeline
+          echo "##vso[task.setvariable variable=SOURCE_BRANCH]$SOURCE_BRANCH"
+          echo "##vso[task.setvariable variable=TARGET_BRANCH]$CURRENT_BRANCH"
+    
+    
+    - task: Bash@3
+      name: create_pr
+      displayName: 'Create & Complete PR'
+      condition: and(eq(variables['isCreatePR'], 'true'), eq(variables['isBranchDevelop'], 'false'))
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -e
+          
+          SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
+          TARGET_BRANCH="$(init.TARGET_BRANCH)"
+          REPO_NAME="SadganErp/_git/Sadgan.Erp.Panel"
+          VERSION="$(init.VERSION_INPUT)"
+          
+          echo "Creating PR from $SOURCE_BRANCH to $TARGET_BRANCH for version $VERSION"
+          
+          # Base URL
+          BASE_URL="http://azure.sadgan.int/WebApp"
+          API_URL="$BASE_URL/_apis"
+          
+          # Get repo ID
+          SIMPLE_REPO_NAME=$(basename "$REPO_NAME")
+          REPOS_URL="$API_URL/git/repositories?api-version=6.0"
+          REPOS_RESPONSE=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$REPOS_URL")
+          REPO_ID=$(echo "$REPOS_RESPONSE" | jq -r ".value[] | select(.name==\"$SIMPLE_REPO_NAME\") | .id")
+          
+          if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
+            echo "❌ Could not find repository: $SIMPLE_REPO_NAME"
+            exit 1
+          fi
+          echo "✅ Found repository ID: $REPO_ID"
+          
+          # Check for existing PR
+          PR_SEARCH_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=6.0"
+          PR_SEARCH=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$PR_SEARCH_URL")
+          EXISTING_PR=$(echo "$PR_SEARCH" | jq -r ".value[] | select(.sourceRefName==\"refs/heads/$SOURCE_BRANCH\" and .targetRefName==\"refs/heads/$TARGET_BRANCH\") | .pullRequestId")
+          
+          if [ -n "$EXISTING_PR" ] && [ "$EXISTING_PR" != "null" ]; then
+            echo "⚠️ Active PR exists: $EXISTING_PR"
+            PR_ID=$EXISTING_PR
+          else
+            # Create new PR
+            PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?api-version=6.0"
+            PR_TITLE="Promote $VERSION from $SOURCE_BRANCH to $TARGET_BRANCH"
+            PR_BODY="{
+              \"sourceRefName\": \"refs/heads/$SOURCE_BRANCH\",
+              \"targetRefName\": \"refs/heads/$TARGET_BRANCH\",
+              \"title\": \"$PR_TITLE\"
+            }"
+            
+            PR_RESPONSE=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" -H "Content-Type: application/json" -d "$PR_BODY" "$PR_URL")
+            PR_ID=$(echo "$PR_RESPONSE" | jq -r '.pullRequestId')
+            
+            if [ -z "$PR_ID" ] || [ "$PR_ID" = "null" ]; then
+              echo "❌ Failed to create PR"
+              exit 1
+            fi
+            echo "✅ PR created with ID: $PR_ID"
+          fi
+          
+          # Wait for merge to be ready
+          echo "Waiting for merge to be ready..."
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+          MERGE_READY=false
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ] && [ "$MERGE_READY" = false ]; do
+            sleep 5
+            
+            PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
+            PR_DETAILS=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$PR_URL")
+            
+            MERGE_STATUS=$(echo "$PR_DETAILS" | jq -r '.mergeStatus')
+            echo "Merge status: $MERGE_STATUS (attempt $((ATTEMPT+1))/$MAX_ATTEMPTS)"
+            
+            if [ "$MERGE_STATUS" = "succeeded" ]; then
+              MERGE_READY=true
+              echo "✅ Merge is ready"
+            elif [ "$MERGE_STATUS" = "conflicts" ]; then
+              echo "❌ Merge conflicts detected"
+              exit 1
+            elif [ "$MERGE_STATUS" = "failure" ]; then
+              echo "❌ Merge failed"
+              exit 1
+            fi
+            
+            ATTEMPT=$((ATTEMPT + 1))
+          done
+          
+          if [ "$MERGE_READY" = false ]; then
+            echo "❌ Timeout waiting for merge to be ready"
+            exit 1
+          fi
+          
+          # Get the source commit
+          SOURCE_COMMIT=$(echo "$PR_DETAILS" | jq -r '.lastMergeSourceCommit.commitId')
+          
+          # Add current user as reviewer and approve
+          echo "Adding current user as reviewer and approving..."
+          
+          # Get current user identity from the PR creator (since it's the build service)
+          CURRENT_USER_ID=$(echo "$PR_DETAILS" | jq -r '.createdBy.id')
+          echo "Current user ID: $CURRENT_USER_ID"
+          
+          # Add as reviewer and vote +10
+          REVIEWER_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID/reviewers/$CURRENT_USER_ID?api-version=6.0"
+          REVIEWER_BODY="{
+            \"vote\": 10
+          }"
+          
+          curl -s -u ":$SYSTEM_ACCESSTOKEN" \
+            -H "Content-Type: application/json" \
+            -X PUT \
+            -d "$REVIEWER_BODY" \
+            "$REVIEWER_URL" > /dev/null
+          
+          echo "✅ PR approved"
+          
+          # Complete the PR with bypass
+          echo "Completing PR $PR_ID with bypass..."
+          COMPLETE_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
+          
+          COMPLETE_BODY="{
+            \"status\": \"completed\",
+            \"lastMergeSourceCommit\": {
+              \"commitId\": \"$SOURCE_COMMIT\"
+            },
+            \"completionOptions\": {
+              \"bypassPolicy\": true,
+              \"bypassReason\": \"Automated promotion for version $VERSION\",
+              \"mergeStrategy\": \"squash\",
+              \"deleteSourceBranch\": false
+            }
+          }"
+          
+          COMPLETE_RESPONSE=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" \
+            -H "Content-Type: application/json" \
+            -X PATCH \
+            -d "$COMPLETE_BODY" \
+            "$COMPLETE_URL")
+          
+          # Check for successful completion - look for completionQueueTime or closedBy
+          HAS_COMPLETION_QUEUE=$(echo "$COMPLETE_RESPONSE" | jq -r 'has("completionQueueTime")')
+          HAS_CLOSED_BY=$(echo "$COMPLETE_RESPONSE" | jq -r 'has("closedBy")')
+          CURRENT_STATUS=$(echo "$COMPLETE_RESPONSE" | jq -r '.status // "unknown"')
+          
+          echo "PR status after completion attempt: $CURRENT_STATUS"
+          
+          if [ "$HAS_COMPLETION_QUEUE" = "true" ] || [ "$HAS_CLOSED_BY" = "true" ] || [ "$CURRENT_STATUS" = "completed" ]; then
+            echo "✅ PR $PR_ID completed successfully"
+            echo "##vso[task.setvariable variable=PR_ID;isOutput=true]$PR_ID"
+            echo "##vso[task.setvariable variable=MERGE_SUCCESS;isOutput=true]true"
+            
+            # Wait a moment for the merge to fully complete
+            echo "Waiting for merge to complete..."
+            sleep 5
+            
+            # Verify final status
+            FINAL_CHECK=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$COMPLETE_URL")
+            FINAL_STATUS=$(echo "$FINAL_CHECK" | jq -r '.status')
+            echo "Final PR status: $FINAL_STATUS"
+          else
+            echo "❌ Failed to complete PR"
+            echo "Response: $COMPLETE_RESPONSE"
+            exit 1
+          fi
+    
+    
+    - bash: |
+        set -e
+        echo "username:S_Bot_Azure" >> ~/.git-credentials
+        echo "password:$(System.AccessToken)" >> ~/.git-credentials
+    
+        # Configure Git
+        git config --global credential.helper store
+        git config --global credential.useHttpPath true
+        git config --global user.email "S_Bot_Azure@sadgan.int"
+        git config --global user.name "S_Bot_Azure"
+        git config --global http.sslVerify false  
+        git config --global --add safe.directory '*'  
+        git config --global core.compression 0
+        git config --global http.postBuffer 1048576000
+        git config --global pack.threads 1
+        git config --global pull.rebase false
+    
+    
+        BASE_URL="http://$(System.AccessToken)@azure.sadgan.int/WebApp"
+    
+        function clone_or_pull {
+                branch_name=$1
+                repo_url=$2
+                repo_name=$3
+    
+    
+                echo "$repo_url" > ~/.git-credentials
+    
+                echo "Cleaning up previous checkout..."
+                if [ -d "$repo_name" ]; then
+                    echo "Removing directory..."
+                    rm -rf "$repo_name"
+                fi
+    
+                echo "Cloning $repo_name from branch $branch_name..."
+                git clone --branch "$branch_name" "$repo_url" "$repo_name"
+    
+                # Clone using environment variable for credentials
+                # git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" clone --branch $branch_name     $repo_url     $repo_name
+                
+                  
+                if [ $? -eq 0 ] && [ -d "$repo_name/.git" ]; then
+                    cd "$repo_name"
+                    echo "Current directory: $pwd"
+                    echo "✅ Repository cloned to: $repo_name"
+                    echo "📁 Directory contents:"
+                    ls -la
+                else
+                    echo "❌ Clone failed"
+                    exit 1
+                fi
+        }
+    
+        PULL_BRANCH=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
+        echo "===== pulling from $PULL_BRANCH"
+        
+            
+        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganShared/_git/1_Configs"              "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
+        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganShared/_git/2_SharedLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary" 
+        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganShared/_git/3_ClientLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary" 
+        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganShared/_git/4_ServerLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"                
+        clone_or_pull  $CURRENT_BRANCH  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"          "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"          
+        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core"    "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"  
+        clone_or_pull  cicd             "$BASE_URL/SadganErp/_git/CICD"                      "$(System.DefaultWorkingDirectory)/CICD"  
+    
+    
+        MAIN_COMMIT_HASH=$(cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel" && git rev-parse HEAD | cut -c1-8)
+        echo "Using commit hash for cache busting: $MAIN_COMMIT_HASH"
+    
+        COMMIT_HASH="$MAIN_COMMIT_HASH"
+    
+    
+        echo "Commit hash for Sadgan.Erp.Panel: $COMMIT_HASH"
+        echo "##vso[task.setvariable variable=commit_hash;isOutput=true]$COMMIT_HASH"
+        # echo "==================================="
+        # echo "$(pwd)"
+        # echo "Final directory structure:"
+        # ls -R | head -15
+      displayName: "Clone or Pull Repositories from Specific Branches"
+      name: gitPull
+    
+
+
+    - task: Bash@3
+      name: tagSetting
+      displayName: 'Version Assign'
+      env:
+        SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      inputs:
+        targetType: 'inline'
+        script: |
+          ls -alh
+          CUR_BRANCH="$CURRENT_BRANCH"
+          echo "User name: ${{ variables['Build.RequestedFor'] }}"
+          echo "User ID: ${{ variables['Build.RequestedForId'] }}"
+          
+
+          compare_versions() {
+                local v1="$1" v2="$2"
+            
+                # 1. Strip leading “v” (case‑insensitive) & validate
+                for v in v1 v2; do
+                    local val=${!v}
+                    [[ $val =~ ^[vV]?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
+                        echo "Error – $val is not a valid semantic version (vMAJOR.MINOR.PATCH)" >&2
+                        return 3
+                    }
+                    # Save only the numeric parts
+                    eval "${v}=(${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]})"
+                done
+            
+                # 2. Compare major, then minor, then patch
+                local i
+                for i in 0 1 2; do
+                    if    (( v1[i] > v2[i] )); then printf "%s > %s\n" "$v1" "$v2"; return 1
+                    elif (( v1[i] < v2[i] )); then printf "%s < %s\n" "$v1" "$v2"; return 2
+                    fi
+                done
+            
+                # 3. All components equal
+                printf "%s == %s\n" "$v1" "$v2"
+                return 0
+          }
+          
+          # ------------------------------------------------------------------
+          #  Extract Version & Perform Sanity check
+          # ------------------------------------------------------------------
+          if [ "$(isBranchDevelop)" == "true" -o  "$(isBranchDevOps)" == "true" ]; then
+            NEW_TAG=$( [ "$(isBranchDevelop)" = true ] && echo "latest-dev" || echo "v0.0.0.0" )
+            echo "Using tag: $NEW_TAG"
+            echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+            echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+                              
+            cat <<EOF > $(Build.ArtifactStagingDirectory)/vars.json
+              {
+                "FQIN": "$(DOCKER_IMG):$NEW_TAG",
+                "DOCKER_TAG": "$NEW_TAG",
+                "CREATE_RELEASE": $SHOULD_RELEASE,
+                "BRANCH": "$CUR_BRANCH"
+              }
+          EOF
+          else
+            json_file="$(System.DefaultWorkingDirectory)/CICD/branch-versions/frontend/version.$CUR_BRANCH.json"
+            #  echo $json_file
+            IFS=, read -r major minor patch < <(
+              jq -r '.major + "," + .minor + "," + .patch' "$json_file"
+            )
+          
+            # printf 'v%s.%s.%s\n' "$major" "$minor" "$patch"
+            baseVersion="v$major.$minor.$patch"
+            echo "baseVersion: $baseVersion"
+              
+            cd "$(baseProjPath)"
+            git tag -l | xargs git tag -d && git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" fetch --tags
+            TAGS=$(git tag -l "${baseVersion}-$CUR_BRANCH*")
+            LAST_TAG=$(git tag -l "${baseVersion}-$CUR_BRANCH.*" | sort -V | tail -n1)
+            echo "LAST_TAG = $LAST_TAG"
+            if [[ -z "$LAST_TAG" ]]; then
+                echo "⚠️  No tag found matching '$baseVersion-$CUR_BRANCH.*'"
+                _MAJOR=$major
+                _MINOR=$minor
+                _PATCH=$patch
+                _PRE=$CUR_BRANCH
+                _BN=0
+            else
+                IFS='.-' read -r _MAJOR _MINOR _PATCH _PRE _BN <<< "${LAST_TAG#v}"
+                # _BN=$(echo "$LAST_TAG" | rev | cut -d. -f1 | rev)
+            fi
+            LAST_TAG="v$_MAJOR.$_MINOR.$_PATCH-$_PRE.$_BN"
+            echo "LAST_TAG = $LAST_TAG"
+            lastTagVersion="v$_MAJOR.$_MINOR.$_PATCH"
+            echo "lastTagVersion: $lastTagVersion"
+            
+            if compare_versions "$lastTagVersion" "$baseVersion"; then # in case versions are equal
+              echo "input version matches base version; so increasing build number:"
+              _BN=$((_BN + 1))
+              NEW_TAG="v$_MAJOR.$_MINOR.$_PATCH-$CUR_BRANCH.$_BN"
+            elif [[ $? -eq 1 ]]; then # in case baseVersion is lower
+              echo "WRONG! base version cannot be lower than previously released version!"
+              exit 1
+            else # baseVersion is upper
+              NEW_TAG="v$major.$minor.$patch-$CUR_BRANCH.1"
+            fi
+            
+            echo "new tag is: $NEW_TAG"
+            cd "$(baseProjPath)"
+            if git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+              echo "Tag $NEW_TAG already exists!"
+              echo "##vso[task.setvariable variable=isTagDuplicate]true"
+              exit 0
+            else
+              git tag -a "$NEW_TAG" -m "$NEW_TAG"
+              git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" push origin "$NEW_TAG" || { echo "Tag already available on remote repo!"; exit 1; }
+              echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+              echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+              cat <<EOF > $(Build.ArtifactStagingDirectory)/vars.json
+                {
+                  "FQIN": "$(DOCKER_IMG):$NEW_TAG",
+                  "DOCKER_TAG": "$NEW_TAG",
+                  "CREATE_RELEASE": $SHOULD_RELEASE,
+                  "BRANCH": "$CUR_BRANCH"
+                }
+          EOF
+            fi
+          fi
+          # for part in "$major" "$minor" "$patch"; do
+          #     # We allow leading zeroes but want at least one digit
+          #     if [[ ! $part =~ ^[0-9]+$ ]]; then
+          #         echo "Error: version part '$part' is not a number" >&2
+          #         exit 1
+          #     fi
+          # done
+    
+    
+    # publish env as artifacts
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'front-build-vars'
+        publishLocation: 'Container'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    - bash: |
+        configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
+    
+        if [ "$(isBranchDevelop)" == "true" -o "$(isBranchDevOps)" = "true" ]; then
+          new_assembly_version="0.0.0.0"
+        else
+          assembly_version=$(awk -F '[<>]' '/<AssemblyVersion>/ {print $3}' $configPropsFile)
+          new_assembly_version="$(readSetting.DOCKER_TAG)"
+          new_assembly_version="${new_assembly_version#v}"
+          new_assembly_version=$(echo "$new_assembly_version" | awk -F'.' '{print $1"."$2"."$3"."$4}')
+        fi
+    
+        echo "current assmebly version $assembly_version is changing to $new_assembly_version"
+        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$new_assembly_version</AssemblyVersion>|" $configPropsFile
+      displayName: "Assembly Version Fix"
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    
+    # Override appsettings.json
+    - bash: |
+        sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.pipe.json"
+        destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json"
+    
+        if [ -f "$sourceFile" ]; then
+            cp -f "$sourceFile" "$destinationFile"
+            echo "Successfully copied appsettings.pipe.json to appsettings.json"
+        else
+            echo "❌ appsettings.pipe.json not found!"
+            exit 1
+        fi
+      displayName: "Override appsettings.json"
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    
+    
+    # Create global NuGet.Config
+    - bash: |
+        # Nuget SSL
+        echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"    
+    
+        sudo mkdir -p /usr/share
+        echo '<?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <packageSources>
+            <clear />
+            <add key="baget" value="https://nupkg.sadgan.int/v3/index.json" />
+            <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
+          </packageSources>
+          <packageSourceCredentials>
+            <NupkgWeb2>
+              <add key="Username" value="S_Bot_Azure" />
+              <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
+            </NupkgWeb2>
+          </packageSourceCredentials>
+        </configuration>' | sudo tee /usr/share/NuGet.Config > /dev/null
+    
+        # Remove project-specific NuGet.Config files
+        find $(Build.SourcesDirectory) -name "NuGet.Config" -type f -delete
+    
+        ls -l /usr/share/NuGet.Config
+        cat /usr/share/NuGet.Config
+      displayName: 'Create global NuGet.Config'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+      env:
+        BOT_TOKEN: $(BOT_TOKEN)
+    
+    
+    
+    # .Net Restore
+    - bash: |
+        export PATH="/home/azurebot/.dotnet:$PATH"
+        dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config --verbosity detailed
+      displayName: 'Dotnet Restore'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    
+    
+    
+    - task: Bash@3
+      displayName: 'Fetch Release Notes'
+      env:
+        wikiPat: $(System.AccessToken)
+      inputs:
+        targetType: 'inline'
+        script: |
+          encoded_path=$(echo "/Release Notes" | sed 's|^/||' | sed 's/ /%20/g' | sed 's/#/%23/g')
+          echo "encoded_path = $encoded_path"
+          response=$(curl -s -u ":$wikiPat" "$(orgUrl)/$(project)/_apis/wiki/wikis/$(wikiId)/pages?path=$encoded_path&api-version=6.0&recursionLevel=full")
+          echo $response
+          
+          
+          # Check if response is valid
+          if [ $? -ne 0 ] || [ -z "$response" ]; then
+            echo "Error: Failed to get response from Azure DevOps API"
+            exit 1
+          fi
+    
+          # Check if Release Notes exists and has subpages
+          if ! echo "$response" | jq -e '.subPages' > /dev/null 2>&1; then
+            echo "Error: Release Notes page not found or has no subpages"
+            echo "Response:"
+            echo "$response" | jq .
+            exit 1
+          fi
+    
+          # Extract subpages from Release Notes
+          subpages=$(echo "$response" | jq -c '.subPages[]?')
+          
+          if [ -z "$subpages" ]; then
+            echo "No subpages found under Release Notes"
+            echo "Response structure:"
+            echo "$response" | jq .
+            exit 0
+          fi
+    
+          echo "Subpages found under Release Notes:"
+          echo "$subpages" | jq -r '.path'
+    
+          TARGET_WWWROOT="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/assets/changelogs"
+          mkdir -p "$TARGET_WWWROOT"
+          
+          # Download each subpage
+          echo "$subpages" | while read -r subpage; do
+            page_path=$(echo "$subpage" | jq -r '.path')
+            echo "Processing: $page_path"
+            
+            # URL encode the path (remove leading slash and encode)
+            encoded_path=$(echo "$page_path" | sed 's|^/||' | sed 's/ /%20/g' | sed 's/#/%23/g')
+            page_content=$(curl -s -u ":$wikiPat" "$(orgUrl)/$(project)/_apis/wiki/wikis/$(wikiId)/pages?path=$encoded_path&includeContent=true&api-version=6.0")
+            filename=$(basename "$page_path" | sed 's/ /_/g' | sed 's/\.md$//')
+            echo "$page_content" | jq -r '.content' > "$TARGET_WWWROOT/${filename}.md"
+            
+            echo "==== Downloaded: ${filename}.md"
+          done
+          
+          ls -la $TARGET_WWWROOT
+    
+    
+    - bash: |
+        export PATH="/home/azurebot/.dotnet:$PATH"
+        dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
+      displayName: 'Build Solution'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    
+    
+    - bash: |
+        export PATH="/home/azurebot/.dotnet:$PATH"
+        dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish
+        cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+      displayName: 'Publish Solution'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    
+    - bash: |
+        echo "Applying cache busting to all static assets..."
+        COMMIT_HASH="$(gitPull.commit_hash)"
+        
+        cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+        INDEX_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html
+        # grep -E '\.(css|png|js)"' "$INDEX_FILE" | head -10
+        
+    
+        if [ ! -f "$INDEX_FILE" ]; then
+          echo "ERROR: Index file not found at $INDEX_FILE"
+          exit 1
+        fi
+    
+        
+        rm $(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html.br
+        rm $(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html.gz
+        ls -alh $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+    
+        
+        # Backup for verification
+        cp "$INDEX_FILE" "$INDEX_FILE.backup"
+        
+        # Remove ALL existing query parameters first
+        sed -i 's|\(href="[^"]*\)?[^"]*"|\1"|g' index.html
+        sed -i 's|\(src="[^"]*\)?[^"]*"|\1"|g' index.html
+        
+        # Apply cache busting to ALL assets (any file type in assets/ or favicon/)
+        sed -i "s|\(href=\"assets/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
+        sed -i "s|\(src=\"assets/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
+        sed -i "s|\(href=\"favicon/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
+    
+    
+        
+        echo "=== AFTER ==="
+        grep -E '(assets/|favicon/)' "$INDEX_FILE" | head -10
+    
+        cat $(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html
+        
+        echo "Targeted cache busting applied with commit: $COMMIT_HASH"
+        echo "=== CHANGES MADE ==="
+        diff -u "$INDEX_FILE.backup" "$INDEX_FILE" | grep -E "^[-+]" || echo "Changes applied successfully"
+    
+    
+        echo "1. All cache-busted assets:"
+        grep -E '\.(css|js|png)\?v=' "$INDEX_FILE"
+        
+        echo ""
+        echo "2. Blazor assets (should be unchanged):"
+        grep -E '(_content/|_framework/|blazor\.webassembly\.js)' "$INDEX_FILE"
+    
+        echo ""
+        echo "3. Any remaining ?modified= params (should be none):"
+        grep '?modified=' "$INDEX_FILE" && echo "ERROR: Manual params still exist!" || echo "GOOD: No manual params found"
+    
+        echo ""
+        echo "4. Summary:"
+        echo "   - Cache-busted files: $(grep -c '?v=' "$INDEX_FILE" || echo 0)"
+        echo "   - Blazor files: $(grep -c -E '(_content/|_framework/)' "$INDEX_FILE" || echo 0)"
+      displayName: 'Cache Busting'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    
+    - bash: |
+        mkdir -p $(Build.ArtifactStagingDirectory)/docker
+        cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Dockerfile.pipe  $(Build.ArtifactStagingDirectory)/docker/
+        cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/nginx.conf       $(Build.ArtifactStagingDirectory)/docker/
+    
+        echo "$(NEXUS_DOCKER_PASSWORD)" | docker login $(DOCKER_REGISTRY) \
+          -u $(NEXUS_DOCKER_USERNAME) \
+          --password-stdin
+    
+    
+        cd $(Build.ArtifactStagingDirectory)
+        APPSETTINGS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/appsettings.json
+        sed -i 's/"IsDeveloperMode": false/"IsDeveloperMode": true/' $APPSETTINGS_FILE
+    
+        if [ "$(isBranchDevelop)" == "true" -o  "$(isBranchDevOps)" = "true" ]; then
+          sed -i 's|"BaseUrl": "[^"]*"|"BaseUrl": "https://dev.api.fx.sadgan.int"|' $APPSETTINGS_FILE
+          docker build \
+              -t $(tagSetting.FQIN) \
+              -f docker/Dockerfile.pipe \
+              .
+          docker push $(tagSetting.FQIN)    
+        else
+          docker build \
+              -t "$(tagSetting.FQIN)-$CURRENT_BRANCH" \
+              -f docker/Dockerfile.pipe \
+              .
+    
+          docker push "$(tagSetting.FQIN)-$CURRENT_BRANCH"
+        fi
+      displayName: 'Build & Push Image'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+      env:
+        NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+        NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
