@@ -1,0 +1,65 @@
+
+trigger: none
+pool:
+  name: 'WEB-1'
+
+parameters:
+- name: VERSION
+  displayName: "Enter Tag Name (e.g.: v1.0.9.0-alpha  or  v1.4.5-alpha.8)"
+  type: string
+  default: 'v0.0.0.0'
+
+variables:  
+  SOURCE_IMG_FRONT: $(DOCKER_REGISTRY)/front_fx
+  SOURCE_IMG_BACKEND: $(DOCKER_REGISTRY)/backend_fx
+  TARGET_IMG_FRONT: $(HARBOR_REGISTRY)/fx/front
+  TARGET_IMG_BACKEND: $(HARBOR_REGISTRY)/fx/backend
+
+
+steps:
+- checkout: none
+
+- task: Bash@3
+  displayName: 'Pushing'
+  env:
+    VERSION: ${{ parameters.VERSION }}
+  inputs:
+    targetType: 'inline'
+    script: |
+      export REDISCLI_AUTH="$(REDIS_PASSWORD)"
+
+      if [[ "$VERSION" == *beta* ]]; then
+        export DOCKER_TAG="$VERSION"
+      else 
+        export DOCKER_TAG="${VERSION%%-*}"
+      fi
+      
+      echo "DOCKER_TAG = $DOCKER_TAG"
+      
+      
+      # -------- pulling image:
+      echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" -u "$(NEXUS_DOCKER_USERNAME)" --password-stdin 2>/dev/null
+      echo "Pulling Docker images: $SOURCE_IMG_FRONT:$VERSION, $SOURCE_IMG_BACKEND:$VERSION"
+      docker pull "$SOURCE_IMG_FRONT:$VERSION" || { echo "docker pull failed. Exiting the script."; exit 1; }
+      docker pull "$SOURCE_IMG_BACKEND:$VERSION" || { echo "docker pull failed. Exiting the script."; exit 1; }
+      
+      
+      # -------- tagging image:
+      docker tag "$SOURCE_IMG_FRONT:$VERSION"    "$TARGET_IMG_FRONT:$DOCKER_TAG" 
+      docker tag "$SOURCE_IMG_BACKEND:$VERSION"  "$TARGET_IMG_BACKEND:$DOCKER_TAG" 
+
+
+      # -------- pushing image:
+      echo "$(HARBOR_PASSWORD)" | docker login "$(HARBOR_REGISTRY)" -u "$(HARBOR_USERNAME)" --password-stdin 2>/dev/null
+      docker push   "$TARGET_IMG_FRONT:$DOCKER_TAG" || { echo "docker push failed. Exiting the script."; exit 1; }
+      docker push   "$TARGET_IMG_BACKEND:$DOCKER_TAG" || { echo "docker push failed. Exiting the script."; exit 1; }
+      
+      
+      # -------- update version index:
+      ASSEMBLY="${DOCKER_TAG%%-*}"
+      redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY#v}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+      # redis-cli -h  "$(REDIS_HOST)" -p 6379   GET v_one:version | jq .
+
+
+      echo "curling https://get.sadgan.com/releases/fx:"
+      curl -fsSL https://get.sadgan.com/releases/fx | jq .
