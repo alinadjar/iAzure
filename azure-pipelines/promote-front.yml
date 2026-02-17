@@ -23,8 +23,8 @@ resources:
   repositories:
     - repository: templates
       type: git
-      name: DevOps/Settings
-      ref: tmp
+      name: SadganErp/CICD
+      ref: cicd
 
 
 stages:
@@ -40,7 +40,7 @@ stages:
           exit 1
         fi
       displayName: "Enforce cicd execution"
-    - template: pipelines/promote-version.yaml@templates
+    - template: azure-pipelines/templates/promote-version.yml@templates
       parameters:
         TARGET_CHANNEL: "${{ parameters.TARGET_CHANNEL }}"
         VERSION: "${{  parameters.VERSION  }}"
