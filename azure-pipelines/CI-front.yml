@@ -309,7 +309,7 @@ jobs:
         TOKEN="kb4t6lvkqh6okekinfpw7hkkzmyfj54f3uufymdgs7xkxppcxiza"
         ENCODED_TOKEN=$(echo "$TOKEN" | sed 's/+/%2B/g; s/\//%2F/g; s/=/%3D/g')
         # Add host-level credentials
-        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int" > ~/.git-credentials
+        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int" > ~/.git-credentials
 
 
          # Add credentials for EACH repository path (since useHttpPath=true)
@@ -335,7 +335,7 @@ jobs:
         git config --global pull.rebase false
     
     
-        BASE_URL="http://azure.sadgan.int/WebApp"
+        BASE_URL="http://$TOKEN@azure.sadgan.int/WebApp"
 
 
         # Debug: Show what's in the credential file
@@ -364,7 +364,6 @@ jobs:
             echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
             # git clone --branch "$branch_name" "$repo_url" "$target_dir"
             git -c http.extraheader="AUTHORIZATION: bearer $ENCODED_TOKEN" clone --single-branch --branch "$branch_name"     "$repo_url"    "$target_dir"
-    
             # git clone --single-branch --branch "$branch_name" "$repo_url" "$target_dir"
                 
                   
