@@ -353,16 +353,17 @@ jobs:
         }
     
         PULL_BRANCH=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
+        PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "developweb1" || echo "alpha" )
         echo "===== pulling from $PULL_BRANCH"
         
             
-        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganShared/_git/1_Configs"              "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
-        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganShared/_git/2_SharedLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary" 
-        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganShared/_git/3_ClientLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary" 
-        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganShared/_git/4_ServerLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"                
-        clone_or_pull  $CURRENT_BRANCH  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"          "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"          
-        clone_or_pull  $PULL_BRANCH     "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core"    "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"  
-        clone_or_pull  cicd             "$BASE_URL/SadganErp/_git/CICD"                      "$(System.DefaultWorkingDirectory)/CICD"  
+        clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/1_Configs"              "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
+        clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/2_SharedLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary" 
+        clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/3_ClientLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary" 
+        clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/4_ServerLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"                
+        clone_or_pull  $CURRENT_BRANCH           "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"          "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"          
+        clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core"    "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"  
+        clone_or_pull  cicd                      "$BASE_URL/SadganErp/_git/CICD"                      "$(System.DefaultWorkingDirectory)/CICD"  
     
     
         MAIN_COMMIT_HASH=$(cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel" && git rev-parse HEAD | cut -c1-8)
