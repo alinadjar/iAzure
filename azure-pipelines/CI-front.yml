@@ -317,33 +317,33 @@ jobs:
         git config --global pull.rebase false
     
     
-        BASE_URL="http://$(System.AccessToken)@azure.sadgan.int/WebApp"
+        BASE_URL="http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp"
     
         function clone_or_pull {
                 branch_name=$1
                 repo_url=$2
-                repo_name=$3
+                target_dir=$3
     
     
                 echo "$repo_url" > ~/.git-credentials
     
                 echo "Cleaning up previous checkout..."
-                if [ -d "$repo_name" ]; then
+                if [ -d "$target_dir" ]; then
                     echo "Removing directory..."
-                    rm -rf "$repo_name"
+                    rm -rf "$target_dir"
                 fi
     
-                echo "Cloning $repo_name from branch $branch_name..."
-                git clone --branch "$branch_name" "$repo_url" "$repo_name"
+                echo "Cloning $target_dir from branch $branch_name..."
+                git clone --branch "$branch_name" "$repo_url" "$target_dir"
     
                 # Clone using environment variable for credentials
-                # git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" clone --branch $branch_name     $repo_url     $repo_name
+                # git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" clone --branch $branch_name     $repo_url     $target_dir
                 
                   
-                if [ $? -eq 0 ] && [ -d "$repo_name/.git" ]; then
-                    cd "$repo_name"
+                if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
+                    cd "$target_dir"
                     echo "Current directory: $pwd"
-                    echo "✅ Repository cloned to: $repo_name"
+                    echo "✅ Repository cloned to: $target_dir"
                     echo "📁 Directory contents:"
                     ls -la
                 else
