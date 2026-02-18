@@ -303,10 +303,11 @@ jobs:
         set -e
         echo "username:S_Bot_Azure" >> ~/.git-credentials
         echo "password:$(System.AccessToken)" >> ~/.git-credentials
+        # echo "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int" > ~/.git-credentials
     
         # Configure Git
-        git config --global credential.helper store
-        git config --global credential.useHttpPath true
+        # git config --global credential.helper store
+        # git config --global credential.useHttpPath true
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
         git config --global http.sslVerify false  
@@ -326,6 +327,7 @@ jobs:
     
     
                 echo "$repo_url" > ~/.git-credentials
+                # repo_path=$(echo "$repo_url" | sed 's|http://[^@]*@||')
     
                 echo "Cleaning up previous checkout..."
                 if [ -d "$target_dir" ]; then
@@ -352,11 +354,11 @@ jobs:
                 fi
         }
     
+        echo "================= isBranchDevelop: $isBranchDevelop"
         PULL_BRANCH=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
         PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "developweb1" || echo "alpha" )
-        echo "===== pulling from $PULL_BRANCH"
         
-            
+
         clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/1_Configs"              "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
         clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/2_SharedLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary" 
         clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/3_ClientLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary" 
