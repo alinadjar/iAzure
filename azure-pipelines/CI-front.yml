@@ -308,19 +308,23 @@ jobs:
         # echo "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int" > ~/.git-credentials
         TOKEN="$(System.AccessToken)"
         ENCODED_TOKEN=$(echo "$TOKEN" | sed 's/+/%2B/g; s/\//%2F/g; s/=/%3D/g')
-        # Add credentials for EACH repository path (since useHttpPath=true)
-        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/1_Configs" >> ~/.git-credentials
-        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/2_SharedLibrary" >> ~/.git-credentials
-        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/3_ClientLibrary" >> ~/.git-credentials
-        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/4_ServerLibrary" >> ~/.git-credentials
-        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.Erp.Panel" >> ~/.git-credentials
-        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.Erp.Client.Core" >> ~/.git-credentials
-        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganErp/_git/CICD" >> ~/.git-credentials
+        # Add host-level credentials
+        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int" > ~/.git-credentials
+
+
+         # Add credentials for EACH repository path (since useHttpPath=true)
+        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/1_Configs" >> ~/.git-credentials
+        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/2_SharedLibrary" >> ~/.git-credentials
+        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/3_ClientLibrary" >> ~/.git-credentials
+        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/4_ServerLibrary" >> ~/.git-credentials
+        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.Erp.Panel" >> ~/.git-credentials
+        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.Erp.Client.Core" >> ~/.git-credentials
+        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganErp/_git/CICD" >> ~/.git-credentials
 
     
         # Configure Git
         git config --global credential.helper store
-        git config --global credential.useHttpPath true
+        git config --global credential.useHttpPath false
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
         git config --global http.sslVerify false
