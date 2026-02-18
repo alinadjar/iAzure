@@ -306,7 +306,7 @@ jobs:
         # echo "username:S_Bot_Azure" >> ~/.git-credentials
         # echo "password:$(System.AccessToken)" >> ~/.git-credentials
         # echo "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int" > ~/.git-credentials
-        TOKEN="$(System.AccessToken)"
+        TOKEN="kb4t6lvkqh6okekinfpw7hkkzmyfj54f3uufymdgs7xkxppcxiza"
         ENCODED_TOKEN=$(echo "$TOKEN" | sed 's/+/%2B/g; s/\//%2F/g; s/=/%3D/g')
         # Add host-level credentials
         echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int" > ~/.git-credentials
