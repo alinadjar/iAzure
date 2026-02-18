@@ -354,12 +354,13 @@ jobs:
                 fi
         }
     
-        echo "================= isBranchDevelop: $isBranchDevelop"
+        echo "================= isBranchDevelop: $(isBranchDevelop)"
+        echo "================= isBranchDevelop: ${isBranchDevelop}"
         PULL_BRANCH=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
         PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "developweb1" || echo "alpha" )
         
 
-        clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/1_Configs"              "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
+        clone_or_pull  developweb1     "$BASE_URL/SadganShared/_git/1_Configs"              "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
         clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/2_SharedLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary" 
         clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/3_ClientLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary" 
         clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/4_ServerLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"                
