@@ -7,13 +7,13 @@ parameters:
 - name: CREATE_PR
   displayName: "Create PR ?"
   type: string
-  default: 'YES'
+  default: 'NO'
   values:
     - YES
     - NO
 - name: SHOULD_RELEASE
   type: string
-  default: 'true'
+  default: 'false'
   values:
     - 'true'
     - 'false'
@@ -303,7 +303,10 @@ jobs:
         set -e
         # echo "username:S_Bot_Azure" >> ~/.git-credentials
         # echo "password:$(System.AccessToken)" >> ~/.git-credentials
-        echo "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int" > ~/.git-credentials
+        # echo "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int" > ~/.git-credentials
+        TOKEN="$(System.AccessToken)"
+        ENCODED_TOKEN=$(echo "$TOKEN" | sed 's/+/%2B/g; s/\//%2F/g; s/=/%3D/g')
+        echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int" > ~/.git-credentials
 
     
         # Configure Git
@@ -365,6 +368,7 @@ jobs:
             fi
         }   
     
+        echo "================= isCreatePR: $(isCreatePR)"
         echo "================= isBranchDevelop: $(isBranchDevelop)"
         PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
         PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "developweb1" || echo "alpha" )
