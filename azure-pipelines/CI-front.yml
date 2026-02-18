@@ -363,8 +363,8 @@ jobs:
             echo "Cloning $target_dir from branch $branch_name..."
             echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
             # git clone --branch "$branch_name" "$repo_url" "$target_dir"
-            # git -c http.extraheader="AUTHORIZATION: bearer $ENCODED_TOKEN" clone --single-branch --branch "$branch_name"     "$repo_url"    "$target_dir"
-            git clone --single-branch --branch "$branch_name" "$repo_url" "$target_dir"
+            git -c http.extraheader="AUTHORIZATION: bearer $ENCODED_TOKEN" clone --single-branch --branch "$branch_name"     "$repo_url"    "$target_dir"
+            # git clone --single-branch --branch "$branch_name" "$repo_url" "$target_dir"
                 
                   
             if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
