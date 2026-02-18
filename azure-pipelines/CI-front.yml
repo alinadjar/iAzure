@@ -355,8 +355,7 @@ jobs:
         }
     
         echo "================= isBranchDevelop: $(isBranchDevelop)"
-        echo "================= isBranchDevelop: ${isBranchDevelop}"
-        PULL_BRANCH=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
+        PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
         PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "developweb1" || echo "alpha" )
         
 
