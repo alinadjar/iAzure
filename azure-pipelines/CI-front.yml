@@ -1,6 +1,6 @@
 trigger: none
 pool:
-  name: 'CI176'
+  name: 'WEB-1'
 
 
 parameters:
@@ -301,33 +301,12 @@ jobs:
     
     - bash: |
         set -e
-         # rm -f ~/.git-credentials
-
-         # echo "username:S_Bot_Azure" >> ~/.git-credentials
-        # echo "password:$(System.AccessToken)" >> ~/.git-credentials
-        # echo "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int" > ~/.git-credentials
-        TOKEN="wi3qrnikmqk44b2vwh62dmnzrvkfg3zmcmhririojsybjcj5srva"
-        ENCODED_TOKEN=$(echo "$TOKEN" | sed 's/+/%2B/g; s/\//%2F/g; s/=/%3D/g')
-         # Add host-level credentials
-        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int" > ~/.git-credentials
-
-
-         # Add credentials for EACH repository path (since useHttpPath=true)
-        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/1_Configs" >> ~/.git-credentials
-        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/2_SharedLibrary" >> ~/.git-credentials
-        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/3_ClientLibrary" >> ~/.git-credentials
-        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganShared/_git/4_ServerLibrary" >> ~/.git-credentials
-        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.Erp.Panel" >> ~/.git-credentials
-        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.Erp.Client.Core" >> ~/.git-credentials
-        # echo "http://S_Bot_Azure:$ENCODED_TOKEN@azure.sadgan.int/WebApp/SadganErp/_git/CICD" >> ~/.git-credentials
-
-    
         # Configure Git
         # git config --global credential.helper store
         # git config --global credential.useHttpPath false
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
-        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$TOKEN" | base64)"
+        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
         git config --global http.sslVerify false
         git config --global --add safe.directory '*'
         git config --global core.compression 0
@@ -336,7 +315,7 @@ jobs:
         git config --global pull.rebase false
     
     
-        BASE_URL="http://$TOKEN@azure.sadgan.int/WebApp"
+        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
 
 
         # Debug: Show what's in the credential file
@@ -401,8 +380,10 @@ jobs:
         # echo "$(pwd)"
         # echo "Final directory structure:"
         # ls -R | head -15
-      displayName: "Clone or Pull Repositories from Specific Branches"
+      displayName: "Git Checkout"
       name: gitPull
+      env:
+        GIT_PAT: $(GIT_PAT)
     
 
 
