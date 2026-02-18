@@ -306,8 +306,8 @@ jobs:
         # echo "http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int" > ~/.git-credentials
     
         # Configure Git
-        # git config --global credential.helper store
-        # git config --global credential.useHttpPath true
+        git config --global credential.helper store
+        git config --global credential.useHttpPath true
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
         git config --global http.sslVerify false
@@ -321,38 +321,43 @@ jobs:
         BASE_URL="http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp"
     
         function clone_or_pull {
-                branch_name=$1
-                repo_url=$2
-                target_dir=$3
+
+            git config --global http.sslVerify false
+            git config --global --add safe.directory '*'
     
+            branch_name=$1
+            repo_url=$2
+            target_dir=$3
+        
+            echo "$repo_url" > ~/.git-credentials
     
-                echo "$repo_url" > ~/.git-credentials
-                # repo_path=$(echo "$repo_url" | sed 's|http://[^@]*@||')
+            echo "Cleaning up previous checkout ($target_dir)..."
+            if [ -d "$target_dir" ]; then
+                echo "Removing directory..."
+                rm -rf "$target_dir"
+            fi
+        
+            echo "Cloning $target_dir from branch $branch_name..."
+            
+            # Clone using environment variable for credentials
+            echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
+            # git clone --branch "$branch_name" "$repo_url" "$target_dir"
+            # git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" clone --single-branch --branch "$branch_name"     "$repo_url"    "$target_dir"
     
-                echo "Cleaning up previous checkout..."
-                if [ -d "$target_dir" ]; then
-                    echo "Removing directory..."
-                    rm -rf "$target_dir"
-                fi
-    
-                echo "Cloning $target_dir from branch $branch_name..."
-                git clone --branch "$branch_name" "$repo_url" "$target_dir"
-    
-                # Clone using environment variable for credentials
-                # git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" clone --branch $branch_name     $repo_url     $target_dir
+            git clone --single-branch --branch "$branch_name" "$repo_url"   "$target_dir"
                 
                   
-                if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
-                    cd "$target_dir"
-                    echo "Current directory: $pwd"
-                    echo "✅ Repository cloned to: $target_dir"
-                    echo "📁 Directory contents:"
-                    ls -la
-                else
-                    echo "❌ Clone failed"
-                    exit 1
-                fi
-        }
+            if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
+                cd "$target_dir"
+                echo "Current directory: $pwd"
+                echo "✅ Repository cloned to: $target_dir"
+                echo "📁 Directory contents:"
+                ls -la
+            else
+                echo "❌ Clone failed"
+                exit 1
+            fi
+        }   
     
         echo "================= isBranchDevelop: $(isBranchDevelop)"
         PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
