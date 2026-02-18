@@ -141,7 +141,7 @@ jobs:
           set -e
           git config --global user.email "S_Bot_Azure@sadgan.int"
           git config --global user.name "S_Bot_Azure"
-          git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(BOT_TOKEN)" | base64)"
+          git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
           git config --global http.sslVerify false
           git config --global --add safe.directory '*'
           git config --global core.compression 0
@@ -156,7 +156,7 @@ jobs:
           echo "Creating PR from $SOURCE_BRANCH to $TARGET_BRANCH"
           
           # Base URL
-          BASE_URL="http://S_Bot_Azure:$(BOT_TOKEN)@azure.sadgan.int/WebApp"
+          BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
           API_URL="$BASE_URL/_apis"
           
           # Get repo ID
@@ -314,7 +314,7 @@ jobs:
         # git config --global credential.useHttpPath false
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
-        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(BOT_TOKEN)" | base64)"
+        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
         git config --global http.sslVerify false
         git config --global --add safe.directory '*'
         git config --global core.compression 0
@@ -323,7 +323,7 @@ jobs:
         git config --global pull.rebase false
     
     
-        BASE_URL="http://S_Bot_Azure:$(BOT_TOKEN)@azure.sadgan.int/WebApp"
+        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
 
 
         # Debug: Show what's in the credential file
@@ -391,7 +391,7 @@ jobs:
       displayName: "Git Checkout"
       name: gitPull
       env:
-        BOT_TOKEN: $(BOT_TOKEN)
+        GIT_PAT: $(GIT_PAT)
     
 
 
