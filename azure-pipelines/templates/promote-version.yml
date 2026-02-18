@@ -451,6 +451,6 @@ steps:
          # git config --local user.email "ci-build@example.com"
          # git config --local user.name  "CI Build"
          git add "$json_file"
-         git commit -m "[BOT] $(init.SOURCE_BRANCH) --> $(init.TARGET_BRANCH) : version promoted to v$inputVersion by ${{ variables['Build.RequestedFor'] }}"
+         git commit -m "[BOT] $(init.SOURCE_BRANCH) --> $(init.TARGET_BRANCH) : version promoted to v$inputVersion at ${{ parameters.side }} by ${{ variables['Build.RequestedFor'] }}"
          git push origin HEAD
        fi
