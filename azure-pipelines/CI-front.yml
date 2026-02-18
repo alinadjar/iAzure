@@ -152,9 +152,8 @@ jobs:
           SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
           TARGET_BRANCH="$(init.TARGET_BRANCH)"
           REPO_NAME="SadganErp/_git/Sadgan.Erp.Panel"
-          VERSION="$(init.VERSION_INPUT)"
           
-          echo "Creating PR from $SOURCE_BRANCH to $TARGET_BRANCH for version $VERSION"
+          echo "Creating PR from $SOURCE_BRANCH to $TARGET_BRANCH"
           
           # Base URL
           BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
@@ -183,7 +182,7 @@ jobs:
           else
             # Create new PR
             PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?api-version=6.0"
-            PR_TITLE="Promote $VERSION from $SOURCE_BRANCH to $TARGET_BRANCH"
+            PR_TITLE="BOT auto pr from $SOURCE_BRANCH to $TARGET_BRANCH"
             PR_BODY="{
               \"sourceRefName\": \"refs/heads/$SOURCE_BRANCH\",
               \"targetRefName\": \"refs/heads/$TARGET_BRANCH\",
@@ -269,7 +268,7 @@ jobs:
             },
             \"completionOptions\": {
               \"bypassPolicy\": true,
-              \"bypassReason\": \"Automated promotion for version $VERSION\",
+              \"bypassReason\": \"Automated pr\",
               \"mergeStrategy\": \"squash\",
               \"deleteSourceBranch\": false
             }
