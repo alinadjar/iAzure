@@ -327,6 +327,7 @@ jobs:
         # git config --global credential.useHttpPath false
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
+        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$TOKEN" | base64)"
         git config --global http.sslVerify false
         git config --global --add safe.directory '*'
         git config --global core.compression 0
@@ -335,7 +336,7 @@ jobs:
         git config --global pull.rebase false
     
     
-        BASE_URL="http://:$TOKEN@azure.sadgan.int/WebApp"
+        BASE_URL="http://$TOKEN@azure.sadgan.int/WebApp"
 
 
         # Debug: Show what's in the credential file
@@ -359,7 +360,7 @@ jobs:
             fi
             
             echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
-            git clone --single-branch --branch "$branch_name" "$repo_url" "$target_dir"
+            git clone --branch "$branch_name" "$repo_url" "$target_dir"
             
             if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
                 cd "$target_dir"
