@@ -335,7 +335,7 @@ jobs:
         git config --global pull.rebase false
     
     
-        BASE_URL="http://anyuser:$ENCODED_TOKEN@azure.sadgan.int/WebApp"
+        BASE_URL="http://:$ENCODED_TOKEN@azure.sadgan.int/WebApp"
 
 
         # Debug: Show what's in the credential file
