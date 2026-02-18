@@ -19,7 +19,7 @@ parameters:
     - 'false'
 - name: BRANCH
   type: string
-  default: 'alpha'
+  default: 'dev'
   displayName: "Select Branch"
   values:
     - 'dev'
@@ -132,7 +132,7 @@ jobs:
     - task: Bash@3
       name: create_pr
       displayName: 'Create & Complete PR'
-      condition: and(eq(variables['isCreatePR'], 'true'), eq(variables['isBranchDevelop'], 'false'))
+      condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
       env:
         SYSTEM_ACCESSTOKEN: $(System.AccessToken)
       inputs:
@@ -310,8 +310,8 @@ jobs:
         # git config --global credential.useHttpPath true
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
-        git config --global http.sslVerify false  
-        git config --global --add safe.directory '*'  
+        git config --global http.sslVerify false
+        git config --global --add safe.directory '*'
         git config --global core.compression 0
         git config --global http.postBuffer 1048576000
         git config --global pack.threads 1
@@ -356,7 +356,7 @@ jobs:
     
         echo "================= isBranchDevelop: $(isBranchDevelop)"
         PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
-        PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "true" -o  "$(isBranchDevOps)" = "true"  ] && echo "developweb1" || echo "alpha" )
+        PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "developweb1" || echo "alpha" )
         
 
         clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/1_Configs"              "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
@@ -430,7 +430,7 @@ jobs:
           # ------------------------------------------------------------------
           #  Extract Version & Perform Sanity check
           # ------------------------------------------------------------------
-          if [ "$(isBranchDevelop)" == "true" -o  "$(isBranchDevOps)" == "true" ]; then
+          if [ "$(isBranchDevelop)" == "True" -o  "$(isBranchDevOps)" == "True" ]; then
             NEW_TAG=$( [ "$(isBranchDevelop)" = true ] && echo "latest-dev" || echo "v0.0.0.0" )
             echo "Using tag: $NEW_TAG"
             echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
@@ -528,7 +528,7 @@ jobs:
     - bash: |
         configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
     
-        if [ "$(isBranchDevelop)" == "true" -o "$(isBranchDevOps)" = "true" ]; then
+        if [ "$(isBranchDevelop)" == "True" -o "$(isBranchDevOps)" = "True" ]; then
           new_assembly_version="0.0.0.0"
         else
           assembly_version=$(awk -F '[<>]' '/<AssemblyVersion>/ {print $3}' $configPropsFile)
@@ -756,7 +756,7 @@ jobs:
         APPSETTINGS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/appsettings.json
         sed -i 's/"IsDeveloperMode": false/"IsDeveloperMode": true/' $APPSETTINGS_FILE
     
-        if [ "$(isBranchDevelop)" == "true" -o  "$(isBranchDevOps)" = "true" ]; then
+        if [ "$(isBranchDevelop)" == "True" -o  "$(isBranchDevOps)" = "True" ]; then
           sed -i 's|"BaseUrl": "[^"]*"|"BaseUrl": "https://dev.api.fx.sadgan.int"|' $APPSETTINGS_FILE
           docker build \
               -t $(tagSetting.FQIN) \
