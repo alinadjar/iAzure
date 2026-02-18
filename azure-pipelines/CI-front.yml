@@ -339,11 +339,11 @@ jobs:
 
 
         # Debug: Show what's in the credential file
-        echo "Credential file content:"
-        cat ~/.git-credentials
+        # echo "Credential file content:"
+        # cat ~/.git-credentials
 
         # Debug: Test authentication with curl
-        curl -I -u "S_Bot_Azure:$(System.AccessToken)" "http://azure.sadgan.int/WebApp/SadganShared/_git/1_Configs/info/refs?service=git-upload-pack"
+        # curl -I -u "S_Bot_Azure:$(System.AccessToken)" "http://azure.sadgan.int/WebApp/SadganShared/_git/1_Configs/info/refs?service=git-upload-pack"
 
 
     
