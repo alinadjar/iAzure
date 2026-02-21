@@ -121,6 +121,7 @@ jobs:
       
       # Build the API URL
       URL="${ORGANIZATION}${PROJECT}/_apis/pipelines/${PIPELINE_ID}/runs?api-version=6.0-preview.1"
+      echo "URL=$URL"
       
       # Create JSON payload
       cat > payload.json << EOF
@@ -144,7 +145,7 @@ jobs:
       echo "Triggering frontend pipeline (ID: ${PIPELINE_ID}) on branch: ${BRANCH}..."
       
       RESPONSE=$(curl -s -X POST \
-        -u ":${PAT}" \
+        -H "Authorization: Bearer $(GIT_PAT)" \
         -H "Content-Type: application/json" \
         -d @payload.json \
         "${URL}")
