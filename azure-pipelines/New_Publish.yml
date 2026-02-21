@@ -70,7 +70,7 @@ jobs:
       echo ""
       
       # Trigger the build
-      RESPONSE=$(curl -s -X POST \
+      RESPONSE=$(curl -s -u ":$PAT" -X POST \
         -u ":${SYSTEM_ACCESSTOKEN}" \
         -H "Content-Type: application/json" \
         -d @payload.json \
