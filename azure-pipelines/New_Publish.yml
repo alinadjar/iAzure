@@ -22,10 +22,9 @@ parameters:
   default: 'dev'
   displayName: "Select Branch"
   values:
-    - 'dev'
-    - 'devops'
     - 'alpha'
     - 'beta'
+    - 'master'
 
 jobs:
 - job: Trigger_Backend
