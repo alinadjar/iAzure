@@ -44,32 +44,34 @@ jobs:
       BRANCH="${{ parameters.BRANCH }}"
       CREATE_PR="${{ parameters.CREATE_PR }}"
       SHOULD_RELEASE="${{ parameters.SHOULD_RELEASE }}"
+
+      echo "=== Triggering Backend Pipeline ==="
+      echo "Organization: ${ORGANIZATION}"
+      echo "Project: ${PROJECT}"
+      echo "Pipeline ID: ${PIPELINE_ID}"
+      echo "Branch: ${BRANCH}"
+
+      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=5.1"
+      echo "URL: ${URL}"
       
-      # Build the API URL
-      URL="${ORGANIZATION}${PROJECT}/_apis/pipelines/${PIPELINE_ID}/runs?api-version=5.1-preview.1"
-      echo "Triggering backend pipeline (ID: ${PIPELINE_ID})..."
       
-      # Create JSON payload
       cat > payload.json << EOF
       {
-        "resources": {
-          "repositories": {
-            "self": {
-              "refName": "refs/heads/${BRANCH}"
-            }
-          }
+        "definition": {
+          "id": ${PIPELINE_ID}
         },
-        "templateParameters": {
-          "CREATE_PR": "${CREATE_PR}",
-          "SHOULD_RELEASE": "${SHOULD_RELEASE}",
-          "BRANCH": "${BRANCH}"
-        }
+        "sourceBranch": "refs/heads/${BRANCH}",
+        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
       }
       EOF
       
+      echo "Payload:"
+      cat payload.json
+      echo ""
+      
       # Trigger the build
       RESPONSE=$(curl -s -X POST \
-        -H "Authorization: Bearer ${SYSTEM_ACCESSTOKEN}" \
+        -u ":${SYSTEM_ACCESSTOKEN}" \
         -H "Content-Type: application/json" \
         -d @payload.json \
         "${URL}")
@@ -77,13 +79,17 @@ jobs:
       echo "Response: ${RESPONSE}"
       
       # Extract build ID
-      BUILD_ID=$(echo "${RESPONSE}" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
-        
-        if [ -n "${BUILD_ID}" ]; then
+      if echo "$RESPONSE" | grep -q "id"; then
+        BUILD_ID=$(echo "$RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
         echo "✅ Backend pipeline triggered successfully! Build ID: ${BUILD_ID}"
         echo "##vso[task.setvariable variable=BACKEND_RUN_ID;isOutput=true]${BUILD_ID}"
       else
         echo "❌ Failed to trigger backend pipeline"
+        # Check for specific error messages
+        if echo "$RESPONSE" | grep -q "message"; then
+          ERROR_MSG=$(echo "$RESPONSE" | grep -o '"message":"[^"]*"' | cut -d':' -f2- | tr -d '"')
+          echo "Error message: ${ERROR_MSG}"
+        fi
         exit 1
       fi
       
