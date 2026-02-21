@@ -46,43 +46,37 @@ jobs:
       SHOULD_RELEASE="${{ parameters.SHOULD_RELEASE }}"
       
       # Build the API URL
-      URL="${ORGANIZATION}${PROJECT}/_apis/pipelines/${PIPELINE_ID}/runs?api-version=6.0-preview.1"
+      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=6.0-preview.1"
+      echo "Triggering backend pipeline (ID: ${PIPELINE_ID})..."
       
       # Create JSON payload
       cat > payload.json << EOF
       {
-        "resources": {
-          "repositories": {
-            "self": {
-              "refName": "refs/heads/${BRANCH}"
-            }
-          }
+        "definition": {
+          "id": ${PIPELINE_ID}
         },
-        "templateParameters": {
-          "CREATE_PR": "${CREATE_PR}",
-          "SHOULD_RELEASE": "${SHOULD_RELEASE}",
-          "BRANCH": "${BRANCH}"
-        }
+        "sourceBranch": "refs/heads/${BRANCH}",
+        "parameters": "{\"CREATE_PR\": \"${{ parameters.CREATE_PR }}\", \"SHOULD_RELEASE\": \"${{ parameters.SHOULD_RELEASE }}\", \"BRANCH\": \"${{ parameters.BRANCH }}\"}"
       }
       EOF
       
-      # Trigger the pipeline using curl
-      echo "Triggering backend pipeline (ID: ${PIPELINE_ID}) on branch: ${BRANCH}..."
-      
+      # Trigger the build
       RESPONSE=$(curl -s -X POST \
         -u ":${PAT}" \
         -H "Content-Type: application/json" \
         -d @payload.json \
         "${URL}")
       
-      # Check if successful
-      if echo "$RESPONSE" | grep -q "id"; then
-        RUN_ID=$(echo "$RESPONSE" | grep -o '"id":[0-9]*' | cut -d':' -f2)
-        echo "✅ Backend pipeline triggered successfully! Run ID: ${RUN_ID}"
-        echo "##vso[task.setvariable variable=BACKEND_RUN_ID;isOutput=true]${RUN_ID}"
+      echo "Response: ${RESPONSE}"
+      
+      # Extract build ID
+      BUILD_ID=$(echo "${RESPONSE}" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        
+        if [ -n "${BUILD_ID}" ]; then
+        echo "✅ Backend pipeline triggered successfully! Build ID: ${BUILD_ID}"
+        echo "##vso[task.setvariable variable=BACKEND_RUN_ID;isOutput=true]${BUILD_ID}"
       else
         echo "❌ Failed to trigger backend pipeline"
-        echo "Response: ${RESPONSE}"
         exit 1
       fi
       
