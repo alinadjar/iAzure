@@ -317,6 +317,18 @@ jobs:
         script: |
           set -e
           
+          # Function to clean repository ID (extract only valid UUID)
+          clean_repo_id() {
+            local id="$1"
+            # Extract UUID format: 8-4-4-4-12 hex digits
+            local cleaned=$(echo "$id" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+            if [ -z "$cleaned" ]; then
+              echo "$id" | tr -d '\n\r ' | cut -c1-36
+            else
+              echo "$cleaned"
+            fi
+          }
+          
           # Function to safely call curl and validate JSON response
           call_api() {
             local url="$1"
@@ -326,6 +338,9 @@ jobs:
             local http_code
             
             echo "🔵 Calling API: $method $url" >&2
+            
+            # Clean URL of any potential newlines or extra characters
+            url=$(echo "$url" | tr -d '\n\r ')
             
             if [ "$method" = "GET" ]; then
               http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
@@ -340,7 +355,9 @@ jobs:
             
             if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
               echo "❌ API call failed with HTTP $http_code" >&2
-              cat "$temp_file" >&2
+              if [ -s "$temp_file" ]; then
+                cat "$temp_file" >&2
+              fi
               rm -f "$temp_file"
               return 1
             fi
@@ -361,7 +378,7 @@ jobs:
           # Git configuration
           git config --global user.email "S_Bot_Azure@sadgan.int"
           git config --global user.name "S_Bot_Azure"
-          git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+          git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64 -w 0)"
           git config --global http.sslVerify false
           git config --global --add safe.directory '*'
           git config --global core.compression 0
@@ -419,7 +436,9 @@ jobs:
               exit 1
             }
             
-            REPO_ID=$(echo "$REPOS_RESPONSE" | jq -r --arg name "$SIMPLE_REPO_NAME" '.value[] | select(.name==$name) | .id')
+            # Extract and clean repository ID
+            RAW_REPO_ID=$(echo "$REPOS_RESPONSE" | jq -r --arg name "$SIMPLE_REPO_NAME" '.value[] | select(.name==$name) | .id')
+            REPO_ID=$(clean_repo_id "$RAW_REPO_ID")
             
             if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
               echo "  ❌ Could not find repository: $SIMPLE_REPO_NAME"
@@ -515,7 +534,11 @@ jobs:
               REPO_ID="${REPO_IDS["$REPO_NAME"]}"
               PR_ID="${PR_IDS["$REPO_NAME"]}"
               
-              PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
+              # Clean IDs before constructing URL
+              REPO_ID_CLEAN=$(clean_repo_id "$REPO_ID")
+              PR_ID_CLEAN=$(echo "$PR_ID" | tr -d '\n\r ')
+              
+              PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0"
               PR_DETAILS=$(call_api "$PR_URL") || {
                 echo "  ⚠️ Failed to get PR details for $REPO_NAME, will retry..."
                 ALL_READY=false
@@ -579,9 +602,13 @@ jobs:
             PR_ID="${PR_IDS["$REPO_NAME"]}"
             SOURCE_COMMIT="${SOURCE_COMMITS["$REPO_NAME"]}"
             
+            # Clean IDs
+            REPO_ID_CLEAN=$(clean_repo_id "$REPO_ID")
+            PR_ID_CLEAN=$(echo "$PR_ID" | tr -d '\n\r ')
+            
             # Get current user identity
             echo "  🔍 Getting PR details for approval..."
-            PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
+            PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0"
             PR_DETAILS=$(call_api "$PR_URL") || {
               echo "  ❌ Failed to get PR details"
               exit 1
@@ -591,7 +618,7 @@ jobs:
             
             # Add as reviewer and vote +10
             echo "  👍 Approving PR $PR_ID..."
-            REVIEWER_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID/reviewers/$CURRENT_USER_ID?api-version=6.0"
+            REVIEWER_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN/reviewers/$CURRENT_USER_ID?api-version=6.0"
             REVIEWER_BODY="{\"vote\": 10}"
             
             call_api "$REVIEWER_URL" "PUT" "$REVIEWER_BODY" > /dev/null || {
@@ -602,7 +629,7 @@ jobs:
             
             # Complete the PR with bypass
             echo "  🔄 Completing PR $PR_ID..."
-            COMPLETE_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
+            COMPLETE_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0"
             COMPLETE_BODY="{
               \"status\": \"completed\",
               \"lastMergeSourceCommit\": {
@@ -648,7 +675,6 @@ jobs:
           echo "========================================="
           echo "✅ ALL $COMPLETED_COUNT REPOSITORIES PROCESSED SUCCESSFULLY"
           echo "========================================="
-    
     
     
     - bash: |
