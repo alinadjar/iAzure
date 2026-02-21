@@ -306,17 +306,57 @@ jobs:
     #         exit 1
     #       fi
 
-
     - task: Bash@3
       name: create_pr_multi_repo
       displayName: 'Create & Complete PRs'
       condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
       env:
-        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        GIT_PAT: $(GIT_PAT)
       inputs:
         targetType: 'inline'
         script: |
           set -e
+          
+          # Function to safely call curl and validate JSON response
+          call_api() {
+            local url="$1"
+            local method="${2:-GET}"
+            local data="${3:-}"
+            local temp_file=$(mktemp)
+            local http_code
+            
+            echo "🔵 Calling API: $method $url" >&2
+            
+            if [ "$method" = "GET" ]; then
+              http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
+                -o "$temp_file" "$url")
+            else
+              http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Content-Type: application/json" \
+                -X "$method" \
+                -d "$data" \
+                -o "$temp_file" "$url")
+            fi
+            
+            if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+              echo "❌ API call failed with HTTP $http_code" >&2
+              cat "$temp_file" >&2
+              rm -f "$temp_file"
+              return 1
+            fi
+            
+            # Validate JSON response
+            if ! jq empty "$temp_file" 2>/dev/null; then
+              echo "❌ Invalid JSON response" >&2
+              cat "$temp_file" >&2
+              rm -f "$temp_file"
+              return 1
+            fi
+            
+            cat "$temp_file"
+            rm -f "$temp_file"
+            return 0
+          }
           
           # Git configuration
           git config --global user.email "S_Bot_Azure@sadgan.int"
@@ -346,45 +386,67 @@ jobs:
           BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
           API_URL="$BASE_URL/_apis"
           
+          echo "========================================="
+          echo "Starting multi-repo PR creation for $SOURCE_BRANCH → $TARGET_BRANCH"
+          echo "Total repositories: ${#REPOSITORIES[@]}"
+          echo "========================================="
+          
+          # Initialize associative arrays
+          declare -A REPO_IDS
+          declare -A PR_IDS
+          declare -A MERGE_STATUSES
+          declare -A SOURCE_COMMITS
+          
           # First pass: Check all repos for conflicts before any merges
+          echo ""
           echo "========================================="
           echo "PHASE 1: PRE-VALIDATION - Checking all repos for merge conflicts"
           echo "========================================="
           
-          declare -A REPO_IDS
-          declare -A PR_IDS
-          declare -A MERGE_STATUSES
-          
           for REPO_NAME in "${REPOSITORIES[@]}"; do
             echo ""
-            echo "Checking repository: $REPO_NAME"
+            echo "📦 Processing repository: $REPO_NAME"
             echo "-----------------------------------------"
             
             # Extract simple repo name
             SIMPLE_REPO_NAME=$(basename "$REPO_NAME")
             
             # Get repository ID
+            echo "  🔍 Looking up repository ID for: $SIMPLE_REPO_NAME"
             REPOS_URL="$API_URL/git/repositories?api-version=6.0"
-            REPOS_RESPONSE=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$REPOS_URL")
-            REPO_ID=$(echo "$REPOS_RESPONSE" | jq -r ".value[] | select(.name==\"$SIMPLE_REPO_NAME\") | .id")
+            REPOS_RESPONSE=$(call_api "$REPOS_URL") || {
+              echo "  ❌ Failed to get repositories list"
+              exit 1
+            }
+            
+            REPO_ID=$(echo "$REPOS_RESPONSE" | jq -r --arg name "$SIMPLE_REPO_NAME" '.value[] | select(.name==$name) | .id')
             
             if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
-              echo "❌ Could not find repository: $SIMPLE_REPO_NAME"
+              echo "  ❌ Could not find repository: $SIMPLE_REPO_NAME"
+              echo "  Available repositories:"
+              echo "$REPOS_RESPONSE" | jq -r '.value[].name' | sed 's/^/    - /'
               exit 1
             fi
-            echo "✅ Found repository ID: $REPO_ID"
+            echo "  ✅ Found repository ID: $REPO_ID"
             REPO_IDS["$REPO_NAME"]="$REPO_ID"
             
             # Check for existing PR
+            echo "  🔍 Checking for existing PRs..."
             PR_SEARCH_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=6.0"
-            PR_SEARCH=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$PR_SEARCH_URL")
-            EXISTING_PR=$(echo "$PR_SEARCH" | jq -r ".value[] | select(.sourceRefName==\"refs/heads/$SOURCE_BRANCH\" and .targetRefName==\"refs/heads/$TARGET_BRANCH\") | .pullRequestId")
+            PR_SEARCH=$(call_api "$PR_SEARCH_URL") || {
+              echo "  ❌ Failed to search PRs"
+              exit 1
+            }
+            
+            EXISTING_PR=$(echo "$PR_SEARCH" | jq -r --arg source "refs/heads/$SOURCE_BRANCH" --arg target "refs/heads/$TARGET_BRANCH" \
+              '.value[] | select(.sourceRefName==$source and .targetRefName==$target) | .pullRequestId')
             
             if [ -n "$EXISTING_PR" ] && [ "$EXISTING_PR" != "null" ]; then
-              echo "⚠️ Active PR exists: $EXISTING_PR"
+              echo "  ⚠️ Active PR exists: $EXISTING_PR"
               PR_IDS["$REPO_NAME"]="$EXISTING_PR"
             else
               # Create new PR
+              echo "  🆕 Creating new PR..."
               PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?api-version=6.0"
               PR_TITLE="BOT auto pr from $SOURCE_BRANCH to $TARGET_BRANCH"
               PR_BODY="{
@@ -393,33 +455,43 @@ jobs:
                 \"title\": \"$PR_TITLE\"
               }"
               
-              PR_RESPONSE=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" -H "Content-Type: application/json" -d "$PR_BODY" "$PR_URL")
+              PR_RESPONSE=$(call_api "$PR_URL" "POST" "$PR_BODY") || {
+                echo "  ❌ Failed to create PR for $REPO_NAME"
+                exit 1
+              }
+              
               PR_ID=$(echo "$PR_RESPONSE" | jq -r '.pullRequestId')
               
               if [ -z "$PR_ID" ] || [ "$PR_ID" = "null" ]; then
-                echo "❌ Failed to create PR for $REPO_NAME"
+                echo "  ❌ Failed to create PR - invalid response"
+                echo "  Response: $PR_RESPONSE"
                 exit 1
               fi
-              echo "✅ PR created with ID: $PR_ID"
+              echo "  ✅ PR created with ID: $PR_ID"
               PR_IDS["$REPO_NAME"]="$PR_ID"
             fi
             
             # Quick check for immediate conflicts
+            echo "  🔍 Checking initial merge status..."
             PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/${PR_IDS["$REPO_NAME"]}?api-version=6.0"
-            PR_DETAILS=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$PR_URL")
+            PR_DETAILS=$(call_api "$PR_URL") || {
+              echo "  ❌ Failed to get PR details"
+              exit 1
+            }
+            
             MERGE_STATUS=$(echo "$PR_DETAILS" | jq -r '.mergeStatus')
             MERGE_STATUSES["$REPO_NAME"]="$MERGE_STATUS"
             
             if [ "$MERGE_STATUS" = "conflicts" ]; then
-              echo "❌ IMMEDIATE CONFLICT detected in $REPO_NAME"
-              echo "Aborting promotion - all repos must be conflict-free before proceeding"
+              echo "  ❌ IMMEDIATE CONFLICT detected in $REPO_NAME"
+              echo "  Aborting promotion - all repos must be conflict-free before proceeding"
               exit 1
             elif [ "$MERGE_STATUS" = "failure" ]; then
-              echo "❌ MERGE FAILURE detected in $REPO_NAME"
+              echo "  ❌ MERGE FAILURE detected in $REPO_NAME"
               exit 1
             fi
             
-            echo "✅ Initial merge status: $MERGE_STATUS"
+            echo "  ✅ Initial merge status: $MERGE_STATUS"
           done
           
           # Second pass: Wait for all merges to be ready
@@ -444,16 +516,21 @@ jobs:
               PR_ID="${PR_IDS["$REPO_NAME"]}"
               
               PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
-              PR_DETAILS=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$PR_URL")
+              PR_DETAILS=$(call_api "$PR_URL") || {
+                echo "  ⚠️ Failed to get PR details for $REPO_NAME, will retry..."
+                ALL_READY=false
+                continue
+              }
+              
               MERGE_STATUS=$(echo "$PR_DETAILS" | jq -r '.mergeStatus')
               
-              echo "$REPO_NAME: $MERGE_STATUS"
+              printf "  %-40s: %s\n" "$REPO_NAME" "$MERGE_STATUS"
               
               if [ "$MERGE_STATUS" = "conflicts" ]; then
-                echo "❌ Merge conflict detected in $REPO_NAME"
+                echo "  ❌ Merge conflict detected in $REPO_NAME"
                 exit 1
               elif [ "$MERGE_STATUS" = "failure" ]; then
-                echo "❌ Merge failure in $REPO_NAME"
+                echo "  ❌ Merge failure in $REPO_NAME"
                 exit 1
               elif [ "$MERGE_STATUS" != "succeeded" ]; then
                 ALL_READY=false
@@ -482,6 +559,7 @@ jobs:
             exit 1
           fi
           
+          echo ""
           echo "✅ ALL REPOSITORIES READY FOR MERGE"
           
           # Third pass: Approve and complete PRs sequentially
@@ -490,9 +568,11 @@ jobs:
           echo "PHASE 3: SEQUENTIAL APPROVAL AND COMPLETION"
           echo "========================================="
           
+          COMPLETED_COUNT=0
           for REPO_NAME in "${REPOSITORIES[@]}"; do
+            COMPLETED_COUNT=$((COMPLETED_COUNT + 1))
             echo ""
-            echo "Processing repository: $REPO_NAME"
+            echo "[$COMPLETED_COUNT/${#REPOSITORIES[@]}] Processing repository: $REPO_NAME"
             echo "-----------------------------------------"
             
             REPO_ID="${REPO_IDS["$REPO_NAME"]}"
@@ -500,25 +580,28 @@ jobs:
             SOURCE_COMMIT="${SOURCE_COMMITS["$REPO_NAME"]}"
             
             # Get current user identity
+            echo "  🔍 Getting PR details for approval..."
             PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
-            PR_DETAILS=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$PR_URL")
+            PR_DETAILS=$(call_api "$PR_URL") || {
+              echo "  ❌ Failed to get PR details"
+              exit 1
+            }
+            
             CURRENT_USER_ID=$(echo "$PR_DETAILS" | jq -r '.createdBy.id')
             
             # Add as reviewer and vote +10
-            echo "Approving PR $PR_ID..."
+            echo "  👍 Approving PR $PR_ID..."
             REVIEWER_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID/reviewers/$CURRENT_USER_ID?api-version=6.0"
             REVIEWER_BODY="{\"vote\": 10}"
             
-            curl -s -u ":$SYSTEM_ACCESSTOKEN" \
-              -H "Content-Type: application/json" \
-              -X PUT \
-              -d "$REVIEWER_BODY" \
-              "$REVIEWER_URL" > /dev/null
+            call_api "$REVIEWER_URL" "PUT" "$REVIEWER_BODY" > /dev/null || {
+              echo "  ⚠️ Failed to record vote, but continuing..."
+            }
             
-            echo "✅ PR approved"
+            echo "  ✅ PR approved"
             
             # Complete the PR with bypass
-            echo "Completing PR $PR_ID..."
+            echo "  🔄 Completing PR $PR_ID..."
             COMPLETE_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/$PR_ID?api-version=6.0"
             COMPLETE_BODY="{
               \"status\": \"completed\",
@@ -533,38 +616,39 @@ jobs:
               }
             }"
             
-            COMPLETE_RESPONSE=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" \
-              -H "Content-Type: application/json" \
-              -X PATCH \
-              -d "$COMPLETE_BODY" \
-              "$COMPLETE_URL")
+            COMPLETE_RESPONSE=$(call_api "$COMPLETE_URL" "PATCH" "$COMPLETE_BODY") || {
+              echo "  ❌ Failed to complete PR for $REPO_NAME"
+              exit 1
+            }
             
             # Check completion
             HAS_COMPLETION_QUEUE=$(echo "$COMPLETE_RESPONSE" | jq -r 'has("completionQueueTime")')
             HAS_CLOSED_BY=$(echo "$COMPLETE_RESPONSE" | jq -r 'has("closedBy")')
+            CURRENT_STATUS=$(echo "$COMPLETE_RESPONSE" | jq -r '.status // "unknown"')
             
-            if [ "$HAS_COMPLETION_QUEUE" = "true" ] || [ "$HAS_CLOSED_BY" = "true" ]; then
-              echo "✅ PR $PR_ID for $REPO_NAME completed successfully"
+            if [ "$HAS_COMPLETION_QUEUE" = "true" ] || [ "$HAS_CLOSED_BY" = "true" ] || [ "$CURRENT_STATUS" = "completed" ]; then
+              echo "  ✅ PR $PR_ID completed successfully"
               
               # Wait for merge to fully complete before next repo
-              echo "Waiting 5 seconds for merge to settle..."
+              echo "  ⏱️ Waiting 5 seconds for merge to settle..."
               sleep 5
               
               # Verify final status
-              FINAL_CHECK=$(curl -s -u ":$SYSTEM_ACCESSTOKEN" "$COMPLETE_URL")
-              FINAL_STATUS=$(echo "$FINAL_CHECK" | jq -r '.status')
-              echo "Final PR status: $FINAL_STATUS"
+              FINAL_CHECK=$(call_api "$COMPLETE_URL") || true
+              FINAL_STATUS=$(echo "$FINAL_CHECK" | jq -r '.status // "unknown"')
+              echo "  📊 Final PR status: $FINAL_STATUS"
             else
-              echo "❌ Failed to complete PR for $REPO_NAME"
-              echo "Response: $COMPLETE_RESPONSE"
+              echo "  ❌ Failed to complete PR for $REPO_NAME"
+              echo "  Response: $COMPLETE_RESPONSE"
               exit 1
             fi
           done
           
           echo ""
           echo "========================================="
-          echo "✅ ALL REPOSITORIES PROCESSED SUCCESSFULLY"
+          echo "✅ ALL $COMPLETED_COUNT REPOSITORIES PROCESSED SUCCESSFULLY"
           echo "========================================="
+    
     
     
     - bash: |
