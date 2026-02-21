@@ -896,15 +896,7 @@ jobs:
           #     fi
           # done
     
-    
-    # publish env as artifacts
-    - task: PublishBuildArtifacts@1
-      inputs:
-        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-        ArtifactName: 'front-build-vars'
-        publishLocation: 'Container'
-      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-    
+
     - bash: |
         configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
     
@@ -912,15 +904,33 @@ jobs:
           new_assembly_version="0.0.0.0"
         else
           assembly_version=$(awk -F '[<>]' '/<AssemblyVersion>/ {print $3}' $configPropsFile)
-          new_assembly_version="$(tagSetting.DOCKER_TAG)"
-          new_assembly_version="${new_assembly_version#v}"
-          new_assembly_version=$(echo "$new_assembly_version" | awk -F'.' '{print $1"."$2"."$3"."$4}')
+          tag_version="$(tagSetting.DOCKER_TAG)"
+          tag_version="${tag_version#v}"
+          
+          # Simple solution: extract all numbers and join with dots
+          new_assembly_version=$(echo "$tag_version" | grep -oE '[0-9]+' | head -4 | paste -sd '.' -)
+          
+          # If we don't have 4 numbers, pad with zeros
+          if [ -z "$new_assembly_version" ]; then
+            new_assembly_version="0.0.0.0"
+          else
+            # Count how many numbers we have
+            num_count=$(echo "$new_assembly_version" | tr -cd '.' | wc -c)
+            num_count=$((num_count + 1))
+            
+            # Pad to 4 numbers
+            while [ $num_count -lt 4 ]; do
+              new_assembly_version="${new_assembly_version}.0"
+              num_count=$((num_count + 1))
+            done
+          fi
         fi
     
-        echo "current assmebly version $assembly_version is changing to $new_assembly_version"
+        echo "current assembly version $assembly_version is changing to $new_assembly_version"
         sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$new_assembly_version</AssemblyVersion>|" $configPropsFile
       displayName: "Assembly Version Fix"
       condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+
     
     
     # Override appsettings.json
