@@ -39,7 +39,7 @@ jobs:
       # Variables
       ORGANIZATION="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}"
       PROJECT="${SYSTEM_TEAMPROJECT}"
-      PIPELINE_ID="YOUR_BACKEND_PIPELINE_ID"  # Replace with your backend pipeline ID
+      PIPELINE_ID="111"  # backend pipeline ID
       PAT="${SYSTEM_ACCESSTOKEN}"
       BRANCH="${{ parameters.BRANCH }}"
       CREATE_PR="${{ parameters.CREATE_PR }}"
@@ -104,7 +104,7 @@ jobs:
       # Variables
       ORGANIZATION="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}"
       PROJECT="${SYSTEM_TEAMPROJECT}"
-      PIPELINE_ID="YOUR_FRONTEND_PIPELINE_ID"  # Replace with your frontend pipeline ID
+      PIPELINE_ID="109"
       PAT="${SYSTEM_ACCESSTOKEN}"
       BRANCH="${{ parameters.BRANCH }}"
       CREATE_PR="${{ parameters.CREATE_PR }}"
