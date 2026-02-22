@@ -71,7 +71,7 @@ jobs:
       
       # Trigger the build using SYSTEM_ACCESSTOKEN
       RESPONSE=$(curl -s -X POST \
-        -u ":${SYSTEM_ACCESSTOKEN}" \
+        -u ":${GIT_PAT}" \
         -H "Content-Type: application/json" \
         -d @payload.json \
         "${URL}")
@@ -98,9 +98,12 @@ jobs:
       
     name: trigger_backend
     displayName: 'Trigger Backend CI Pipeline'
+    env:
+        GIT_PAT: $(GIT_PAT)
+    
 
 - job: Trigger_Frontend
-  displayName: '🎨 Trigger Frontend Pipeline'
+  displayName: '🚀 Trigger Frontend Pipeline'
   dependsOn: []  # This ensures the job runs in parallel with Trigger_Backend
   steps:
   - checkout: none
@@ -143,7 +146,7 @@ jobs:
       
       # Trigger the build using SYSTEM_ACCESSTOKEN
       RESPONSE=$(curl -s -X POST \
-        -u ":${SYSTEM_ACCESSTOKEN}" \
+        -u ":${GIT_PAT}" \
         -H "Content-Type: application/json" \
         -d @payload.json \
         "${URL}")
@@ -170,6 +173,8 @@ jobs:
       
     name: trigger_frontend
     displayName: 'Trigger Frontend CI Pipeline'
+    env:
+        GIT_PAT: $(GIT_PAT)
 
 # Optional: Add a job to monitor both pipelines
 - job: Monitor_Pipelines
