@@ -135,26 +135,8 @@ jobs:
         "definition": {
           "id": ${PIPELINE_ID}
         },
-        "sourceBranch": "refs/heads/${BRANCH}",
-        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}",
-        "resources": {
-          "repositories": {
-            "self": {
-              "refName": "refs/heads/${BRANCH}",
-              "repository": {
-                "id": "49a3a49b-79c3-4601-b22e-87e268e22ae7",
-                "type": "TfsGit"
-              }
-            },
-            "versionRepo": {
-              "refName": "refs/heads/cicd",
-              "repository": {
-                "id": "cc58a0a1-cbab-49c0-baf7-297708d1656ccc58a0a1-cbab-49c0-baf7-297708d1656c",
-                "type": "TfsGit"
-              }
-            }
-          }
-        }
+        "sourceBranch": "refs/heads/${BRANCH}",        
+        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
       }
       EOF
       
