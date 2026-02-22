@@ -568,6 +568,7 @@ jobs:
       name: gitPull
       env:
         GIT_PAT: $(GIT_PAT)
+        HOME: $(Agent.HomeDirectory) 
     
 
 
