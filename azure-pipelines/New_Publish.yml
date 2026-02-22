@@ -1,6 +1,12 @@
 trigger: none
 pool:
   name: 'WEB-1'
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: SadganErp/CICD
+      ref: cicd
 
 parameters:
 - name: CREATE_PR
@@ -36,7 +42,7 @@ jobs:
   displayName: '🚀 Trigger Backend Pipeline'
   steps:
   - checkout: none
-  - template: azure-pipelines/CI-backend.yml
+  - template: azure-pipelines/CI-backend.yml@templates
     parameters:
       PIPELINE_ID: $(BACKEND_PIPELINE_ID)
       BRANCH: ${{ parameters.BRANCH }}
@@ -49,7 +55,7 @@ jobs:
   dependsOn: []  # Run in parallel
   steps:
   - checkout: none
-  - template: azure-pipelines/CI-front.yml
+  - template: azure-pipelines/CI-front.yml@templates
     parameters:
       PIPELINE_ID: $(FRONTEND_PIPELINE_ID)
       BRANCH: ${{ parameters.BRANCH }}
