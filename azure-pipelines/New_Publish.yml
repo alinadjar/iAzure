@@ -1,14 +1,7 @@
+# parallel-trigger-pipeline.yml
 trigger: none
-pr: none
 pool:
   name: 'WEB-1'
-
-resources:
-  repositories:
-    - repository: templates
-      type: git
-      name: SadganErp/CICD
-      ref: cicd
 
 parameters:
 - name: CREATE_PR
@@ -30,37 +23,175 @@ parameters:
   displayName: "Select Branch"
   values:
     - 'dev'
+    - 'devops'
     - 'alpha'
     - 'beta'
-    - 'master'
-
-# Define pipeline IDs as variables
-variables:
-  BACKEND_PIPELINE_ID: 111
-  FRONTEND_PIPELINE_ID: 109
 
 jobs:
 - job: Trigger_Backend
   displayName: '🚀 Trigger Backend Pipeline'
   steps:
   - checkout: none
-  - template: azure-pipelines/CI-backend.yml@templates
-    parameters:
-      PIPELINE_ID: $(BACKEND_PIPELINE_ID)
-      BRANCH: ${{ parameters.BRANCH }}
-      CREATE_PR: ${{ parameters.CREATE_PR }}
-      SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
-      side: "backend"
+    
+  - bash: |
+      #!/bin/bash
+      
+      # Variables - Use SYSTEM_ACCESSTOKEN consistently
+      ORGANIZATION="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}"
+      PROJECT="${SYSTEM_TEAMPROJECT}"
+      PIPELINE_ID="111"  # backend pipeline ID
+      BRANCH="${{ parameters.BRANCH }}"
+      CREATE_PR="${{ parameters.CREATE_PR }}"
+      SHOULD_RELEASE="${{ parameters.SHOULD_RELEASE }}"
+      
+      echo "=== Triggering Backend Pipeline ==="
+      echo "Organization: ${ORGANIZATION}"
+      echo "Project: ${PROJECT}"
+      echo "Pipeline ID: ${PIPELINE_ID}"
+      echo "Branch: ${BRANCH}"
+      
+      # Build the API URL - Using builds endpoint which is more reliable
+      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=5.1"
+      echo "URL: ${URL}"
+      
+      # Create JSON payload for build trigger
+      cat > payload.json << EOF
+      {
+        "definition": {
+          "id": ${PIPELINE_ID}
+        },
+        "sourceBranch": "refs/heads/${BRANCH}",
+        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
+      }
+      EOF
+      
+      echo "Payload:"
+      cat payload.json
+      echo ""
+      
+      # Trigger the build using SYSTEM_ACCESSTOKEN
+      RESPONSE=$(curl -s -X POST \
+        -u ":${SYSTEM_ACCESSTOKEN}" \
+        -H "Content-Type: application/json" \
+        -d @payload.json \
+        "${URL}")
+      
+      echo "Response: ${RESPONSE}"
+      
+      # Extract build ID
+      if echo "$RESPONSE" | grep -q "id"; then
+        BUILD_ID=$(echo "$RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        echo "✅ Backend pipeline triggered successfully! Build ID: ${BUILD_ID}"
+        echo "##vso[task.setvariable variable=BACKEND_RUN_ID;isOutput=true]${BUILD_ID}"
+      else
+        echo "❌ Failed to trigger backend pipeline"
+        # Check for specific error messages
+        if echo "$RESPONSE" | grep -q "message"; then
+          ERROR_MSG=$(echo "$RESPONSE" | grep -o '"message":"[^"]*"' | cut -d':' -f2- | tr -d '"')
+          echo "Error message: ${ERROR_MSG}"
+        fi
+        exit 1
+      fi
+      
+      # Clean up
+      rm -f payload.json
+      
+    name: trigger_backend
+    displayName: 'Trigger Backend CI Pipeline'
 
 - job: Trigger_Frontend
   displayName: '🎨 Trigger Frontend Pipeline'
-  dependsOn: []  # Run in parallel
+  dependsOn: []  # This ensures the job runs in parallel with Trigger_Backend
   steps:
   - checkout: none
-  - template: azure-pipelines/CI-front.yml@templates
-    parameters:
-      PIPELINE_ID: $(FRONTEND_PIPELINE_ID)
-      BRANCH: ${{ parameters.BRANCH }}
-      CREATE_PR: ${{ parameters.CREATE_PR }}
-      SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
-      side: "frontend"
+  
+  - bash: |
+      #!/bin/bash
+      
+      # Variables - Use SYSTEM_ACCESSTOKEN consistently
+      ORGANIZATION="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}"
+      PROJECT="${SYSTEM_TEAMPROJECT}"
+      PIPELINE_ID="109"  # frontend pipeline ID
+      BRANCH="${{ parameters.BRANCH }}"
+      CREATE_PR="${{ parameters.CREATE_PR }}"
+      SHOULD_RELEASE="${{ parameters.SHOULD_RELEASE }}"
+      
+      echo "=== Triggering Frontend Pipeline ==="
+      echo "Organization: ${ORGANIZATION}"
+      echo "Project: ${PROJECT}"
+      echo "Pipeline ID: ${PIPELINE_ID}"
+      echo "Branch: ${BRANCH}"
+      
+      # Build the API URL - Using builds endpoint which is more reliable
+      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=5.1"
+      echo "URL: ${URL}"
+      
+      # Create JSON payload for build trigger
+      cat > payload.json << EOF
+      {
+        "definition": {
+          "id": ${PIPELINE_ID}
+        },
+        "sourceBranch": "refs/heads/${BRANCH}",
+        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
+      }
+      EOF
+      
+      echo "Payload:"
+      cat payload.json
+      echo ""
+      
+      # Trigger the build using SYSTEM_ACCESSTOKEN
+      RESPONSE=$(curl -s -X POST \
+        -u ":${SYSTEM_ACCESSTOKEN}" \
+        -H "Content-Type: application/json" \
+        -d @payload.json \
+        "${URL}")
+      
+      echo "Response: ${RESPONSE}"
+      
+      # Extract build ID
+      if echo "$RESPONSE" | grep -q "id"; then
+        BUILD_ID=$(echo "$RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        echo "✅ Frontend pipeline triggered successfully! Build ID: ${BUILD_ID}"
+        echo "##vso[task.setvariable variable=FRONTEND_RUN_ID;isOutput=true]${BUILD_ID}"
+      else
+        echo "❌ Failed to trigger frontend pipeline"
+        # Check for specific error messages
+        if echo "$RESPONSE" | grep -q "message"; then
+          ERROR_MSG=$(echo "$RESPONSE" | grep -o '"message":"[^"]*"' | cut -d':' -f2- | tr -d '"')
+          echo "Error message: ${ERROR_MSG}"
+        fi
+        exit 1
+      fi
+      
+      # Clean up
+      rm -f payload.json
+      
+    name: trigger_frontend
+    displayName: 'Trigger Frontend CI Pipeline'
+
+# Optional: Add a job to monitor both pipelines
+- job: Monitor_Pipelines
+  displayName: '📊 Monitor Pipeline Status'
+  dependsOn:
+    - Trigger_Backend
+    - Trigger_Frontend
+  condition: always()  # Run even if trigger jobs fail
+  variables:
+    backend_run_id: $[dependencies.Trigger_Backend.outputs['trigger_backend.BACKEND_RUN_ID']]
+    frontend_run_id: $[dependencies.Trigger_Frontend.outputs['trigger_frontend.FRONTEND_RUN_ID']]
+  steps:
+  - checkout: none
+  
+  - bash: |
+      echo "📊 Pipeline Trigger Summary:"
+      echo "================================"
+      echo "Backend Run ID: $(backend_run_id)"
+      echo "Frontend Run ID: $(frontend_run_id)"
+      echo ""
+      echo "🔗 Backend URL: ${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}${SYSTEM_TEAMPROJECT}/_build/results?buildId=$(backend_run_id)"
+      echo "🔗 Frontend URL: ${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}${SYSTEM_TEAMPROJECT}/_build/results?buildId=$(frontend_run_id)"
+      echo "================================"
+    displayName: 'Display pipeline URLs'
+    condition: and(succeeded(), ne(variables['backend_run_id'], ''), ne(variables['frontend_run_id'], ''))
