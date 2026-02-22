@@ -30,9 +30,9 @@ parameters:
   displayName: "Select Branch"
   values:
     - 'dev'
-    - 'devops'
     - 'alpha'
     - 'beta'
+    - 'master'
 
 # Define pipeline IDs as variables
 variables:
@@ -44,7 +44,7 @@ jobs:
   displayName: '🚀 Trigger Backend Pipeline'
   steps:
   - checkout: none
-  - template: azure-pipelines/templates/trigger-step.yml@templates
+  - template: azure-pipelines/CI-backend.yml@templates
     parameters:
       PIPELINE_ID: $(BACKEND_PIPELINE_ID)
       BRANCH: ${{ parameters.BRANCH }}
@@ -57,7 +57,7 @@ jobs:
   dependsOn: []  # Run in parallel
   steps:
   - checkout: none
-  - template: azure-pipelines/templates/trigger-step.yml@templates
+  - template: azure-pipelines/CI-front.yml@templates
     parameters:
       PIPELINE_ID: $(FRONTEND_PIPELINE_ID)
       BRANCH: ${{ parameters.BRANCH }}
