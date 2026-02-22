@@ -28,6 +28,79 @@ parameters:
     - 'master'
 
 jobs:
+- job: Diagnose_Repositories
+  displayName: '🔍 Diagnose Repository Issues'
+  steps:
+  - checkout: none
+  
+  - bash: |
+      #!/bin/bash
+      
+      ORGANIZATION="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}"
+      PROJECT="${SYSTEM_TEAMPROJECT}"
+      
+      echo "========================================="
+      echo "STEP 1: List ALL repositories in project"
+      echo "========================================="
+      REPO_URL="${ORGANIZATION}${PROJECT}/_apis/git/repositories?api-version=5.1"
+      
+      echo "Fetching all repositories..."
+      REPOS_RESPONSE=$(curl -s -u ":${GIT_PAT}" \
+        -H "Content-Type: application/json" \
+        "${REPO_URL}")
+      
+      echo "$REPOS_RESPONSE" | jq '.'
+      
+      # Extract repository names and IDs
+      echo ""
+      echo "========================================="
+      echo "STEP 2: Repository Names and IDs"
+      echo "========================================="
+      echo "$REPOS_RESPONSE" | jq '.value[] | {name: .name, id: .id, remoteUrl: .remoteUrl}'
+      
+      echo ""
+      echo "========================================="
+      echo "STEP 3: Check if branch 'dev' exists in each repo"
+      echo "========================================="
+      
+      # Loop through each repository and check for dev branch
+      echo "$REPOS_RESPONSE" | jq -r '.value[] | .name' | while read repo_name; do
+        echo ""
+        echo "--- Repository: $repo_name ---"
+        
+        BRANCH_URL="${ORGANIZATION}${PROJECT}/_apis/git/repositories/${repo_name}/refs?filter=heads/dev&api-version=5.1"
+        BRANCH_RESPONSE=$(curl -s -u ":${GIT_PAT}" \
+          -H "Content-Type: application/json" \
+          "${BRANCH_URL}")
+        
+        BRANCH_COUNT=$(echo "$BRANCH_RESPONSE" | jq '.count')
+        
+        if [ "$BRANCH_COUNT" -gt 0 ]; then
+          echo "✅ Branch 'dev' EXISTS in repository: $repo_name"
+          echo "Branch details:"
+          echo "$BRANCH_RESPONSE" | jq '.value[] | {name: .name, objectId: .objectId}'
+        else
+          echo "❌ Branch 'dev' DOES NOT EXIST in repository: $repo_name"
+        fi
+      done
+      
+      echo ""
+      echo "========================================="
+      echo "STEP 4: Get Default Branches"
+      echo "========================================="
+      
+      echo "$REPOS_RESPONSE" | jq -r '.value[] | .name' | while read repo_name; do
+        DEFAULT_BRANCH=$(curl -s -u ":${GIT_PAT}" \
+          -H "Content-Type: application/json" \
+          "${ORGANIZATION}${PROJECT}/_apis/git/repositories/${repo_name}?api-version=5.1" | jq -r '.defaultBranch')
+        
+        echo "Repository: $repo_name - Default branch: $DEFAULT_BRANCH"
+      done
+      
+    env:
+      GIT_PAT: $(GIT_PAT)
+    displayName: 'Diagnose repositories and branches'
+    
 - job: Trigger_Backend
   displayName: '🚀 Trigger Backend Pipeline'
   steps:
