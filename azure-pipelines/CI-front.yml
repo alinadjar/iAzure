@@ -52,13 +52,13 @@ variables:
 # ──────────────────────────────────────────────────────────────────────
 # 1. Resources – this pulls in the *other* Git repo
 # ──────────────────────────────────────────────────────────────────────
-resources:
-  repositories:
-  - repository: versionRepo   # alias you’ll use in checkout / path
-    type: git
-    name: SadganErp/CICD
-    ref: refs/heads/cicd      # or refs/tags/v1.2.3, whatever branch you want
-    # project: CICD
+# resources:
+#   repositories:
+#   - repository: versionRepo   # alias you’ll use in checkout / path
+#     type: git
+#     name: SadganErp/CICD
+#     ref: refs/heads/cicd      # or refs/tags/v1.2.3, whatever branch you want
+#     # project: CICD
 
 # ──────────────────────────────────────────────────────────────────────
 # 2. Check out *both* repos
