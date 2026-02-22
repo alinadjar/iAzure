@@ -733,8 +733,7 @@ jobs:
     
         echo "================= isCreatePR: $(isCreatePR)"
         echo "================= isBranchDevelop: $(isBranchDevelop)"
-        PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "dev" || echo "$CURRENT_BRANCH" )
-        PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "developweb1" || echo "alpha" )
+        PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "dev" || echo "alpha" )
         
 
         clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/1_Configs"              "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
