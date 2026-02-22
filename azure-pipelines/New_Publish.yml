@@ -1,4 +1,4 @@
-# test-trigger-pipeline.yml
+# parallel-trigger-pipeline.yml
 trigger: none
 pool:
   name: 'WEB-1'
@@ -8,16 +8,28 @@ parameters:
   displayName: "Create PR ?"
   type: string
   default: 'NO'
+  values:
+    - YES
+    - NO
 - name: SHOULD_RELEASE
   type: string
   default: 'false'
+  values:
+    - 'true'
+    - 'false'
 - name: BRANCH
   type: string
   default: 'dev'
+  displayName: "Select Branch"
+  values:
+    - 'dev'
+    - 'alpha'
+    - 'beta'
+    - 'master'
 
 jobs:
-- job: Test_All_Approaches
-  displayName: '🧪 Test All Trigger Approaches'
+- job: Diagnose_Repositories
+  displayName: '🔍 Diagnose Repository Issues'
   steps:
   - checkout: none
   
@@ -26,227 +38,260 @@ jobs:
       
       ORGANIZATION="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}"
       PROJECT="${SYSTEM_TEAMPROJECT}"
-      PIPELINE_ID="111"  # Test with backend first
+      
+      echo "========================================="
+      echo "STEP 1: List ALL repositories in project"
+      echo "========================================="
+      REPO_URL="${ORGANIZATION}${PROJECT}/_apis/git/repositories?api-version=6.1"
+      
+      echo "Fetching all repositories..."
+      REPOS_RESPONSE=$(curl -s -u ":${GIT_PAT}" \
+        -H "Content-Type: application/json" \
+        "${REPO_URL}")
+      
+      echo "$REPOS_RESPONSE" | jq '.'
+      
+      # Extract repository names and IDs
+      echo ""
+      echo "========================================="
+      echo "STEP 2: Repository Names and IDs"
+      echo "========================================="
+      echo "$REPOS_RESPONSE" | jq '.value[] | {name: .name, id: .id, remoteUrl: .remoteUrl}'
+      
+      echo ""
+      echo "========================================="
+      echo "STEP 3: Check if branch 'dev' exists in each repo"
+      echo "========================================="
+      
+      # Loop through each repository and check for dev branch
+      echo "$REPOS_RESPONSE" | jq -r '.value[] | .name' | while read repo_name; do
+        echo ""
+        echo "--- Repository: $repo_name ---"
+        
+        BRANCH_URL="${ORGANIZATION}${PROJECT}/_apis/git/repositories/${repo_name}/refs?filter=heads/dev&api-version=6.1"
+        BRANCH_RESPONSE=$(curl -s -u ":${GIT_PAT}" \
+          -H "Content-Type: application/json" \
+          "${BRANCH_URL}")
+        
+        BRANCH_COUNT=$(echo "$BRANCH_RESPONSE" | jq '.count')
+        
+        if [ "$BRANCH_COUNT" -gt 0 ]; then
+          echo "✅ Branch 'dev' EXISTS in repository: $repo_name"
+          echo "Branch details:"
+          echo "$BRANCH_RESPONSE" | jq '.value[] | {name: .name, objectId: .objectId}'
+        else
+          echo "❌ Branch 'dev' DOES NOT EXIST in repository: $repo_name"
+        fi
+      done
+      
+      echo ""
+      echo "========================================="
+      echo "STEP 4: Get Default Branches"
+      echo "========================================="
+      
+      echo "$REPOS_RESPONSE" | jq -r '.value[] | .name' | while read repo_name; do
+        DEFAULT_BRANCH=$(curl -s -u ":${GIT_PAT}" \
+          -H "Content-Type: application/json" \
+          "${ORGANIZATION}${PROJECT}/_apis/git/repositories/${repo_name}?api-version=6.1" | jq -r '.defaultBranch')
+        
+        echo "Repository: $repo_name - Default branch: $DEFAULT_BRANCH"
+      done
+      
+    env:
+      GIT_PAT: $(GIT_PAT)
+    displayName: 'Diagnose repositories and branches'
+    
+- job: Trigger_Backend
+  displayName: '🚀 Trigger Backend Pipeline'
+  steps:
+  - checkout: none
+  - bash: |
+      #!/bin/bash
+      
+      # Variables
+      ORGANIZATION="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}"
+      PROJECT="${SYSTEM_TEAMPROJECT}"
+      PIPELINE_ID="111"  # backend pipeline ID in CICD repo
       BRANCH="${{ parameters.BRANCH }}"
       CREATE_PR="${{ parameters.CREATE_PR }}"
       SHOULD_RELEASE="${{ parameters.SHOULD_RELEASE }}"
       
-      # Repository GUIDs from diagnostic
-      BACKEND_REPO_GUID="49a3a49b-79c3-4601-b22e-87e268e22ae7"
-      BACKEND_REPO_NAME="SadganErpApi"
+      # The repository that contains the source code (not the pipeline repo)
+      # This should be the repo that CI-backend.yml clones
+      SOURCE_REPO="SadganErp/SadganErpApi"
       
-      FRONTEND_REPO_GUID="e64409f1-4ad5-4022-b859-71b07f18e860"
-      FRONTEND_REPO_NAME="Sadgan.Erp.Panel"
+      echo "=== Triggering Backend Pipeline ==="
+      echo "Pipeline ID: ${PIPELINE_ID} (in CICD repo)"
+      echo "Source Repository: ${SOURCE_REPO}"
+      echo "Branch: ${BRANCH}"
       
-      # Get project ID
-      echo "Getting project ID..."
-      PROJECT_URL="${ORGANIZATION}_apis/projects/SadganErp?api-version=5.1"
-      PROJECT_RESPONSE=$(curl -s -u ":${GIT_PAT}" "${PROJECT_URL}")
-      PROJECT_ID=$(echo "$PROJECT_RESPONSE" | grep -o '"id":"[^"]*"' | head -1 | cut -d':' -f2 | tr -d '"')
-      echo "Project ID: ${PROJECT_ID}"
+      # Build the API URL
+      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=6.1"
+      echo "URL: ${URL}"
       
-      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=5.1"
-      
-      # Approach 1: No repository specified
-      echo ""
-      echo "========================================="
-      echo "APPROACH 1: No repository specified"
-      echo "========================================="
-      
-      cat > payload1.json << EOF
+      # Create JSON payload with repository information
+      cat > payload.json << EOF
       {
         "definition": {
           "id": ${PIPELINE_ID}
         },
         "sourceBranch": "refs/heads/${BRANCH}",
-        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
-      }
-      EOF
-      
-      echo "Payload:"
-      cat payload1.json
-      echo ""
-      
-      RESPONSE1=$(curl -s -X POST \
-        -u ":${GIT_PAT}" \
-        -H "Content-Type: application/json" \
-        -d @payload1.json \
-        "${URL}")
-      
-      echo "Response: ${RESPONSE1}"
-      
-      # Approach 2: Repository with GUID only
-      echo ""
-      echo "========================================="
-      echo "APPROACH 2: Repository with GUID only"
-      echo "========================================="
-      
-      cat > payload2.json << EOF
-      {
-        "definition": {
-          "id": ${PIPELINE_ID}
-        },
-        "sourceBranch": "refs/heads/${BRANCH}",
-        "repository": {
-          "id": "${BACKEND_REPO_GUID}",
-          "type": "TfsGit"
-        },
-        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
-      }
-      EOF
-      
-      echo "Payload:"
-      cat payload2.json
-      echo ""
-      
-      RESPONSE2=$(curl -s -X POST \
-        -u ":${GIT_PAT}" \
-        -H "Content-Type: application/json" \
-        -d @payload2.json \
-        "${URL}")
-      
-      echo "Response: ${RESPONSE2}"
-      
-      # Approach 3: Repository with name instead of GUID
-      echo ""
-      echo "========================================="
-      echo "APPROACH 3: Repository with name instead of GUID"
-      echo "========================================="
-      
-      cat > payload3.json << EOF
-      {
-        "definition": {
-          "id": ${PIPELINE_ID}
-        },
-        "sourceBranch": "refs/heads/${BRANCH}",
-        "repository": {
-          "id": "${BACKEND_REPO_NAME}",
-          "type": "TfsGit"
-        },
-        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
-      }
-      EOF
-      
-      echo "Payload:"
-      cat payload3.json
-      echo ""
-      
-      RESPONSE3=$(curl -s -X POST \
-        -u ":${GIT_PAT}" \
-        -H "Content-Type: application/json" \
-        -d @payload3.json \
-        "${URL}")
-      
-      echo "Response: ${RESPONSE3}"
-      
-      # Approach 4: Full repository with project
-      echo ""
-      echo "========================================="
-      echo "APPROACH 4: Full repository with project"
-      echo "========================================="
-      
-      cat > payload4.json << EOF
-      {
-        "definition": {
-          "id": ${PIPELINE_ID}
-        },
-        "sourceBranch": "refs/heads/${BRANCH}",
-        "repository": {
-          "id": "${BACKEND_REPO_GUID}",
-          "type": "TfsGit",
-          "name": "${BACKEND_REPO_NAME}",
-          "project": {
-            "id": "${PROJECT_ID}",
-            "name": "SadganErp"
+        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}",
+        "resources": {
+          "repositories": {
+            "self": {
+              "refName": "refs/heads/${BRANCH}",
+              "repository": {
+                "id": "49a3a49b-79c3-4601-b22e-87e268e22ae7",
+                "type": "TfsGit"
+              }
+            },
+            "versionRepo": {
+              "refName": "refs/heads/cicd",
+              "repository": {
+                "id": "cc58a0a1-cbab-49c0-baf7-297708d1656ccc58a0a1-cbab-49c0-baf7-297708d1656c",
+                "type": "TfsGit"
+              }
+            }
           }
-        },
-        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
+        }
       }
       EOF
       
       echo "Payload:"
-      cat payload4.json
+      cat payload.json
       echo ""
       
-      RESPONSE4=$(curl -s -X POST \
+      # Trigger the build using GIT_PAT
+      RESPONSE=$(curl -s -X POST \
         -u ":${GIT_PAT}" \
         -H "Content-Type: application/json" \
-        -d @payload4.json \
+        -d @payload.json \
         "${URL}")
       
-      echo "Response: ${RESPONSE4}"
+      echo "Response: ${RESPONSE}"
       
-      # Approach 5: Try without refs/heads prefix
-      echo ""
-      echo "========================================="
-      echo "APPROACH 5: Without refs/heads prefix"
-      echo "========================================="
-      
-      cat > payload5.json << EOF
-      {
-        "definition": {
-          "id": ${PIPELINE_ID}
-        },
-        "sourceBranch": "${BRANCH}",
-        "repository": {
-          "id": "${BACKEND_REPO_GUID}",
-          "type": "TfsGit"
-        },
-        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
-      }
-      EOF
-      
-      echo "Payload:"
-      cat payload5.json
-      echo ""
-      
-      RESPONSE5=$(curl -s -X POST \
-        -u ":${GIT_PAT}" \
-        -H "Content-Type: application/json" \
-        -d @payload5.json \
-        "${URL}")
-      
-      echo "Response: ${RESPONSE5}"
-      
-      # Approach 6: Use sourceVersion
-      echo ""
-      echo "========================================="
-      echo "APPROACH 6: Using sourceVersion"
-      echo "========================================="
-      
-      cat > payload6.json << EOF
-      {
-        "definition": {
-          "id": ${PIPELINE_ID}
-        },
-        "sourceBranch": "refs/heads/${BRANCH}",
-        "repository": {
-          "id": "${BACKEND_REPO_GUID}",
-          "type": "TfsGit"
-        },
-        "sourceVersion": {
-          "version": "${BRANCH}",
-          "versionType": "branch"
-        },
-        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
-      }
-      EOF
-      
-      echo "Payload:"
-      cat payload6.json
-      echo ""
-      
-      RESPONSE6=$(curl -s -X POST \
-        -u ":${GIT_PAT}" \
-        -H "Content-Type: application/json" \
-        -d @payload6.json \
-        "${URL}")
-      
-      echo "Response: ${RESPONSE6}"
+      # Extract build ID
+      if echo "$RESPONSE" | grep -q '"id":[0-9]'; then
+        BUILD_ID=$(echo "$RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        echo "✅ Backend pipeline triggered successfully! Build ID: ${BUILD_ID}"
+        echo "##vso[task.setvariable variable=BACKEND_RUN_ID;isOutput=true]${BUILD_ID}"
+      else
+        echo "❌ Failed to trigger backend pipeline"
+        if echo "$RESPONSE" | grep -q "message"; then
+          ERROR_MSG=$(echo "$RESPONSE" | grep -o '"message":"[^"]*"' | cut -d':' -f2- | tr -d '"')
+          echo "Error message: ${ERROR_MSG}"
+        fi
+        exit 1
+      fi
       
       # Clean up
-      rm -f payload*.json
+      rm -f payload.json
       
+    name: trigger_backend
+    displayName: 'Trigger Backend CI Pipeline'
     env:
       GIT_PAT: $(GIT_PAT)
-    displayName: 'Test all trigger approaches'
+
+- job: Trigger_Frontend
+  displayName: '🚀 Trigger Frontend Pipeline'
+  dependsOn: []
+  steps:
+  - checkout: none
+  - bash: |
+      #!/bin/bash
+      
+      # Variables
+      ORGANIZATION="${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}"
+      PROJECT="${SYSTEM_TEAMPROJECT}"
+      PIPELINE_ID="109"  # frontend pipeline ID in CICD repo
+      BRANCH="${{ parameters.BRANCH }}"
+      CREATE_PR="${{ parameters.CREATE_PR }}"
+      SHOULD_RELEASE="${{ parameters.SHOULD_RELEASE }}"
+      
+      # The repository that contains the source code (not the pipeline repo)
+      # This should be the repo that CI-front.yml clones
+      SOURCE_REPO="SadganErp/Sadgan.Erp.Panel" 
+      
+      echo "=== Triggering Frontend Pipeline ==="
+      echo "Pipeline ID: ${PIPELINE_ID} (in CICD repo)"
+      echo "Source Repository: ${SOURCE_REPO}"
+      echo "Branch: ${BRANCH}"
+      
+      # Build the API URL
+      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=6.1"
+      
+      # Create JSON payload with repository information
+      cat > payload.json << EOF
+      {
+        "definition": {
+          "id": ${PIPELINE_ID}
+        },
+        "sourceBranch": "refs/heads/${BRANCH}",
+        "repository": {
+           "id": "e64409f1-4ad5-4022-b859-71b07f18e860",
+           "type": "TfsGit"
+        },
+        "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
+      }
+      EOF
+      
+      echo "Payload:"
+      cat payload.json
+      echo ""
+      
+      # Trigger the build using GIT_PAT
+      RESPONSE=$(curl -s -X POST \
+        -u ":${GIT_PAT}" \
+        -H "Content-Type: application/json" \
+        -d @payload.json \
+        "${URL}")
+      
+      echo "Response: ${RESPONSE}"
+      
+      # Extract build ID
+      if echo "$RESPONSE" | grep -q '"id":[0-9]'; then
+        BUILD_ID=$(echo "$RESPONSE" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        echo "✅ Frontend pipeline triggered! Build ID: ${BUILD_ID}"
+        echo "##vso[task.setvariable variable=FRONTEND_RUN_ID;isOutput=true]${BUILD_ID}"
+      else
+        echo "❌ Failed to trigger frontend pipeline"
+        if echo "$RESPONSE" | grep -q "message"; then
+          ERROR_MSG=$(echo "$RESPONSE" | grep -o '"message":"[^"]*"' | cut -d':' -f2- | tr -d '"')
+          echo "Error message: ${ERROR_MSG}"
+        fi
+        exit 1
+      fi
+      
+      # Clean up
+      rm -f payload.json
+      
+    name: trigger_frontend
+    displayName: 'Trigger Frontend CI Pipeline'
+    env:
+      GIT_PAT: $(GIT_PAT)
+
+
+# Optional: Monitor job
+- job: Monitor_Pipelines
+  displayName: '📊 Monitor Pipeline Status'
+  dependsOn:
+    - Trigger_Backend
+    - Trigger_Frontend
+  condition: always()
+  variables:
+    backend_run_id: $[dependencies.Trigger_Backend.outputs['trigger_backend.BACKEND_RUN_ID']]
+    frontend_run_id: $[dependencies.Trigger_Frontend.outputs['trigger_frontend.FRONTEND_RUN_ID']]
+  steps:
+  - checkout: none
+  - bash: |
+      echo "📊 Pipeline Trigger Summary:"
+      echo "================================"
+      echo "Backend Run ID: $(backend_run_id)"
+      echo "Frontend Run ID: $(frontend_run_id)"
+      echo ""
+      echo "🔗 Backend URL: ${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}${SYSTEM_TEAMPROJECT}/_build/results?buildId=$(backend_run_id)"
+      echo "🔗 Frontend URL: ${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}${SYSTEM_TEAMPROJECT}/_build/results?buildId=$(frontend_run_id)"
+      echo "================================"
+    displayName: 'Display pipeline URLs'
+    condition: and(succeeded(), ne(variables['backend_run_id'], ''), ne(variables['frontend_run_id'], ''))      
