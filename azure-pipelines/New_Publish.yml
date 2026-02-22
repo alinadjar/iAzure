@@ -36,7 +36,7 @@ jobs:
   displayName: '🚀 Trigger Backend Pipeline'
   steps:
   - checkout: none
-  - template: azure-pipelines/templates/trigger-pipeline.yml
+  - template: azure-pipelines/CI-backend.yml
     parameters:
       PIPELINE_ID: $(BACKEND_PIPELINE_ID)
       BRANCH: ${{ parameters.BRANCH }}
@@ -49,7 +49,7 @@ jobs:
   dependsOn: []  # Run in parallel
   steps:
   - checkout: none
-  - template: azure-pipelines/templates/trigger-pipeline.yml
+  - template: azure-pipelines/CI-front.yml
     parameters:
       PIPELINE_ID: $(FRONTEND_PIPELINE_ID)
       BRANCH: ${{ parameters.BRANCH }}
