@@ -64,8 +64,9 @@ jobs:
         },
         "sourceBranch": "refs/heads/${BRANCH}",
         "repository": {
-          "id": "${SOURCE_REPO}",
-          "type": "TfsGit"
+           "id": "SadganErpApi",
+           "type": "TfsGit",
+           "name": "SadganErpApi"
         },
         "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
       }
@@ -142,8 +143,9 @@ jobs:
         },
         "sourceBranch": "refs/heads/${BRANCH}",
         "repository": {
-          "id": "${SOURCE_REPO}",
-          "type": "TfsGit"
+           "id": "Sadgan.Erp.Panel",
+           "type": "TfsGit",
+           "name": "SadganErp/Sadgan.Erp.Panel"
         },
         "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
       }
