@@ -136,6 +136,15 @@ jobs:
           "id": ${PIPELINE_ID}
         },
         "sourceBranch": "refs/heads/${BRANCH}",
+        "repository": {
+          "id": "49a3a49b-79c3-4601-b22e-87e268e22ae7",
+          "type": "TfsGit",
+          "name": "SadganErpApi",
+          "project": {
+            "id": "SadganErp",
+            "name": "SadganErp"
+          }
+        },
         "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
       }
       EOF
