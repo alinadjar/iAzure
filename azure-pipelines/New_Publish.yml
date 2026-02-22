@@ -2,6 +2,7 @@ trigger: none
 pr: none
 pool:
   name: 'WEB-1'
+
 resources:
   repositories:
     - repository: templates
@@ -43,7 +44,7 @@ jobs:
   displayName: '🚀 Trigger Backend Pipeline'
   steps:
   - checkout: none
-  - template: azure-pipelines/CI-backend.yml@templates
+  - template: azure-pipelines/templates/trigger-step.yml@templates
     parameters:
       PIPELINE_ID: $(BACKEND_PIPELINE_ID)
       BRANCH: ${{ parameters.BRANCH }}
@@ -56,7 +57,7 @@ jobs:
   dependsOn: []  # Run in parallel
   steps:
   - checkout: none
-  - template: azure-pipelines/CI-front.yml@templates
+  - template: azure-pipelines/templates/trigger-step.yml@templates
     parameters:
       PIPELINE_ID: $(FRONTEND_PIPELINE_ID)
       BRANCH: ${{ parameters.BRANCH }}
