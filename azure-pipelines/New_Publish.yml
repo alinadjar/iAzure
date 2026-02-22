@@ -138,8 +138,7 @@ jobs:
         "sourceBranch": "refs/heads/${BRANCH}",
         "repository": {
            "id": "49a3a49b-79c3-4601-b22e-87e268e22ae7",
-           "type": "TfsGit",
-           "name": "SadganErpApi"
+           "type": "TfsGit"
         },
         "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
       }
@@ -217,8 +216,7 @@ jobs:
         "sourceBranch": "refs/heads/${BRANCH}",
         "repository": {
            "id": "e64409f1-4ad5-4022-b859-71b07f18e860",
-           "type": "TfsGit",
-           "name": "Sadgan.Erp.Panel"
+           "type": "TfsGit"
         },
         "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
       }
@@ -258,3 +256,28 @@ jobs:
     displayName: 'Trigger Frontend CI Pipeline'
     env:
       GIT_PAT: $(GIT_PAT)
+
+
+# Optional: Monitor job
+- job: Monitor_Pipelines
+  displayName: '📊 Monitor Pipeline Status'
+  dependsOn:
+    - Trigger_Backend
+    - Trigger_Frontend
+  condition: always()
+  variables:
+    backend_run_id: $[dependencies.Trigger_Backend.outputs['trigger_backend.BACKEND_RUN_ID']]
+    frontend_run_id: $[dependencies.Trigger_Frontend.outputs['trigger_frontend.FRONTEND_RUN_ID']]
+  steps:
+  - checkout: none
+  - bash: |
+      echo "📊 Pipeline Trigger Summary:"
+      echo "================================"
+      echo "Backend Run ID: $(backend_run_id)"
+      echo "Frontend Run ID: $(frontend_run_id)"
+      echo ""
+      echo "🔗 Backend URL: ${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}${SYSTEM_TEAMPROJECT}/_build/results?buildId=$(backend_run_id)"
+      echo "🔗 Frontend URL: ${SYSTEM_TEAMFOUNDATIONCOLLECTIONURI}${SYSTEM_TEAMPROJECT}/_build/results?buildId=$(frontend_run_id)"
+      echo "================================"
+    displayName: 'Display pipeline URLs'
+    condition: and(succeeded(), ne(variables['backend_run_id'], ''), ne(variables['frontend_run_id'], ''))      
