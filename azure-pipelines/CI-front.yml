@@ -719,7 +719,13 @@ jobs:
           #         exit 1
           #     fi
           # done
-    
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'front-build-vars'
+        publishLocation: 'Container'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
     - bash: |
         configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
