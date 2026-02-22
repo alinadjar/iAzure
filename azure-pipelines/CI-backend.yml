@@ -57,10 +57,7 @@ resources:
     type: git
     name: SadganErp/CICD
     ref: refs/heads/cicd      # or refs/tags/v1.2.3, whatever branch you want
-  - repository: self          # This is the source code repo
-    type: git
-    name: SadganErp/SadganErpApi
-    ref: refs/heads/${{ parameters.BRANCH }}
+
 # ──────────────────────────────────────────────────────────────────────
 # 2. Check out *both* repos
 # ──────────────────────────────────────────────────────────────────────
