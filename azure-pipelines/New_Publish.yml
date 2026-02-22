@@ -1,4 +1,5 @@
 trigger: none
+pr: none
 pool:
   name: 'WEB-1'
 resources:
