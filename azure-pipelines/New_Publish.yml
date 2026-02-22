@@ -42,7 +42,7 @@ jobs:
       echo "========================================="
       echo "STEP 1: List ALL repositories in project"
       echo "========================================="
-      REPO_URL="${ORGANIZATION}${PROJECT}/_apis/git/repositories?api-version=5.1"
+      REPO_URL="${ORGANIZATION}${PROJECT}/_apis/git/repositories?api-version=6.1"
       
       echo "Fetching all repositories..."
       REPOS_RESPONSE=$(curl -s -u ":${GIT_PAT}" \
@@ -68,7 +68,7 @@ jobs:
         echo ""
         echo "--- Repository: $repo_name ---"
         
-        BRANCH_URL="${ORGANIZATION}${PROJECT}/_apis/git/repositories/${repo_name}/refs?filter=heads/dev&api-version=5.1"
+        BRANCH_URL="${ORGANIZATION}${PROJECT}/_apis/git/repositories/${repo_name}/refs?filter=heads/dev&api-version=6.1"
         BRANCH_RESPONSE=$(curl -s -u ":${GIT_PAT}" \
           -H "Content-Type: application/json" \
           "${BRANCH_URL}")
@@ -92,7 +92,7 @@ jobs:
       echo "$REPOS_RESPONSE" | jq -r '.value[] | .name' | while read repo_name; do
         DEFAULT_BRANCH=$(curl -s -u ":${GIT_PAT}" \
           -H "Content-Type: application/json" \
-          "${ORGANIZATION}${PROJECT}/_apis/git/repositories/${repo_name}?api-version=5.1" | jq -r '.defaultBranch')
+          "${ORGANIZATION}${PROJECT}/_apis/git/repositories/${repo_name}?api-version=6.1" | jq -r '.defaultBranch')
         
         echo "Repository: $repo_name - Default branch: $DEFAULT_BRANCH"
       done
@@ -126,7 +126,7 @@ jobs:
       echo "Branch: ${BRANCH}"
       
       # Build the API URL
-      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=7.1"
+      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=6.1"
       echo "URL: ${URL}"
       
       # Create JSON payload with repository information
@@ -210,7 +210,7 @@ jobs:
       echo "Branch: ${BRANCH}"
       
       # Build the API URL
-      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=7.1"
+      URL="${ORGANIZATION}${PROJECT}/_apis/build/builds?api-version=6.1"
       
       # Create JSON payload with repository information
       cat > payload.json << EOF
