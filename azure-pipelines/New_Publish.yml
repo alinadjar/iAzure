@@ -60,7 +60,6 @@ jobs:
         "definition": {
           "id": ${PIPELINE_ID}
         },
-        "sourceBranch": "refs/heads/${BRANCH}",
         "parameters": "{\"CREATE_PR\": \"${CREATE_PR}\", \"SHOULD_RELEASE\": \"${SHOULD_RELEASE}\", \"BRANCH\": \"${BRANCH}\"}"
       }
       EOF
