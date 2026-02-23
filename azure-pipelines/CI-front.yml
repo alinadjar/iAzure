@@ -30,7 +30,7 @@ parameters:
 
 
 
-variables:  
+variables:
   solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
   buildPlatform: 'Any CPU'
   buildConfiguration: 'Release'
@@ -47,6 +47,9 @@ variables:
   isBranchMASTER:  ${{ eq(parameters.BRANCH, 'master') }} 
   isCreatePR:      ${{ eq(parameters.CREATE_PR, 'YES') }} 
   CURRENT_BRANCH:  ${{ parameters.BRANCH }}
+  System.Diagnostics.DefaultLogDirectory: '$(Agent.TempDirectory)/diag'
+  SYSTEM_DEBUG: false
+  VSTS_DEBUG: false
 
 
 # ──────────────────────────────────────────────────────────────────────
