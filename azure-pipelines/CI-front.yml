@@ -237,8 +237,8 @@ jobs:
           git config --global pack.threads 1
           git config --global pull.rebase false
           
-          SOURCE_BRANCH="refs/head/$(init.SOURCE_BRANCH)"
-          TARGET_BRANCH="refs/head/$(init.TARGET_BRANCH)"
+          SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
+          TARGET_BRANCH="$(init.TARGET_BRANCH)"
           
           # Define all repositories to process
           REPOSITORIES=(
