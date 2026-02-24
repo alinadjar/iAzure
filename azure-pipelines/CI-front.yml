@@ -612,30 +612,6 @@ jobs:
           fi
           echo "========================================="
     
-    
-    # - task: Bash@3
-    #   displayName: 'Force merge  for 1_Configs'
-    #   condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
-    #   inputs:
-    #     targetType: 'inline'
-    #     script: |
-    #       # Clone both branches
-    #       git clone http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganShared/_git/1_Configs
-    #       cd 1_Configs
-
-    #       SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
-    #       TARGET_BRANCH="$(init.TARGET_BRANCH)"
-          
-    #       # Fetch both branches
-    #       git fetch origin $SOURCE_BRANCH $TARGET_BRANCH
-          
-    #       # Perform merge locally
-    #       git checkout $TARGET_BRANCH
-    #       git merge origin/dev --no-ff -m "BOT: Force sync $SOURCE_BRANCH → $TARGET_BRANCH"
-          
-    #       # Push the merge (this is the critical write operation)
-    #       git push origin $TARGET_BRANCH
-
     - task: Bash@3
       displayName: 'Force merge for 1_Configs (Safe Mode)'
       condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
