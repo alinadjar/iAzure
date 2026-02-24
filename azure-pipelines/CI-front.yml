@@ -287,7 +287,7 @@ jobs:
             
             # Construct project-specific API URL
             PROJECT_API_URL="$GIT_BASE_URL/$PROJECT_NAME/_apis"
-            echo "PROJECT_API_URL: $PROJECT_API_URL"
+            echo "========  PROJECT_API_URL: $PROJECT_API_URL"
             
             # Get repository ID from REST API using project-specific URL
             echo "  🔍 Looking up repository ID for: $SIMPLE_REPO_NAME"
@@ -312,6 +312,7 @@ jobs:
             
             # Construct Git URL for this repository
             REPO_GIT_URL="$GIT_BASE_URL/$REPO_NAME"
+            echo "======== REPO_GIT_URL: $REPO_GIT_URL"
             
             # Validate source branch using Git
             echo "  🔍 Validating source branch via Git: $SOURCE_BRANCH"
