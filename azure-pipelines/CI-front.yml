@@ -202,6 +202,22 @@ jobs:
             return 0
           }
           
+          # Function to check if a branch exists in a repository
+          check_branch_exists() {
+            local repo_id="$1"
+            local branch_name="$2"
+            
+            local branch_url="$API_URL/git/repositories/$repo_id/refs?filter=heads/$branch_name&api-version=6.0"
+            local branch_check=$(call_api "$branch_url" 2>/dev/null || echo '{"count":0}')
+            
+            local count=$(echo "$branch_check" | jq -r '.count')
+            if [ "$count" -gt 0 ]; then
+              return 0
+            else
+              return 1
+            fi
+          }
+          
           # Git configuration
           git config --global user.email "S_Bot_Azure@sadgan.int"
           git config --global user.name "S_Bot_Azure"
@@ -240,6 +256,7 @@ jobs:
           declare -A PR_IDS
           declare -A MERGE_STATUSES
           declare -A SOURCE_COMMITS
+          declare -A REPO_SKIPPED
           
           # First pass: Check all repos for conflicts before any merges
           echo ""
@@ -275,6 +292,26 @@ jobs:
             fi
             echo "  ✅ Found repository ID: $REPO_ID"
             REPO_IDS["$REPO_NAME"]="$REPO_ID"
+            
+            # Validate source branch exists
+            echo "  🔍 Validating source branch: $SOURCE_BRANCH"
+            if ! check_branch_exists "$REPO_ID" "$SOURCE_BRANCH"; then
+              echo "  ⚠️ Source branch '$SOURCE_BRANCH' does NOT exist in this repository"
+              echo "  ⚠️ Skipping this repository for PR creation"
+              REPO_SKIPPED["$REPO_NAME"]="source_branch_missing"
+              continue
+            fi
+            echo "  ✅ Source branch exists"
+            
+            # Validate target branch exists
+            echo "  🔍 Validating target branch: $TARGET_BRANCH"
+            if ! check_branch_exists "$REPO_ID" "$TARGET_BRANCH"; then
+              echo "  ⚠️ Target branch '$TARGET_BRANCH' does NOT exist in this repository"
+              echo "  ⚠️ Skipping this repository for PR creation"
+              REPO_SKIPPED["$REPO_NAME"]="target_branch_missing"
+              continue
+            fi
+            echo "  ✅ Target branch exists"
             
             # Check for existing PR
             echo "  🔍 Checking for existing PRs..."
@@ -340,7 +377,27 @@ jobs:
             echo "  ✅ Initial merge status: $MERGE_STATUS"
           done
           
-          # Second pass: Wait for all merges to be ready
+          # Filter out skipped repositories
+          ACTIVE_REPOS=()
+          for REPO_NAME in "${REPOSITORIES[@]}"; do
+            if [ -z "${REPO_SKIPPED["$REPO_NAME"]}" ]; then
+              ACTIVE_REPOS+=("$REPO_NAME")
+            else
+              echo ""
+              echo "⚠️ Skipping $REPO_NAME - Reason: ${REPO_SKIPPED["$REPO_NAME"]}"
+            fi
+          done
+          
+          if [ ${#ACTIVE_REPOS[@]} -eq 0 ]; then
+            echo ""
+            echo "❌ No active repositories to process. All were skipped due to missing branches."
+            exit 0
+          fi
+          
+          echo ""
+          echo "✅ Active repositories to process: ${#ACTIVE_REPOS[@]}"
+          
+          # Second pass: Wait for all merges to be ready (only active repos)
           echo ""
           echo "========================================="
           echo "PHASE 2: WAITING FOR ALL MERGES TO BE READY"
@@ -357,7 +414,7 @@ jobs:
             echo ""
             echo "--- Check attempt $ATTEMPT/$MAX_ATTEMPTS ---"
             
-            for REPO_NAME in "${REPOSITORIES[@]}"; do
+            for REPO_NAME in "${ACTIVE_REPOS[@]}"; do
               REPO_ID="${REPO_IDS["$REPO_NAME"]}"
               PR_ID="${PR_IDS["$REPO_NAME"]}"
               
@@ -403,14 +460,14 @@ jobs:
           if [ "$ALL_READY" = false ]; then
             echo "❌ Timeout waiting for merges to be ready"
             echo "Current statuses:"
-            for REPO_NAME in "${REPOSITORIES[@]}"; do
+            for REPO_NAME in "${ACTIVE_REPOS[@]}"; do
               echo "  $REPO_NAME: ${MERGE_STATUSES["$REPO_NAME"]}"
             done
             exit 1
           fi
           
           echo ""
-          echo "✅ ALL REPOSITORIES READY FOR MERGE"
+          echo "✅ ALL ACTIVE REPOSITORIES READY FOR MERGE"
           
           # Third pass: Approve and complete PRs sequentially
           echo ""
@@ -419,10 +476,10 @@ jobs:
           echo "========================================="
           
           COMPLETED_COUNT=0
-          for REPO_NAME in "${REPOSITORIES[@]}"; do
+          for REPO_NAME in "${ACTIVE_REPOS[@]}"; do
             COMPLETED_COUNT=$((COMPLETED_COUNT + 1))
             echo ""
-            echo "[$COMPLETED_COUNT/${#REPOSITORIES[@]}] Processing repository: $REPO_NAME"
+            echo "[$COMPLETED_COUNT/${#ACTIVE_REPOS[@]}] Processing repository: $REPO_NAME"
             echo "-----------------------------------------"
             
             REPO_ID="${REPO_IDS["$REPO_NAME"]}"
@@ -500,7 +557,10 @@ jobs:
           
           echo ""
           echo "========================================="
-          echo "✅ ALL $COMPLETED_COUNT REPOSITORIES PROCESSED SUCCESSFULLY"
+          echo "✅ ALL $COMPLETED_COUNT ACTIVE REPOSITORIES PROCESSED SUCCESSFULLY"
+          if [ ${#REPOSITORIES[@]} -ne ${#ACTIVE_REPOS[@]} ]; then
+            echo "⚠️ Skipped repositories: $(( ${#REPOSITORIES[@]} - ${#ACTIVE_REPOS[@]} ))"
+          fi
           echo "========================================="
     
     
