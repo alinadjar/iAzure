@@ -574,7 +574,7 @@ jobs:
               \"completionOptions\": {
                 \"bypassPolicy\": true,
                 \"bypassReason\": \"Automated pr - sequential merge\",
-                \"mergeStrategy\": \"noFastForward\",
+                \"mergeStrategy\": \"rebaseAndFastForward\",
                 \"deleteSourceBranch\": false
               }
             }"
