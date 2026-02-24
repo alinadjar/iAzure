@@ -358,14 +358,14 @@ jobs:
               }"
               
               # Retry loop for PR creation (REST API might lag behind Git)
-              MAX_PR_RETRIES=5
+              MAX_PR_RETRIES=14
               PR_RETRY=0
               PR_CREATED=false
               
               while [ $PR_RETRY -lt $MAX_PR_RETRIES ] && [ "$PR_CREATED" = false ]; do
                 if [ $PR_RETRY -gt 0 ]; then
                   echo "  ⚠️ Retry $PR_RETRY creating PR (waiting for REST API cache to update)..."
-                  sleep 10
+                  sleep 15
                 fi
                 
                 # Attempt PR creation via REST API with cache-busting headers
