@@ -23,7 +23,6 @@ parameters:
   displayName: "Select Branch"
   values:
     - 'dev'
-    - 'devops'
     - 'alpha'
     - 'beta'
     - 'master'
