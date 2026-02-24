@@ -581,7 +581,7 @@ jobs:
               \"completionOptions\": {
                 \"bypassPolicy\": true,
                 \"bypassReason\": \"Automated pr - sequential merge\",
-                \"mergeStrategy\": \"squash\",
+                \"mergeStrategy\": \"noFastForward\",
                 \"deleteSourceBranch\": false
               }
             }"
