@@ -200,6 +200,35 @@ jobs:
             rm -f "$temp_file"
             return 0
           }
+
+          refresh_branch_cache() {
+            local repo_id="$1"
+            local branch_name="$2"
+            
+            echo "  🔄 Attempting to refresh branch cache..." >&2
+            
+            # First, try to get the current branch object ID
+            local branch_url="$API_URL/git/repositories/$repo_id/refs/heads/$branch_name?api-version=6.0"
+            local branch_info=$(call_api "$branch_url" 2>/dev/null || echo '{"value":[]}')
+            local object_id=$(echo "$branch_info" | jq -r '.value[0].objectId // ""')
+            
+            if [ -n "$object_id" ] && [ "$object_id" != "null" ]; then
+              # Perform a no-op update to refresh cache
+              local update_url="$API_URL/git/repositories/$repo_id/refs?api-version=6.0"
+              local update_body="[{
+                \"name\": \"refs/heads/$branch_name\",
+                \"oldObjectId\": \"$object_id\",
+                \"newObjectId\": \"$object_id\"
+              }]"
+              
+              # This will either succeed or return "staleOldObjectId" which also refreshes cache
+              call_api "$update_url" "POST" "$update_body" > /dev/null 2>&1 || true
+              echo "  ✅ Branch cache refresh attempted" >&2
+              return 0
+            fi
+            
+            return 1
+          }
           
           # Function to check if a branch exists with retry logic
           check_branch_exists() {
@@ -324,12 +353,44 @@ jobs:
             REPO_IDS["$REPO_NAME"]="$REPO_ID"
             
             # Validate source branch exists (with retry)
-            echo "  🔍 Validating source branch: $SOURCE_BRANCH"
+            # echo "  🔍 Validating source branch: $SOURCE_BRANCH"
+            # if ! check_branch_exists "$REPO_ID" "$SOURCE_BRANCH" 3; then
+            #   echo "  ⚠️ Source branch '$SOURCE_BRANCH' does NOT exist after 3 retries"
+            #   echo "  ⚠️ Skipping this repository for PR creation"
+            #   REPO_SKIPPED["$REPO_NAME"]="source_branch_missing"
+            #   continue
+            # fi
+            echo "  🔍 Validating target branch: $SOURCE_BRANCH"
             if ! check_branch_exists "$REPO_ID" "$SOURCE_BRANCH" 3; then
-              echo "  ⚠️ Source branch '$SOURCE_BRANCH' does NOT exist after 3 retries"
-              echo "  ⚠️ Skipping this repository for PR creation"
-              REPO_SKIPPED["$REPO_NAME"]="source_branch_missing"
-              continue
+              echo "  ⚠️ Target branch not detected after retries, attempting cache refresh..."
+              refresh_branch_cache "$REPO_ID" "$SOURCE_BRANCH"
+              
+              # Check again after refresh
+              sleep 2
+              if check_branch_exists "$REPO_ID" "$SOURCE_BRANCH" 2; then
+                echo "  ✅ Target branch now detected after cache refresh"
+              else
+                echo "  ⚠️ Target branch '$SOURCE_BRANCH' still not detected after refresh"
+                echo "  ⚠️ Skipping this repository for PR creation"
+                REPO_SKIPPED["$REPO_NAME"]="SOURCE_BRANCH_missing"
+                continue
+              fi
+            fi
+
+            if ! check_branch_exists "$REPO_ID" "$TARGET_BRANCH" 3; then
+              echo "  ⚠️ Target branch not detected after retries, attempting cache refresh..."
+              refresh_branch_cache "$REPO_ID" "$TARGET_BRANCH"
+              
+              # Check again after refresh
+              sleep 2
+              if check_branch_exists "$REPO_ID" "$TARGET_BRANCH" 2; then
+                echo "  ✅ Target branch now detected after cache refresh"
+              else
+                echo "  ⚠️ Target branch '$TARGET_BRANCH' still not detected after refresh"
+                echo "  ⚠️ Skipping this repository for PR creation"
+                REPO_SKIPPED["$REPO_NAME"]="target_branch_missing"
+                continue
+              fi
             fi
             
             # Get source branch details
@@ -337,13 +398,13 @@ jobs:
             SOURCE_BRANCH_IDS["$REPO_NAME"]=$(echo "$SOURCE_BRANCH_DETAILS" | jq -r '.value[0].objectId // "unknown"')
             
             # Validate target branch exists (with retry)
-            echo "  🔍 Validating target branch: $TARGET_BRANCH"
-            if ! check_branch_exists "$REPO_ID" "$TARGET_BRANCH" 3; then
-              echo "  ⚠️ Target branch '$TARGET_BRANCH' does NOT exist after 3 retries"
-              echo "  ⚠️ Skipping this repository for PR creation"
-              REPO_SKIPPED["$REPO_NAME"]="target_branch_missing"
-              continue
-            fi
+            # echo "  🔍 Validating target branch: $TARGET_BRANCH"
+            # if ! check_branch_exists "$REPO_ID" "$TARGET_BRANCH" 3; then
+            #   echo "  ⚠️ Target branch '$TARGET_BRANCH' does NOT exist after 3 retries"
+            #   echo "  ⚠️ Skipping this repository for PR creation"
+            #   REPO_SKIPPED["$REPO_NAME"]="target_branch_missing"
+            #   continue
+            # fi
             
             # Get target branch details
             TARGET_BRANCH_DETAILS=$(get_branch_details "$REPO_ID" "$TARGET_BRANCH")
