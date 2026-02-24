@@ -168,12 +168,17 @@ jobs:
             # Clean URL of any potential newlines or extra characters
             url=$(echo "$url" | tr -d '\n\r ')
             
+            # Add cache-control headers for all requests
             if [ "$method" = "GET" ]; then
               http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Cache-Control: no-cache" \
+                -H "Pragma: no-cache" \
                 -o "$temp_file" "$url")
             else
               http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
                 -H "Content-Type: application/json" \
+                -H "Cache-Control: no-cache" \
+                -H "Pragma: no-cache" \
                 -X "$method" \
                 -d "$data" \
                 -o "$temp_file" "$url")
@@ -200,39 +205,7 @@ jobs:
             rm -f "$temp_file"
             return 0
           }
-
-          refresh_branch_cache() {
-            local repo_id="$1"
-            local branch_name="$2"
-            
-            echo "  🔄 Attempting to refresh branch cache..." >&2
-            
-            # First, try to get the current branch object ID
-            local branch_url="$API_URL/git/repositories/$repo_id/refs/heads/$branch_name?api-version=6.0"
-            local branch_info=$(call_api "$branch_url" 2>/dev/null || echo '{"value":[]}')
-            local object_id=$(echo "$branch_info" | jq -r '.value[0].objectId // ""')
-            
-            if [ -n "$object_id" ] && [ "$object_id" != "null" ]; then
-              # Perform a no-op update to refresh cache
-              local update_url="$API_URL/git/repositories/$repo_id/refs?api-version=6.0"
-              local update_body="[{
-                \"name\": \"refs/heads/$branch_name\",
-                \"oldObjectId\": \"$object_id\",
-                \"newObjectId\": \"$object_id\"
-              }]"
-              
-              # This will either succeed or return "staleOldObjectId" which also refreshes cache
-              call_api "$update_url" "POST" "$update_body" > /dev/null 2>&1 || true
-              echo "  ✅ Branch cache refresh attempted" >&2
-              return 0
-            fi
-            
-            return 1
-          }
           
-          # Function to check if a branch exists with retry logic
-# Add this function to your script, replacing the existing check_branch_exists and refresh_branch_cache
-
           # Function to check if a branch exists with multiple strategies
           check_branch_exists() {
             local repo_id="$1"
@@ -294,7 +267,7 @@ jobs:
             return 1
           }
           
-          # Function to validate branch with fallback to direct PR attempt
+          # Function to validate branch with fallback
           validate_branch_with_fallback() {
             local repo_id="$1"
             local branch_name="$2"
@@ -313,7 +286,7 @@ jobs:
               echo "  ⚠️ Target branch validation failed, attempting final check..." >&2
               
               # Final attempt: Try to get branch info through a different API
-              local final_url="$API_URL/git/repositories/$repo_id/refs/heads/?api-version=6.0"
+              local final_url="$API_URL/git/repositories/$repo_id/refs/heads/?api-version=6.0&_=$(date +%s%N)"
               local all_branches=$(call_api "$final_url" 2>/dev/null || echo '{"value":[]}')
               
               # Check if branch exists in the list
@@ -326,23 +299,11 @@ jobs:
               fi
               
               # If we still can't find it, list available branches for debugging
-              echo "  📋 Available branches in repository:" >&2
+              echo "  📋 Available branches in repository (first 10):" >&2
               echo "$all_branches" | jq -r '.value[].name' | head -10 | sed 's/^/      /' >&2
             fi
             
             return 1
-          }
-          
-          # Function to get branch details including object ID
-          get_branch_details() {
-            local repo_id="$1"
-            local branch_name="$2"
-            
-            local cache_buster="&_=$(date +%s)"
-            local branch_url="$API_URL/git/repositories/$repo_id/refs?filter=heads/$branch_name&api-version=6.0$cache_buster"
-            local branch_check=$(call_api "$branch_url" 2>/dev/null || echo '{"count":0}')
-            
-            echo "$branch_check"
           }
           
           # Git configuration
@@ -384,8 +345,6 @@ jobs:
           declare -A MERGE_STATUSES
           declare -A SOURCE_COMMITS
           declare -A REPO_SKIPPED
-          declare -A SOURCE_BRANCH_IDS
-          declare -A TARGET_BRANCH_IDS
           
           # First pass: Check all repos for conflicts before any merges
           echo ""
@@ -403,7 +362,7 @@ jobs:
             
             # Get repository ID
             echo "  🔍 Looking up repository ID for: $SIMPLE_REPO_NAME"
-            REPOS_URL="$API_URL/git/repositories?api-version=6.0"
+            REPOS_URL="$API_URL/git/repositories?api-version=6.0&_=$(date +%s%N)"
             REPOS_RESPONSE=$(call_api "$REPOS_URL") || {
               echo "  ❌ Failed to get repositories list"
               exit 1
@@ -422,9 +381,7 @@ jobs:
             echo "  ✅ Found repository ID: $REPO_ID"
             REPO_IDS["$REPO_NAME"]="$REPO_ID"
             
-
             # Validate source branch
-            echo "  🔍 Validating source branch: $SOURCE_BRANCH"
             if ! validate_branch_with_fallback "$REPO_ID" "$SOURCE_BRANCH" "source" "$REPO_NAME"; then
               echo "  ⚠️ Source branch '$SOURCE_BRANCH' validation failed"
               echo "  ⚠️ Skipping this repository for PR creation"
@@ -433,7 +390,6 @@ jobs:
             fi
             
             # Validate target branch with special handling
-            echo "  🔍 Validating target branch: $TARGET_BRANCH"
             if ! validate_branch_with_fallback "$REPO_ID" "$TARGET_BRANCH" "target" "$REPO_NAME"; then
               echo "  ⚠️ Target branch '$TARGET_BRANCH' validation failed"
               echo "  ⚠️ Skipping this repository for PR creation"
@@ -441,27 +397,11 @@ jobs:
               continue
             fi
             
-            # If we get here, both branches validated
             echo "  ✅ Both branches validated successfully"
-
-
-            
-            # Get source branch details
-            SOURCE_BRANCH_DETAILS=$(get_branch_details "$REPO_ID" "$SOURCE_BRANCH")
-            SOURCE_BRANCH_IDS["$REPO_NAME"]=$(echo "$SOURCE_BRANCH_DETAILS" | jq -r '.value[0].objectId // "unknown"')
-            
-            
-            # Get target branch details
-            TARGET_BRANCH_DETAILS=$(get_branch_details "$REPO_ID" "$TARGET_BRANCH")
-            TARGET_BRANCH_IDS["$REPO_NAME"]=$(echo "$TARGET_BRANCH_DETAILS" | jq -r '.value[0].objectId // "unknown"')
-            
-            echo "  ✅ Both branches exist"
-            echo "     Source branch object ID: ${SOURCE_BRANCH_IDS["$REPO_NAME"]}"
-            echo "     Target branch object ID: ${TARGET_BRANCH_IDS["$REPO_NAME"]}"
             
             # Check for existing PR
             echo "  🔍 Checking for existing PRs..."
-            PR_SEARCH_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=6.0"
+            PR_SEARCH_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=6.0&_=$(date +%s%N)"
             PR_SEARCH=$(call_api "$PR_SEARCH_URL") || {
               echo "  ❌ Failed to search PRs"
               exit 1
@@ -474,8 +414,8 @@ jobs:
               echo "  ⚠️ Active PR exists: $EXISTING_PR"
               PR_IDS["$REPO_NAME"]="$EXISTING_PR"
             else
-              # Create new PR
-              echo "  🆕 Creating new PR with cache-busting headers..."
+              # Create new PR with cache-busting headers
+              echo "  🆕 Creating new PR..."
               PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?api-version=6.0"
               PR_TITLE="BOT auto pr from $SOURCE_BRANCH to $TARGET_BRANCH"
               PR_BODY="{
@@ -484,29 +424,17 @@ jobs:
                 \"title\": \"$PR_TITLE\"
               }"
               
-              # PR_RESPONSE=$(call_api "$PR_URL" "POST" "$PR_BODY") || {
-              #   echo "  ❌ Failed to create PR for $REPO_NAME"
-              #   exit 1
-              # }
-              # Add a custom header to bypass cache
+              # Use direct curl with cache headers
               PR_RESPONSE=$(curl -s -u ":$GIT_PAT" \
                 -H "Content-Type: application/json" \
-                -H "Cache-Control: no-cache" \
+                -H "Cache-Control: no-cache, no-store" \
                 -H "Pragma: no-cache" \
+                -H "Expires: 0" \
                 -X POST \
                 -d "$PR_BODY" \
                 "$PR_URL")
               
-              # PR_ID=$(echo "$PR_RESPONSE" | jq -r '.pullRequestId')
-              
-              # if [ -z "$PR_ID" ] || [ "$PR_ID" = "null" ]; then
-              #   echo "  ❌ Failed to create PR - invalid response"
-              #   echo "  Response: $PR_RESPONSE"
-              #   exit 1
-              # fi
-              # echo "  ✅ PR created with ID: $PR_ID"
-              # PR_IDS["$REPO_NAME"]="$PR_ID"
-              # Check if PR creation succeeded despite validation warning
+              # Check if PR creation succeeded
               if echo "$PR_RESPONSE" | jq -e '.pullRequestId' > /dev/null 2>&1; then
                 PR_ID=$(echo "$PR_RESPONSE" | jq -r '.pullRequestId')
                 echo "  ✅ PR created successfully with ID: $PR_ID"
@@ -514,9 +442,11 @@ jobs:
               else
                 # Check if error is about branch not existing
                 if echo "$PR_RESPONSE" | grep -q "TF401398"; then
-                  echo "  ❌ Branch still not recognized by PR API"
+                  echo "  ❌ Branch still not recognized by PR API despite validation"
                   echo "  Response: $PR_RESPONSE"
-                  exit 1
+                  echo "  ⚠️ Skipping this repository"
+                  REPO_SKIPPED["$REPO_NAME"]="branch_not_recognized"
+                  continue
                 else
                   echo "  ❌ Failed to create PR - unexpected error"
                   echo "  Response: $PR_RESPONSE"
@@ -527,7 +457,7 @@ jobs:
             
             # Quick check for immediate conflicts
             echo "  🔍 Checking initial merge status..."
-            PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/${PR_IDS["$REPO_NAME"]}?api-version=6.0"
+            PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/${PR_IDS["$REPO_NAME"]}?api-version=6.0&_=$(date +%s%N)"
             PR_DETAILS=$(call_api "$PR_URL") || {
               echo "  ❌ Failed to get PR details"
               exit 1
@@ -561,14 +491,14 @@ jobs:
           
           if [ ${#ACTIVE_REPOS[@]} -eq 0 ]; then
             echo ""
-            echo "❌ No active repositories to process. All were skipped due to missing branches."
+            echo "❌ No active repositories to process. All were skipped."
             exit 0
           fi
           
           echo ""
           echo "✅ Active repositories to process: ${#ACTIVE_REPOS[@]}"
           
-          # Second pass: Wait for all merges to be ready (only active repos)
+          # Second pass: Wait for all merges to be ready
           echo ""
           echo "========================================="
           echo "PHASE 2: WAITING FOR ALL MERGES TO BE READY"
@@ -593,7 +523,7 @@ jobs:
               REPO_ID_CLEAN=$(clean_repo_id "$REPO_ID")
               PR_ID_CLEAN=$(echo "$PR_ID" | tr -d '\n\r ')
               
-              PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0"
+              PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0&_=$(date +%s%N)"
               PR_DETAILS=$(call_api "$PR_URL") || {
                 echo "  ⚠️ Failed to get PR details for $REPO_NAME, will retry..."
                 ALL_READY=false
@@ -663,7 +593,7 @@ jobs:
             
             # Get current user identity
             echo "  🔍 Getting PR details for approval..."
-            PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0"
+            PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0&_=$(date +%s%N)"
             PR_DETAILS=$(call_api "$PR_URL") || {
               echo "  ❌ Failed to get PR details"
               exit 1
