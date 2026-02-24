@@ -380,6 +380,19 @@ jobs:
             fi
             echo "  ✅ Found repository ID: $REPO_ID"
             REPO_IDS["$REPO_NAME"]="$REPO_ID"
+
+            # Get current commit of alpha
+            COMMIT=$(git rev-parse origin/alpha)
+            
+            # Force update (oldObjectId = current to make it a no-op change but touch metadata)
+            curl -u ":$GIT_PAT" -X POST \
+              -H "Content-Type: application/json" \
+              -d '{
+                "name": "refs/heads/alpha",
+                "oldObjectId": "'"$COMMIT"'",
+                "newObjectId": "'"$COMMIT"'"
+              }' \
+              "$API_URL/git/repositories/$REPO_ID/refs?api-version=6.0"
             
             # Validate source branch
             if ! validate_branch_with_fallback "$REPO_ID" "$SOURCE_BRANCH" "source" "$REPO_NAME"; then
