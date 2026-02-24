@@ -580,7 +580,7 @@ jobs:
               \"completionOptions\": {
                 \"bypassPolicy\": true,
                 \"bypassReason\": \"Automated pr - sequential merge\",
-                \"mergeStrategy\": \"semiLinear\",
+                \"mergeStrategy\": \"rebaseAndFastForward\",
                 \"deleteSourceBranch\": false
               }
             }"
