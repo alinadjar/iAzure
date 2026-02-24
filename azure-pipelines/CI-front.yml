@@ -620,115 +620,115 @@ jobs:
           fi
           echo "========================================="
     
-    - task: Bash@3
-      displayName: 'Force merge for 1_Configs (Safe Mode)'
-      condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
-      inputs:
-        targetType: 'inline'
-        script: |
-          set -e  # Exit immediately on any error
+    # - task: Bash@3
+    #   displayName: 'Force merge for 1_Configs (Safe Mode)'
+    #   condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
+    #   inputs:
+    #     targetType: 'inline'
+    #     script: |
+    #       set -e  # Exit immediately on any error
           
-          echo "🔄 Starting force merge for 1_Configs (SAFE MODE)..."
-          echo "⚠️ This step will FAIL if any conflict is detected"
+    #       echo "🔄 Starting force merge for 1_Configs (SAFE MODE)..."
+    #       echo "⚠️ This step will FAIL if any conflict is detected"
           
-          # Create a unique temp directory
-          TEMP_DIR=$(mktemp -d)
-          cd "$TEMP_DIR"
-          echo "📁 Working in temp directory: $TEMP_DIR"
+    #       # Create a unique temp directory
+    #       TEMP_DIR=$(mktemp -d)
+    #       cd "$TEMP_DIR"
+    #       echo "📁 Working in temp directory: $TEMP_DIR"
           
-          # Clone the repository
-          echo "📦 Cloning 1_Configs..."
-          git clone http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganShared/_git/1_Configs
-          cd 1_Configs
+    #       # Clone the repository
+    #       echo "📦 Cloning 1_Configs..."
+    #       git clone http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganShared/_git/1_Configs
+    #       cd 1_Configs
 
-          SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
-          TARGET_BRANCH="$(init.TARGET_BRANCH)"
+    #       SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
+    #       TARGET_BRANCH="$(init.TARGET_BRANCH)"
           
-          echo "🌿 Source branch: $SOURCE_BRANCH"
-          echo "🌿 Target branch: $TARGET_BRANCH"
+    #       echo "🌿 Source branch: $SOURCE_BRANCH"
+    #       echo "🌿 Target branch: $TARGET_BRANCH"
           
-          # Fetch both branches
-          echo "📡 Fetching branches..."
-          git fetch origin $SOURCE_BRANCH $TARGET_BRANCH
+    #       # Fetch both branches
+    #       echo "📡 Fetching branches..."
+    #       git fetch origin $SOURCE_BRANCH $TARGET_BRANCH
           
-          # Check if branches exist
-          if ! git rev-parse --verify "origin/$SOURCE_BRANCH" >/dev/null 2>&1; then
-            echo "❌ ERROR: Source branch '$SOURCE_BRANCH' does not exist"
-            exit 1
-          fi
+    #       # Check if branches exist
+    #       if ! git rev-parse --verify "origin/$SOURCE_BRANCH" >/dev/null 2>&1; then
+    #         echo "❌ ERROR: Source branch '$SOURCE_BRANCH' does not exist"
+    #         exit 1
+    #       fi
           
-          if ! git rev-parse --verify "origin/$TARGET_BRANCH" >/dev/null 2>&1; then
-            echo "❌ ERROR: Target branch '$TARGET_BRANCH' does not exist"
-            exit 1
-          fi
+    #       if ! git rev-parse --verify "origin/$TARGET_BRANCH" >/dev/null 2>&1; then
+    #         echo "❌ ERROR: Target branch '$TARGET_BRANCH' does not exist"
+    #         exit 1
+    #       fi
           
-          # Check if merge is even possible (no conflicts)
-          echo "🔍 Pre-validating merge for conflicts..."
+    #       # Check if merge is even possible (no conflicts)
+    #       echo "🔍 Pre-validating merge for conflicts..."
           
-          # Checkout target branch
-          git checkout $TARGET_BRANCH
+    #       # Checkout target branch
+    #       git checkout $TARGET_BRANCH
           
-          # Dry-run merge to detect conflicts without actually merging
-          echo "🔍 Performing dry-run merge to detect conflicts..."
-          if ! git merge --no-commit --no-ff "origin/$SOURCE_BRANCH"; then
-            echo "❌ CONFLICT DETECTED during dry-run!"
-            echo ""
-            echo "========================================="
-            echo "CONFLICT DETAILS:"
-            echo "========================================="
-            git status
-            echo ""
-            echo "Conflicted files:"
-            git diff --name-only --diff-filter=U
-            echo ""
-            echo "========================================="
-            echo "⚠️ Aborting merge due to conflicts"
-            echo "❌ Pipeline will stop here as requested (safe mode)"
+    #       # Dry-run merge to detect conflicts without actually merging
+    #       echo "🔍 Performing dry-run merge to detect conflicts..."
+    #       if ! git merge --no-commit --no-ff "origin/$SOURCE_BRANCH"; then
+    #         echo "❌ CONFLICT DETECTED during dry-run!"
+    #         echo ""
+    #         echo "========================================="
+    #         echo "CONFLICT DETAILS:"
+    #         echo "========================================="
+    #         git status
+    #         echo ""
+    #         echo "Conflicted files:"
+    #         git diff --name-only --diff-filter=U
+    #         echo ""
+    #         echo "========================================="
+    #         echo "⚠️ Aborting merge due to conflicts"
+    #         echo "❌ Pipeline will stop here as requested (safe mode)"
             
-            # Abort the dry-run merge
-            git merge --abort
+    #         # Abort the dry-run merge
+    #         git merge --abort
             
-            # Clean up
-            cd /
-            rm -rf "$TEMP_DIR"
+    #         # Clean up
+    #         cd /
+    #         rm -rf "$TEMP_DIR"
             
-            # Exit with error to stop the pipeline
-            exit 1
-          else
-            echo "✅ No conflicts detected in dry-run!"
+    #         # Exit with error to stop the pipeline
+    #         exit 1
+    #       else
+    #         echo "✅ No conflicts detected in dry-run!"
             
-            # Abort the dry-run merge
-            git merge --abort
+    #         # Abort the dry-run merge
+    #         git merge --abort
             
-            # Now perform the actual merge (safe because dry-run passed)
-            echo "🔄 Performing actual merge (safe - no conflicts detected)..."
-            git merge "origin/$SOURCE_BRANCH" --no-ff -m "BOT: Force sync $SOURCE_BRANCH → $TARGET_BRANCH"
+    #         # Now perform the actual merge (safe because dry-run passed)
+    #         echo "🔄 Performing actual merge (safe - no conflicts detected)..."
+    #         git merge "origin/$SOURCE_BRANCH" --no-ff -m "BOT: Force sync $SOURCE_BRANCH → $TARGET_BRANCH"
             
-            # Push the merge
-            echo "📤 Pushing merge to remote..."
-            git push origin $TARGET_BRANCH
+    #         # Push the merge
+    #         echo "📤 Pushing merge to remote..."
+    #         git push origin $TARGET_BRANCH
             
-            echo "✅ Force merge completed successfully"
-          fi
+    #         echo "✅ Force merge completed successfully"
+    #       fi
           
-          # Verify the merge was pushed
-          echo "🔍 Verifying merge was successful..."
-          git fetch origin $TARGET_BRANCH
-          LOCAL_COMMIT=$(git rev-parse HEAD)
-          REMOTE_COMMIT=$(git rev-parse origin/$TARGET_BRANCH)
+    #       # Verify the merge was pushed
+    #       echo "🔍 Verifying merge was successful..."
+    #       git fetch origin $TARGET_BRANCH
+    #       LOCAL_COMMIT=$(git rev-parse HEAD)
+    #       REMOTE_COMMIT=$(git rev-parse origin/$TARGET_BRANCH)
           
-          if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
-            echo "✅ Verification successful - remote branch updated"
-          else
-            echo "❌ Verification failed - remote branch not updated"
-            exit 1
-          fi
+    #       if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
+    #         echo "✅ Verification successful - remote branch updated"
+    #       else
+    #         echo "❌ Verification failed - remote branch not updated"
+    #         exit 1
+    #       fi
           
-          # Clean up
-          cd /
-          rm -rf "$TEMP_DIR"
-          echo "✅ Force merge step completed successfully"
-          echo "🎉 1_Configs is now in sync: $SOURCE_BRANCH → $TARGET_BRANCH"
+    #       # Clean up
+    #       cd /
+    #       rm -rf "$TEMP_DIR"
+    #       echo "✅ Force merge step completed successfully"
+    #       echo "🎉 1_Configs is now in sync: $SOURCE_BRANCH → $TARGET_BRANCH"
 
 
 
