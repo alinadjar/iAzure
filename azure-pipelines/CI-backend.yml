@@ -88,46 +88,6 @@ jobs:
     
     
     - task: Bash@3
-      name: init
-      displayName: 'init'
-      env:
-        CURRENT_BRANCH: ${{ parameters.BRANCH }}
-      inputs:
-        targetType: 'inline'
-        script: |    
-          # Determine source branch based on current branch
-          case "$CURRENT_BRANCH" in
-              "dev")
-                  SOURCE_BRANCH="dev"
-                  ;;
-              "devops")
-                  SOURCE_BRANCH="dev"
-                  ;;
-              "alpha")
-                  SOURCE_BRANCH="dev"
-                  ;;
-              "beta")
-                  SOURCE_BRANCH="alpha"
-                  ;;
-              "master")
-                  SOURCE_BRANCH="beta"
-                  ;;
-              *)
-                  echo "Error: Current branch '$CURRENT_BRANCH' is not valid for promotion"
-                  echo "Expected: alpha, beta, or master"
-                  exit 1
-                  ;;
-          esac
-          
-          echo "Current branch: $CURRENT_BRANCH"
-          echo "Source branch: $SOURCE_BRANCH"
-          
-          # Export for use in pipeline
-          echo "##vso[task.setvariable variable=SOURCE_BRANCH;isOutput=true]$SOURCE_BRANCH"
-          echo "##vso[task.setvariable variable=TARGET_BRANCH;isOutput=true]$CURRENT_BRANCH"
-    
-    
-    - task: Bash@3
       name: create_pr_multi_repo
       displayName: 'Create & Complete PRs'
       condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
@@ -163,12 +123,17 @@ jobs:
             # Clean URL of any potential newlines or extra characters
             url=$(echo "$url" | tr -d '\n\r ')
             
+            # Add cache-control headers for all requests
             if [ "$method" = "GET" ]; then
               http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Cache-Control: no-cache" \
+                -H "Pragma: no-cache" \
                 -o "$temp_file" "$url")
             else
               http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
                 -H "Content-Type: application/json" \
+                -H "Cache-Control: no-cache" \
+                -H "Pragma: no-cache" \
                 -X "$method" \
                 -d "$data" \
                 -o "$temp_file" "$url")
@@ -196,6 +161,26 @@ jobs:
             return 0
           }
           
+          # Function to check if a branch exists using Git (more reliable than REST API)
+          check_branch_exists_git() {
+            local repo_url="$1"
+            local branch_name="$2"
+            
+            echo "  🔍 Checking branch via Git: $branch_name" >&2
+            
+            # Use git ls-remote to check if branch exists
+            if git ls-remote --heads "$repo_url" "$branch_name" 2>/dev/null | grep -q "refs/heads/$branch_name"; then
+              # Extract the commit hash for the branch
+              local commit_hash=$(git ls-remote --heads "$repo_url" "$branch_name" 2>/dev/null | awk '{print $1}')
+              echo "  ✅ Branch confirmed via Git (Commit: $commit_hash)" >&2
+              echo "$commit_hash"
+              return 0
+            else
+              echo "  ❌ Branch not found via Git" >&2
+              return 1
+            fi
+          }
+          
           # Git configuration
           git config --global user.email "S_Bot_Azure@sadgan.int"
           git config --global user.name "S_Bot_Azure"
@@ -218,9 +203,11 @@ jobs:
             "SadganErp/_git/SadganErpApi"
           )
           
-          # Base URL
-          BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
-          API_URL="$BASE_URL/_apis"
+          # Base URL for Git operations (used for validation)
+          GIT_BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+          
+          # Base URL for REST API
+          API_URL="$GIT_BASE_URL/_apis"
           
           echo "========================================="
           echo "Starting multi-repo PR creation for $SOURCE_BRANCH → $TARGET_BRANCH"
@@ -232,6 +219,9 @@ jobs:
           declare -A PR_IDS
           declare -A MERGE_STATUSES
           declare -A SOURCE_COMMITS
+          declare -A REPO_SKIPPED
+          declare -A SOURCE_COMMIT_HASHES
+          declare -A TARGET_COMMIT_HASHES
           
           # First pass: Check all repos for conflicts before any merges
           echo ""
@@ -247,9 +237,9 @@ jobs:
             # Extract simple repo name
             SIMPLE_REPO_NAME=$(basename "$REPO_NAME")
             
-            # Get repository ID
+            # Get repository ID from REST API (still needed for PR operations)
             echo "  🔍 Looking up repository ID for: $SIMPLE_REPO_NAME"
-            REPOS_URL="$API_URL/git/repositories?api-version=6.0"
+            REPOS_URL="$API_URL/git/repositories?api-version=7.0&_=$(date +%s%N)"
             REPOS_RESPONSE=$(call_api "$REPOS_URL") || {
               echo "  ❌ Failed to get repositories list"
               exit 1
@@ -268,9 +258,36 @@ jobs:
             echo "  ✅ Found repository ID: $REPO_ID"
             REPO_IDS["$REPO_NAME"]="$REPO_ID"
             
+            # Construct Git URL for this repository
+            REPO_GIT_URL="$GIT_BASE_URL/$REPO_NAME"
+            
+            # Validate source branch using Git (more reliable)
+            echo "  🔍 Validating source branch via Git: $SOURCE_BRANCH"
+            SOURCE_COMMIT=$(check_branch_exists_git "$REPO_GIT_URL" "$SOURCE_BRANCH") || {
+              echo "  ⚠️ Source branch '$SOURCE_BRANCH' not found via Git"
+              echo "  ⚠️ Skipping this repository for PR creation"
+              REPO_SKIPPED["$REPO_NAME"]="source_branch_missing"
+              continue
+            }
+            SOURCE_COMMIT_HASHES["$REPO_NAME"]="$SOURCE_COMMIT"
+            echo "  ✅ Source branch commit: $SOURCE_COMMIT"
+            
+            # Validate target branch using Git (more reliable)
+            echo "  🔍 Validating target branch via Git: $TARGET_BRANCH"
+            TARGET_COMMIT=$(check_branch_exists_git "$REPO_GIT_URL" "$TARGET_BRANCH") || {
+              echo "  ⚠️ Target branch '$TARGET_BRANCH' not found via Git"
+              echo "  ⚠️ Skipping this repository for PR creation"
+              REPO_SKIPPED["$REPO_NAME"]="target_branch_missing"
+              continue
+            }
+            TARGET_COMMIT_HASHES["$REPO_NAME"]="$TARGET_COMMIT"
+            echo "  ✅ Target branch commit: $TARGET_COMMIT"
+            
+            echo "  ✅ Both branches validated successfully via Git"
+            
             # Check for existing PR
             echo "  🔍 Checking for existing PRs..."
-            PR_SEARCH_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=6.0"
+            PR_SEARCH_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=7.0&_=$(date +%s%N)"
             PR_SEARCH=$(call_api "$PR_SEARCH_URL") || {
               echo "  ❌ Failed to search PRs"
               exit 1
@@ -283,9 +300,9 @@ jobs:
               echo "  ⚠️ Active PR exists: $EXISTING_PR"
               PR_IDS["$REPO_NAME"]="$EXISTING_PR"
             else
-              # Create new PR
+              # Create new PR with retry logic for REST API cache delays
               echo "  🆕 Creating new PR..."
-              PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?api-version=6.0"
+              PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?api-version=7.0"
               PR_TITLE="BOT auto pr from $SOURCE_BRANCH to $TARGET_BRANCH"
               PR_BODY="{
                 \"sourceRefName\": \"refs/heads/$SOURCE_BRANCH\",
@@ -293,25 +310,55 @@ jobs:
                 \"title\": \"$PR_TITLE\"
               }"
               
-              PR_RESPONSE=$(call_api "$PR_URL" "POST" "$PR_BODY") || {
-                echo "  ❌ Failed to create PR for $REPO_NAME"
-                exit 1
-              }
+              # Retry loop for PR creation (REST API might lag behind Git)
+              MAX_PR_RETRIES=10
+              PR_RETRY=0
+              PR_CREATED=false
               
-              PR_ID=$(echo "$PR_RESPONSE" | jq -r '.pullRequestId')
+              while [ $PR_RETRY -lt $MAX_PR_RETRIES ] && [ "$PR_CREATED" = false ]; do
+                if [ $PR_RETRY -gt 0 ]; then
+                  echo "  ⚠️ Retry $PR_RETRY creating PR (waiting for REST API cache to update)..."
+                  sleep 5
+                fi
+                
+                # Attempt PR creation via REST API with cache-busting headers
+                PR_RESPONSE=$(curl -s -u ":$GIT_PAT" \
+                  -H "Content-Type: application/json" \
+                  -H "Cache-Control: no-cache, no-store" \
+                  -H "Pragma: no-cache" \
+                  -H "Expires: 0" \
+                  -X POST \
+                  -d "$PR_BODY" \
+                  "$PR_URL" 2>/dev/null || echo '{"error":"connection failed"}')
+                
+                # Check if PR creation succeeded
+                if echo "$PR_RESPONSE" | jq -e '.pullRequestId' > /dev/null 2>&1; then
+                  PR_ID=$(echo "$PR_RESPONSE" | jq -r '.pullRequestId')
+                  echo "  ✅ PR created successfully with ID: $PR_ID"
+                  PR_IDS["$REPO_NAME"]="$PR_ID"
+                  PR_CREATED=true
+                elif echo "$PR_RESPONSE" | grep -q "TF401398"; then
+                  # Branch not found error - cache issue
+                  echo "  ⚠️ REST API still doesn't see the branch (attempt $((PR_RETRY+1))/$MAX_PR_RETRIES)"
+                  PR_RETRY=$((PR_RETRY + 1))
+                else
+                  echo "  ❌ Failed to create PR - unexpected error"
+                  echo "  Response: $PR_RESPONSE"
+                  PR_RETRY=$((PR_RETRY + 1))
+                fi
+              done
               
-              if [ -z "$PR_ID" ] || [ "$PR_ID" = "null" ]; then
-                echo "  ❌ Failed to create PR - invalid response"
-                echo "  Response: $PR_RESPONSE"
-                exit 1
+              if [ "$PR_CREATED" = false ]; then
+                echo "  ❌ Could not create PR after $MAX_PR_RETRIES attempts"
+                echo "  ⚠️ Skipping this repository"
+                REPO_SKIPPED["$REPO_NAME"]="pr_creation_failed"
+                continue
               fi
-              echo "  ✅ PR created with ID: $PR_ID"
-              PR_IDS["$REPO_NAME"]="$PR_ID"
             fi
             
             # Quick check for immediate conflicts
             echo "  🔍 Checking initial merge status..."
-            PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/${PR_IDS["$REPO_NAME"]}?api-version=6.0"
+            PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/${PR_IDS["$REPO_NAME"]}?api-version=7.0&_=$(date +%s%N)"
             PR_DETAILS=$(call_api "$PR_URL") || {
               echo "  ❌ Failed to get PR details"
               exit 1
@@ -332,6 +379,26 @@ jobs:
             echo "  ✅ Initial merge status: $MERGE_STATUS"
           done
           
+          # Filter out skipped repositories
+          ACTIVE_REPOS=()
+          for REPO_NAME in "${REPOSITORIES[@]}"; do
+            if [ -z "${REPO_SKIPPED["$REPO_NAME"]}" ]; then
+              ACTIVE_REPOS+=("$REPO_NAME")
+            else
+              echo ""
+              echo "⚠️ Skipping $REPO_NAME - Reason: ${REPO_SKIPPED["$REPO_NAME"]}"
+            fi
+          done
+          
+          if [ ${#ACTIVE_REPOS[@]} -eq 0 ]; then
+            echo ""
+            echo "❌ No active repositories to process. All were skipped."
+            exit 0
+          fi
+          
+          echo ""
+          echo "✅ Active repositories to process: ${#ACTIVE_REPOS[@]}"
+          
           # Second pass: Wait for all merges to be ready
           echo ""
           echo "========================================="
@@ -349,7 +416,7 @@ jobs:
             echo ""
             echo "--- Check attempt $ATTEMPT/$MAX_ATTEMPTS ---"
             
-            for REPO_NAME in "${REPOSITORIES[@]}"; do
+            for REPO_NAME in "${ACTIVE_REPOS[@]}"; do
               REPO_ID="${REPO_IDS["$REPO_NAME"]}"
               PR_ID="${PR_IDS["$REPO_NAME"]}"
               
@@ -357,7 +424,7 @@ jobs:
               REPO_ID_CLEAN=$(clean_repo_id "$REPO_ID")
               PR_ID_CLEAN=$(echo "$PR_ID" | tr -d '\n\r ')
               
-              PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0"
+              PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=7.0&_=$(date +%s%N)"
               PR_DETAILS=$(call_api "$PR_URL") || {
                 echo "  ⚠️ Failed to get PR details for $REPO_NAME, will retry..."
                 ALL_READY=false
@@ -395,14 +462,14 @@ jobs:
           if [ "$ALL_READY" = false ]; then
             echo "❌ Timeout waiting for merges to be ready"
             echo "Current statuses:"
-            for REPO_NAME in "${REPOSITORIES[@]}"; do
+            for REPO_NAME in "${ACTIVE_REPOS[@]}"; do
               echo "  $REPO_NAME: ${MERGE_STATUSES["$REPO_NAME"]}"
             done
             exit 1
           fi
           
           echo ""
-          echo "✅ ALL REPOSITORIES READY FOR MERGE"
+          echo "✅ ALL ACTIVE REPOSITORIES READY FOR MERGE"
           
           # Third pass: Approve and complete PRs sequentially
           echo ""
@@ -411,10 +478,10 @@ jobs:
           echo "========================================="
           
           COMPLETED_COUNT=0
-          for REPO_NAME in "${REPOSITORIES[@]}"; do
+          for REPO_NAME in "${ACTIVE_REPOS[@]}"; do
             COMPLETED_COUNT=$((COMPLETED_COUNT + 1))
             echo ""
-            echo "[$COMPLETED_COUNT/${#REPOSITORIES[@]}] Processing repository: $REPO_NAME"
+            echo "[$COMPLETED_COUNT/${#ACTIVE_REPOS[@]}] Processing repository: $REPO_NAME"
             echo "-----------------------------------------"
             
             REPO_ID="${REPO_IDS["$REPO_NAME"]}"
@@ -427,7 +494,7 @@ jobs:
             
             # Get current user identity
             echo "  🔍 Getting PR details for approval..."
-            PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0"
+            PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=7.0&_=$(date +%s%N)"
             PR_DETAILS=$(call_api "$PR_URL") || {
               echo "  ❌ Failed to get PR details"
               exit 1
@@ -437,7 +504,7 @@ jobs:
             
             # Add as reviewer and vote +10
             echo "  👍 Approving PR $PR_ID..."
-            REVIEWER_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN/reviewers/$CURRENT_USER_ID?api-version=6.0"
+            REVIEWER_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN/reviewers/$CURRENT_USER_ID?api-version=7.0"
             REVIEWER_BODY="{\"vote\": 10}"
             
             call_api "$REVIEWER_URL" "PUT" "$REVIEWER_BODY" > /dev/null || {
@@ -448,7 +515,7 @@ jobs:
             
             # Complete the PR with bypass
             echo "  🔄 Completing PR $PR_ID..."
-            COMPLETE_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0"
+            COMPLETE_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=7.0"
             COMPLETE_BODY="{
               \"status\": \"completed\",
               \"lastMergeSourceCommit\": {
@@ -492,9 +559,122 @@ jobs:
           
           echo ""
           echo "========================================="
-          echo "✅ ALL $COMPLETED_COUNT REPOSITORIES PROCESSED SUCCESSFULLY"
+          echo "✅ ALL $COMPLETED_COUNT ACTIVE REPOSITORIES PROCESSED SUCCESSFULLY"
+          if [ ${#REPOSITORIES[@]} -ne ${#ACTIVE_REPOS[@]} ]; then
+            echo "⚠️ Skipped repositories: $(( ${#REPOSITORIES[@]} - ${#ACTIVE_REPOS[@]} ))"
+          fi
           echo "========================================="
-    
+
+
+    - task: Bash@3
+      displayName: 'Force merge for 1_Configs (Safe Mode)'
+      condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -e  # Exit immediately on any error
+          
+          echo "🔄 Starting force merge for 1_Configs (SAFE MODE)..."
+          echo "⚠️ This step will FAIL if any conflict is detected"
+          
+          # Create a unique temp directory
+          TEMP_DIR=$(mktemp -d)
+          cd "$TEMP_DIR"
+          echo "📁 Working in temp directory: $TEMP_DIR"
+          
+          # Clone the repository
+          echo "📦 Cloning 1_Configs..."
+          git clone http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganShared/_git/1_Configs
+          cd 1_Configs
+
+          SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
+          TARGET_BRANCH="$(init.TARGET_BRANCH)"
+          
+          echo "🌿 Source branch: $SOURCE_BRANCH"
+          echo "🌿 Target branch: $TARGET_BRANCH"
+          
+          # Fetch both branches
+          echo "📡 Fetching branches..."
+          git fetch origin $SOURCE_BRANCH $TARGET_BRANCH
+          
+          # Check if branches exist
+          if ! git rev-parse --verify "origin/$SOURCE_BRANCH" >/dev/null 2>&1; then
+            echo "❌ ERROR: Source branch '$SOURCE_BRANCH' does not exist"
+            exit 1
+          fi
+          
+          if ! git rev-parse --verify "origin/$TARGET_BRANCH" >/dev/null 2>&1; then
+            echo "❌ ERROR: Target branch '$TARGET_BRANCH' does not exist"
+            exit 1
+          fi
+          
+          # Check if merge is even possible (no conflicts)
+          echo "🔍 Pre-validating merge for conflicts..."
+          
+          # Checkout target branch
+          git checkout $TARGET_BRANCH
+          
+          # Dry-run merge to detect conflicts without actually merging
+          echo "🔍 Performing dry-run merge to detect conflicts..."
+          if ! git merge --no-commit --no-ff "origin/$SOURCE_BRANCH"; then
+            echo "❌ CONFLICT DETECTED during dry-run!"
+            echo ""
+            echo "========================================="
+            echo "CONFLICT DETAILS:"
+            echo "========================================="
+            git status
+            echo ""
+            echo "Conflicted files:"
+            git diff --name-only --diff-filter=U
+            echo ""
+            echo "========================================="
+            echo "⚠️ Aborting merge due to conflicts"
+            echo "❌ Pipeline will stop here as requested (safe mode)"
+            
+            # Abort the dry-run merge
+            git merge --abort
+            
+            # Clean up
+            cd /
+            rm -rf "$TEMP_DIR"
+            
+            # Exit with error to stop the pipeline
+            exit 1
+          else
+            echo "✅ No conflicts detected in dry-run!"
+            
+            # Abort the dry-run merge
+            git merge --abort
+            
+            # Now perform the actual merge (safe because dry-run passed)
+            echo "🔄 Performing actual merge (safe - no conflicts detected)..."
+            git merge "origin/$SOURCE_BRANCH" --no-ff -m "BOT: Force sync $SOURCE_BRANCH → $TARGET_BRANCH"
+            
+            # Push the merge
+            echo "📤 Pushing merge to remote..."
+            git push origin $TARGET_BRANCH
+            
+            echo "✅ Force merge completed successfully"
+          fi
+          
+          # Verify the merge was pushed
+          echo "🔍 Verifying merge was successful..."
+          git fetch origin $TARGET_BRANCH
+          LOCAL_COMMIT=$(git rev-parse HEAD)
+          REMOTE_COMMIT=$(git rev-parse origin/$TARGET_BRANCH)
+          
+          if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
+            echo "✅ Verification successful - remote branch updated"
+          else
+            echo "❌ Verification failed - remote branch not updated"
+            exit 1
+          fi
+          
+          # Clean up
+          cd /
+          rm -rf "$TEMP_DIR"
+          echo "✅ Force merge step completed successfully"
+          echo "🎉 1_Configs is now in sync: $SOURCE_BRANCH → $TARGET_BRANCH"
     
     
     - bash: |
