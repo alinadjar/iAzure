@@ -86,7 +86,46 @@ jobs:
     #     version: '9.x' 
     #     installationPath: $(Agent.ToolsDirectory)/dotnet
     
-    
+    - task: Bash@3
+      name: init
+      displayName: 'init'
+      env:
+        CURRENT_BRANCH: ${{ parameters.BRANCH }}
+      inputs:
+        targetType: 'inline'
+        script: |    
+          # Determine source branch based on current branch
+          case "$CURRENT_BRANCH" in
+              "dev")
+                  SOURCE_BRANCH="dev"
+                  ;;
+              "devops")
+                  SOURCE_BRANCH="dev"
+                  ;;
+              "alpha")
+                  SOURCE_BRANCH="dev"
+                  ;;
+              "beta")
+                  SOURCE_BRANCH="alpha"
+                  ;;
+              "master")
+                  SOURCE_BRANCH="beta"
+                  ;;
+              *)
+                  echo "Error: Current branch '$CURRENT_BRANCH' is not valid for promotion"
+                  echo "Expected: alpha, beta, or master"
+                  exit 1
+                  ;;
+          esac
+          
+          echo "Current branch: $CURRENT_BRANCH"
+          echo "Source branch: $SOURCE_BRANCH"
+          
+          # Export for use in pipeline
+          echo "##vso[task.setvariable variable=SOURCE_BRANCH;isOutput=true]$SOURCE_BRANCH"
+          echo "##vso[task.setvariable variable=TARGET_BRANCH;isOutput=true]$CURRENT_BRANCH"
+
+
     - task: Bash@3
       name: create_pr_multi_repo
       displayName: 'Create & Complete PRs'
@@ -196,6 +235,7 @@ jobs:
           TARGET_BRANCH="$(init.TARGET_BRANCH)"
           
           # Define all repositories to process
+                    # Define all repositories to process
           REPOSITORIES=(
                 "SadganShared/_git/1_Configs"
                 "SadganShared/_git/2_SharedLibrary"
@@ -240,6 +280,7 @@ jobs:
             
             # Construct project-specific API URL
             PROJECT_API_URL="$GIT_BASE_URL/$PROJECT_NAME/_apis"
+            echo "========  PROJECT_API_URL: $PROJECT_API_URL"
             
             # Get repository ID from REST API using project-specific URL
             echo "  🔍 Looking up repository ID for: $SIMPLE_REPO_NAME"
@@ -264,6 +305,7 @@ jobs:
             
             # Construct Git URL for this repository
             REPO_GIT_URL="$GIT_BASE_URL/$REPO_NAME"
+            echo "======== REPO_GIT_URL: $REPO_GIT_URL"
             
             # Validate source branch using Git
             echo "  🔍 Validating source branch via Git: $SOURCE_BRANCH"
@@ -532,7 +574,7 @@ jobs:
               \"completionOptions\": {
                 \"bypassPolicy\": true,
                 \"bypassReason\": \"Automated pr - sequential merge\",
-                \"mergeStrategy\": \"squash\",
+                \"mergeStrategy\": \"noFastForward\",
                 \"deleteSourceBranch\": false
               }
             }"
