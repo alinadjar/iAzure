@@ -286,7 +286,7 @@ jobs:
             
             # Get repository ID from REST API (still needed for PR operations)
             echo "  🔍 Looking up repository ID for: $SIMPLE_REPO_NAME"
-            REPOS_URL="$API_URL/git/repositories?api-version=6.0&_=$(date +%s%N)"
+            REPOS_URL="$API_URL/git/repositories?api-version=7.0&_=$(date +%s%N)"
             REPOS_RESPONSE=$(call_api "$REPOS_URL") || {
               echo "  ❌ Failed to get repositories list"
               exit 1
@@ -334,7 +334,7 @@ jobs:
             
             # Check for existing PR
             echo "  🔍 Checking for existing PRs..."
-            PR_SEARCH_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=6.0&_=$(date +%s%N)"
+            PR_SEARCH_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=7.0&_=$(date +%s%N)"
             PR_SEARCH=$(call_api "$PR_SEARCH_URL") || {
               echo "  ❌ Failed to search PRs"
               exit 1
@@ -349,7 +349,7 @@ jobs:
             else
               # Create new PR with retry logic for REST API cache delays
               echo "  🆕 Creating new PR..."
-              PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?api-version=6.0"
+              PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests?api-version=7.0"
               PR_TITLE="BOT auto pr from $SOURCE_BRANCH to $TARGET_BRANCH"
               PR_BODY="{
                 \"sourceRefName\": \"refs/heads/$SOURCE_BRANCH\",
@@ -358,14 +358,14 @@ jobs:
               }"
               
               # Retry loop for PR creation (REST API might lag behind Git)
-              MAX_PR_RETRIES=14
+              MAX_PR_RETRIES=10
               PR_RETRY=0
               PR_CREATED=false
               
               while [ $PR_RETRY -lt $MAX_PR_RETRIES ] && [ "$PR_CREATED" = false ]; do
                 if [ $PR_RETRY -gt 0 ]; then
                   echo "  ⚠️ Retry $PR_RETRY creating PR (waiting for REST API cache to update)..."
-                  sleep 15
+                  sleep 5
                 fi
                 
                 # Attempt PR creation via REST API with cache-busting headers
@@ -405,7 +405,7 @@ jobs:
             
             # Quick check for immediate conflicts
             echo "  🔍 Checking initial merge status..."
-            PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/${PR_IDS["$REPO_NAME"]}?api-version=6.0&_=$(date +%s%N)"
+            PR_URL="$API_URL/git/repositories/$REPO_ID/pullrequests/${PR_IDS["$REPO_NAME"]}?api-version=7.0&_=$(date +%s%N)"
             PR_DETAILS=$(call_api "$PR_URL") || {
               echo "  ❌ Failed to get PR details"
               exit 1
@@ -471,7 +471,7 @@ jobs:
               REPO_ID_CLEAN=$(clean_repo_id "$REPO_ID")
               PR_ID_CLEAN=$(echo "$PR_ID" | tr -d '\n\r ')
               
-              PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0&_=$(date +%s%N)"
+              PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=7.0&_=$(date +%s%N)"
               PR_DETAILS=$(call_api "$PR_URL") || {
                 echo "  ⚠️ Failed to get PR details for $REPO_NAME, will retry..."
                 ALL_READY=false
@@ -541,7 +541,7 @@ jobs:
             
             # Get current user identity
             echo "  🔍 Getting PR details for approval..."
-            PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0&_=$(date +%s%N)"
+            PR_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=7.0&_=$(date +%s%N)"
             PR_DETAILS=$(call_api "$PR_URL") || {
               echo "  ❌ Failed to get PR details"
               exit 1
@@ -551,7 +551,7 @@ jobs:
             
             # Add as reviewer and vote +10
             echo "  👍 Approving PR $PR_ID..."
-            REVIEWER_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN/reviewers/$CURRENT_USER_ID?api-version=6.0"
+            REVIEWER_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN/reviewers/$CURRENT_USER_ID?api-version=7.0"
             REVIEWER_BODY="{\"vote\": 10}"
             
             call_api "$REVIEWER_URL" "PUT" "$REVIEWER_BODY" > /dev/null || {
@@ -562,7 +562,7 @@ jobs:
             
             # Complete the PR with bypass
             echo "  🔄 Completing PR $PR_ID..."
-            COMPLETE_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=6.0"
+            COMPLETE_URL="$API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=7.0"
             COMPLETE_BODY="{
               \"status\": \"completed\",
               \"lastMergeSourceCommit\": {
@@ -944,7 +944,7 @@ jobs:
         script: |
           encoded_path=$(echo "/Release Notes" | sed 's|^/||' | sed 's/ /%20/g' | sed 's/#/%23/g')
           echo "encoded_path = $encoded_path"
-          response=$(curl -s -u ":$wikiPat" "$(orgUrl)/$(project)/_apis/wiki/wikis/$(wikiId)/pages?path=$encoded_path&api-version=6.0&recursionLevel=full")
+          response=$(curl -s -u ":$wikiPat" "$(orgUrl)/$(project)/_apis/wiki/wikis/$(wikiId)/pages?path=$encoded_path&api-version=7.0&recursionLevel=full")
           echo $response
           
           
@@ -985,7 +985,7 @@ jobs:
             
             # URL encode the path (remove leading slash and encode)
             encoded_path=$(echo "$page_path" | sed 's|^/||' | sed 's/ /%20/g' | sed 's/#/%23/g')
-            page_content=$(curl -s -u ":$wikiPat" "$(orgUrl)/$(project)/_apis/wiki/wikis/$(wikiId)/pages?path=$encoded_path&includeContent=true&api-version=6.0")
+            page_content=$(curl -s -u ":$wikiPat" "$(orgUrl)/$(project)/_apis/wiki/wikis/$(wikiId)/pages?path=$encoded_path&includeContent=true&api-version=7.0")
             filename=$(basename "$page_path" | sed 's/ /_/g' | sed 's/\.md$//')
             echo "$page_content" | jq -r '.content' > "$TARGET_WWWROOT/${filename}.md"
             
