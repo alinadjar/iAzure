@@ -615,6 +615,7 @@ jobs:
     
     - task: Bash@3
       displayName: 'Force merge  for 1_Configs'
+      condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
       inputs:
         targetType: 'inline'
         script: |
