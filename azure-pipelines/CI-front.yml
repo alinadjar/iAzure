@@ -47,9 +47,9 @@ variables:
   isBranchMASTER:  ${{ eq(parameters.BRANCH, 'master') }} 
   isCreatePR:      ${{ eq(parameters.CREATE_PR, 'YES') }} 
   CURRENT_BRANCH:  ${{ parameters.BRANCH }}
-  System.Diagnostics.DefaultLogDirectory: '$(Agent.TempDirectory)/diag'
-  SYSTEM_DEBUG: false
-  VSTS_DEBUG: false
+  # System.Diagnostics.DefaultLogDirectory: '$(Agent.TempDirectory)/diag'
+  # SYSTEM_DEBUG: false
+  # VSTS_DEBUG: false
 
 
 # ──────────────────────────────────────────────────────────────────────
