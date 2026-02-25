@@ -614,42 +614,7 @@ stages:
         targetPath: '$(Build.ArtifactStagingDirectory)'
         artifactName: 'pr-status'
 
-  - job: Assembly_Fix
-    displayName: 'Assembly Version Set'
-    dependsOn: Git_Checkout
-    steps:
-    - bash: |
-        configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
-    
-        if [ "$(isBranchDevelop)" == "True" -o "$(isBranchDevOps)" = "True" ]; then
-          new_assembly_version="0.0.0.0"
-        else
-          assembly_version=$(awk -F '[<>]' '/<AssemblyVersion>/ {print $3}' $configPropsFile)
-          tag_version="$(tagSetting.DOCKER_TAG)"
-          tag_version="${tag_version#v}"
-          
-          # Simple solution: extract all numbers and join with dots
-          new_assembly_version=$(echo "$tag_version" | grep -oE '[0-9]+' | head -4 | paste -sd '.' -)
-          
-          # If we don't have 4 numbers, pad with zeros
-          if [ -z "$new_assembly_version" ]; then
-            new_assembly_version="0.0.0.0"
-          else
-            # Count how many numbers we have
-            num_count=$(echo "$new_assembly_version" | tr -cd '.' | wc -c)
-            num_count=$((num_count + 1))
-            
-            # Pad to 4 numbers
-            while [ $num_count -lt 4 ]; do
-              new_assembly_version="${new_assembly_version}.0"
-              num_count=$((num_count + 1))
-            done
-          fi
-        fi
-    
-        echo "current assembly version $assembly_version is changing to $new_assembly_version"
-        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$new_assembly_version</AssemblyVersion>|" $configPropsFile
-    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))        
+ 
 
 
 # Stage 2: Build
@@ -727,10 +692,47 @@ stages:
       env:
         GIT_PAT: $(GIT_PAT)
 
+  - job: Assembly_Fix
+    displayName: 'Assembly Version Set'
+    dependsOn: Git_Checkout
+    steps:
+    - bash: |
+        configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
+    
+        if [ "$(isBranchDevelop)" == "True" -o "$(isBranchDevOps)" = "True" ]; then
+          new_assembly_version="0.0.0.0"
+        else
+          assembly_version=$(awk -F '[<>]' '/<AssemblyVersion>/ {print $3}' $configPropsFile)
+          tag_version="$(tagSetting.DOCKER_TAG)"
+          tag_version="${tag_version#v}"
+          
+          # Simple solution: extract all numbers and join with dots
+          new_assembly_version=$(echo "$tag_version" | grep -oE '[0-9]+' | head -4 | paste -sd '.' -)
+          
+          # If we don't have 4 numbers, pad with zeros
+          if [ -z "$new_assembly_version" ]; then
+            new_assembly_version="0.0.0.0"
+          else
+            # Count how many numbers we have
+            num_count=$(echo "$new_assembly_version" | tr -cd '.' | wc -c)
+            num_count=$((num_count + 1))
+            
+            # Pad to 4 numbers
+            while [ $num_count -lt 4 ]; do
+              new_assembly_version="${new_assembly_version}.0"
+              num_count=$((num_count + 1))
+            done
+          fi
+        fi
+    
+        echo "current assembly version $assembly_version is changing to $new_assembly_version"
+        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$new_assembly_version</AssemblyVersion>|" $configPropsFile
+    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))       
+
   # Parallel build jobs
   - job: Build_Frontend
     displayName: 'Build Frontend'
-    dependsOn: Git_Checkout
+    dependsOn: Assembly_Fix
     pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
@@ -748,7 +750,7 @@ stages:
 
   - job: Build_Backend
     displayName: 'Build Backend'
-    dependsOn: Git_Checkout
+    dependsOn: Assembly_Fix
     pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
