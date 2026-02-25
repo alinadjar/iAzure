@@ -67,8 +67,8 @@ steps:
                 "BRANCH": "$CUR_BRANCH"
               }
           EOF
-          else
-            json_file="$(System.DefaultWorkingDirectory)/CICD/branch-versions/frontend/version.$CUR_BRANCH.json"
+          else            
+            json_file="$(System.DefaultWorkingDirectory)/$(versionConfigPath)/version.$CUR_BRANCH.json"
             #  echo $json_file
             IFS=, read -r major minor patch < <(
               jq -r '.major + "," + .minor + "," + .patch' "$json_file"
