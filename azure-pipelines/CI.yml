@@ -610,10 +610,10 @@ stages:
           echo "========================================="
           
     # Publish PR completion status for next stages
-    - task: PublishPipelineArtifact@1
-      inputs:
-        targetPath: '$(Build.ArtifactStagingDirectory)'
-        artifactName: 'pr-status'
+    # - task: PublishPipelineArtifact@1
+    #   inputs:
+    #     targetPath: '$(Build.ArtifactStagingDirectory)'
+    #     artifactName: 'pr-status'
 
  
 
