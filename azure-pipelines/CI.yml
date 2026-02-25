@@ -693,11 +693,6 @@ stages:
       env:
         GIT_PAT: $(GIT_PAT)
 
-  - job: Assembly_Fix
-    displayName: 'Assembly Version Set'
-    dependsOn: Git_Checkout
-    steps:
-    - checkout: none
     - bash: |
         ls -alh 
         configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
@@ -735,7 +730,7 @@ stages:
   # Parallel build jobs
   - job: Build_Frontend
     displayName: 'Build Frontend'
-    dependsOn: Assembly_Fix
+    dependsOn: Git_Checkout
     pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
@@ -753,7 +748,7 @@ stages:
 
   - job: Build_Backend
     displayName: 'Build Backend'
-    dependsOn: Assembly_Fix
+    dependsOn: Git_Checkout
     pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
