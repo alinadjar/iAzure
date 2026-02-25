@@ -623,114 +623,9 @@ stages:
   displayName: 'Build Stage'
   dependsOn: PR_Creation
   condition: succeededOrFailed()  # Run even if PR stage was skipped
-  jobs:
-  - job: Git_Checkout
-    displayName: 'Git Checkout'
-    pool: 'WEB-1'
-    steps:
-    - checkout: none
-    - bash: |
-        set -e
-        # Configure Git
-        git config --global user.email "S_Bot_Azure@sadgan.int"
-        git config --global user.name "S_Bot_Azure"
-        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
-        git config --global http.sslVerify false
-        git config --global --add safe.directory '*'
-        
-        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
-        
-        function clone_or_pull {
-            branch_name=$1
-            repo_url=$2
-            target_dir=$3
-            
-            echo "Cleaning up previous checkout ($target_dir)..."
-            if [ -d "$target_dir" ]; then
-                echo "Removing directory..."
-                rm -rf "$target_dir"
-            fi
-            
-            echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
-            git clone --branch "$branch_name" "$repo_url" "$target_dir"
-            
-            if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
-                cd "$target_dir"
-                echo "Current directory: $(pwd)"
-                echo "✅ Repository cloned to: $target_dir"
-                echo "📁 Directory contents:"
-                ls -la
-            else
-                echo "❌ Clone failed"
-                exit 1
-            fi
-        }
-        
-        PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True" ] && echo "dev" || echo "$CURRENT_BRANCH" )
-        
-        # Clone shared repos (common to both)
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/1_Configs"            "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/2_SharedLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/4_ServerLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/3_ClientLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary"
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"        "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core"  "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/SadganErpApi"            "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
-        clone_or_pull  cicd          "$BASE_URL/SadganErp/_git/CICD"                    "$(System.DefaultWorkingDirectory)/CICD"
-
-        # Get frontend commit hash
-        cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
-        FRONTEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
-        echo "##vso[task.setvariable variable=FRONTEND_COMMIT;isOutput=true]$FRONTEND_COMMIT"
-
-        # Get backend commit hash
-        cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
-        BACKEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
-        echo "##vso[task.setvariable variable=BACKEND_COMMIT;isOutput=true]$BACKEND_COMMIT"
-        
-      displayName: "Git Checkout"
-      name: gitPull
-      env:
-        GIT_PAT: $(GIT_PAT)
-
-    - bash: |
-        ls -alh 
-        configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
-    
-        if [ "$(isBranchDevelop)" == "True" -o "$(isBranchDevOps)" = "True" ]; then
-          new_assembly_version="0.0.0.0"
-        else
-          assembly_version=$(awk -F '[<>]' '/<AssemblyVersion>/ {print $3}' $configPropsFile)
-          tag_version="$(tagSetting.DOCKER_TAG)"
-          tag_version="${tag_version#v}"
-          
-          # Simple solution: extract all numbers and join with dots
-          new_assembly_version=$(echo "$tag_version" | grep -oE '[0-9]+' | head -4 | paste -sd '.' -)
-          
-          # If we don't have 4 numbers, pad with zeros
-          if [ -z "$new_assembly_version" ]; then
-            new_assembly_version="0.0.0.0"
-          else
-            # Count how many numbers we have
-            num_count=$(echo "$new_assembly_version" | tr -cd '.' | wc -c)
-            num_count=$((num_count + 1))
-            
-            # Pad to 4 numbers
-            while [ $num_count -lt 4 ]; do
-              new_assembly_version="${new_assembly_version}.0"
-              num_count=$((num_count + 1))
-            done
-          fi
-        fi
-    
-        echo "current assembly version $assembly_version is changing to $new_assembly_version"
-        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$new_assembly_version</AssemblyVersion>|" $configPropsFile
-    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))       
-
-  # Parallel build jobs
+  jobs:           
   - job: Build_Frontend
     displayName: 'Build Frontend'
-    dependsOn: Git_Checkout
     pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
@@ -739,6 +634,7 @@ stages:
       versionConfigPath: 'CICD/branch-versions/frontend'
       commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.FRONTEND_COMMIT'] ]
     steps:
+    - checkout: none
     - template: templates/build-frontend-steps.yml
       parameters:
         SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
@@ -748,7 +644,6 @@ stages:
 
   - job: Build_Backend
     displayName: 'Build Backend'
-    dependsOn: Git_Checkout
     pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
@@ -757,6 +652,7 @@ stages:
       versionConfigPath: 'CICD/branch-versions/backend'
       commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.BACKEND_COMMIT'] ]
     steps:
+    - checkout: none
     - template: templates/build-backend-steps.yml
       parameters:
         SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
