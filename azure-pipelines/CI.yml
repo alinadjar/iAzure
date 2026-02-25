@@ -605,7 +605,7 @@ stages:
         targetPath: '$(Build.ArtifactStagingDirectory)'
         artifactName: 'pr-status'
 
-# Stage 2: Build Components
+# Stage 2: Build
 - stage: Build
   displayName: 'Build Stage'
   dependsOn: PR_Creation
@@ -656,31 +656,47 @@ stages:
         PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True" ] && echo "dev" || echo "$CURRENT_BRANCH" )
         
         # Clone shared repos (common to both)
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/1_Configs"        "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/2_SharedLibrary"  "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary" 
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/4_ServerLibrary"  "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
-        clone_or_pull  cicd          "$BASE_URL/SadganErp/_git/CICD"                "$(System.DefaultWorkingDirectory)/CICD"
+        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/1_Configs"            "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
+        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/2_SharedLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
+        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/4_ServerLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
+        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/3_ClientLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary"
+        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"        "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core"  "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"
+        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/SadganErpApi"            "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        clone_or_pull  cicd          "$BASE_URL/SadganErp/_git/CICD"                    "$(System.DefaultWorkingDirectory)/CICD"
+
+        # Get frontend commit hash
+        cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+        FRONTEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+        echo "##vso[task.setvariable variable=FRONTEND_COMMIT;isOutput=true]$FRONTEND_COMMIT"
+
+        # Get backend commit hash
+        cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        BACKEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+        echo "##vso[task.setvariable variable=BACKEND_COMMIT;isOutput=true]$BACKEND_COMMIT"
+
+
         
         # Clone based on component selection
-        if [[ "${{ parameters.COMPONENT }}" == "frontend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
-          clone_or_pull  $PULL_BRANCH      "$BASE_URL/SadganShared/_git/3_ClientLibrary"     "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary"
-          clone_or_pull  $PULL_BRANCH      "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"       "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
-          clone_or_pull  $PULL_BRANCH      "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core" "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"
+        # if [[ "${{ parameters.COMPONENT }}" == "frontend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+        #   clone_or_pull  $PULL_BRANCH      "$BASE_URL/SadganShared/_git/3_ClientLibrary"     "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary"
+        #   clone_or_pull  $PULL_BRANCH      "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"       "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+        #   clone_or_pull  $PULL_BRANCH      "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core" "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"
           
-          # Get frontend commit hash
-          cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
-          FRONTEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
-          echo "##vso[task.setvariable variable=FRONTEND_COMMIT;isOutput=true]$FRONTEND_COMMIT"
-        fi
+        #   # Get frontend commit hash
+        #   cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+        #   FRONTEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+        #   echo "##vso[task.setvariable variable=FRONTEND_COMMIT;isOutput=true]$FRONTEND_COMMIT"
+        # fi
         
-        if [[ "${{ parameters.COMPONENT }}" == "backend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
-          clone_or_pull  $PULL_BRANCH   "$BASE_URL/SadganErp/_git/SadganErpApi"           "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        # if [[ "${{ parameters.COMPONENT }}" == "backend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+        #   clone_or_pull  $PULL_BRANCH   "$BASE_URL/SadganErp/_git/SadganErpApi"           "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
           
-          # Get backend commit hash
-          cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
-          BACKEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
-          echo "##vso[task.setvariable variable=BACKEND_COMMIT;isOutput=true]$BACKEND_COMMIT"
-        fi
+        #   # Get backend commit hash
+        #   cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        #   BACKEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+        #   echo "##vso[task.setvariable variable=BACKEND_COMMIT;isOutput=true]$BACKEND_COMMIT"
+        # fi
         
       displayName: "Git Checkout"
       name: gitPull
