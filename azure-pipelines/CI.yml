@@ -734,7 +734,6 @@ stages:
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))        
 
   # Parallel build jobs
-  # - ${{ if eq(parameters.COMPONENT, 'both') }}:
   - job: Build_Frontend
     displayName: 'Build Frontend'
     dependsOn: Assembly_Fix
