@@ -1,0 +1,1200 @@
+# ===========================================================================================
+#                    Utlizing Matrix Strategy For Parallel Execution
+# Pros:
+# 
+# ✅ Faster total execution - Both build in parallel (typically 50% time savings)
+# ✅ Isolation - Issues in one don't affect the other
+# ✅ Clear separation - Each job has its own logs, making debugging easier
+# ✅ Independent artifact publishing - Can have separate artifacts per component
+# 
+# Cons:
+# 
+# ❌ Resource consumption - Uses 2 agents simultaneously
+# ❌ Complex variable handling - Need conditional variables for paths
+# ❌ PR creation duplication - Would run PR creation twice (wasteful)
+# 
+# ===========================================================================================
+
+
+trigger: none
+pool:
+  name: 'WEB-1'
+
+parameters:
+- name: CREATE_PR
+  displayName: "Create PR ?"
+  type: string
+  default: 'NO'
+  values:
+    - YES
+    - NO
+- name: SHOULD_RELEASE
+  type: string
+  default: 'true'
+  values:
+    - 'true'
+    - 'false'
+- name: BRANCH
+  type: string
+  default: 'dev'
+  displayName: "Select Branch"
+  values:
+    - 'dev'
+    - 'alpha'
+    - 'beta'
+    - 'master'
+- name: COMPONENT
+  displayName: "Component to build"
+  type: string
+  default: 'both'
+  values:
+    - frontend
+    - backend
+    - both
+
+variables:
+  # Frontend specific variables
+  ${{ if eq(parameters.COMPONENT, 'frontend') }}:
+    solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
+    DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
+    baseProjPath: $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel
+    versionConfigPath: 'CICD/branch-versions/frontend'
+    appsettingsSource: 'wwwroot/appsettings.pipe.json'
+    appsettingsDest: 'wwwroot/appsettings.json'
+    dockerfilePath: 'src/Sadgan.Erp.Panel.WebApp/Dockerfile.pipe'
+    nginxConfigPath: 'src/Sadgan.Erp.Panel.WebApp/nginx.conf'
+    wikiChangelogPath: 'assets/changelogs'
+    hasFrontendSteps: true
+    hasBackendSteps: false
+    repoMainPath: 'SadganErp/_git/Sadgan.Erp.Panel'
+    
+  ${{ if eq(parameters.COMPONENT, 'backend') }}:
+    solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
+    DOCKER_IMG: $(DOCKER_REGISTRY)/fx/backend
+    baseProjPath: $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi
+    versionConfigPath: 'CICD/branch-versions/backend'
+    appsettingsSource: 'appsettings.pipe.json'
+    appsettingsDest: 'appsettings.json'
+    dockerfilePath: 'Dockerfile.pipe'
+    nginxConfigPath: ''
+    wikiChangelogPath: ''
+    hasFrontendSteps: false
+    hasBackendSteps: true
+    repoMainPath: 'SadganErp/_git/SadganErpApi'
+
+  ${{ if eq(parameters.COMPONENT, 'both') }}:
+    # These will be overridden in matrix strategy
+    solution: ''
+    DOCKER_IMG: ''
+    baseProjPath: ''
+    versionConfigPath: ''
+    appsettingsSource: ''
+    appsettingsDest: ''
+    dockerfilePath: ''
+    nginxConfigPath: ''
+    wikiChangelogPath: ''
+    hasFrontendSteps: false
+    hasBackendSteps: false
+    repoMainPath: ''
+
+  # Common variables
+  buildPlatform: 'Any CPU'
+  buildConfiguration: 'Release'
+  isTagDuplicate: 'false'
+  orgUrl: 'http://azure.sadgan.int/WebApp'
+  project: 'SadganErp'
+  isBranchDevelop: ${{ eq(parameters.BRANCH, 'dev') }}
+  isBranchDevOps:  ${{ eq(parameters.BRANCH, 'devops') }}
+  isBranchALPHA:   ${{ eq(parameters.BRANCH, 'alpha') }}
+  isBranchBETA:    ${{ eq(parameters.BRANCH, 'beta') }}
+  isBranchMASTER:  ${{ eq(parameters.BRANCH, 'master') }} 
+  isCreatePR:      ${{ eq(parameters.CREATE_PR, 'YES') }} 
+  CURRENT_BRANCH:  ${{ parameters.BRANCH }}
+  System.Diagnostics.DefaultLogDirectory: '$(Agent.TempDirectory)/diag'
+  SYSTEM_DEBUG: false
+  VSTS_DEBUG: false
+  wikiId: 'SadganErp.wiki'
+
+# Use strategy for building both components
+${{ if eq(parameters.COMPONENT, 'both') }}:
+  strategy:
+    matrix:
+      frontend:
+        component: 'frontend'
+        solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
+        DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
+        baseProjPath: $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel
+        versionConfigPath: 'CICD/branch-versions/frontend'
+        appsettingsSource: 'wwwroot/appsettings.pipe.json'
+        appsettingsDest: 'wwwroot/appsettings.json'
+        dockerfilePath: 'src/Sadgan.Erp.Panel.WebApp/Dockerfile.pipe'
+        nginxConfigPath: 'src/Sadgan.Erp.Panel.WebApp/nginx.conf'
+        wikiChangelogPath: 'assets/changelogs'
+        hasFrontendSteps: true
+        hasBackendSteps: false
+        repoMainPath: 'SadganErp/_git/Sadgan.Erp.Panel'
+      backend:
+        component: 'backend'
+        solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
+        DOCKER_IMG: $(DOCKER_REGISTRY)/fx/backend
+        baseProjPath: $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi
+        versionConfigPath: 'CICD/branch-versions/backend'
+        appsettingsSource: 'appsettings.pipe.json'
+        appsettingsDest: 'appsettings.json'
+        dockerfilePath: 'Dockerfile.pipe'
+        nginxConfigPath: ''
+        wikiChangelogPath: ''
+        hasFrontendSteps: false
+        hasBackendSteps: true
+        repoMainPath: 'SadganErp/_git/SadganErpApi'
+
+jobs:
+  - job: CI
+    displayName: 'CI - ${{ parameters.COMPONENT }}'
+    ${{ if eq(parameters.COMPONENT, 'both') }}:
+      dependsOn: []
+    steps:
+    - checkout: none
+    
+    - task: Bash@3
+      name: init
+      displayName: 'init'
+      env:
+        CURRENT_BRANCH: ${{ parameters.BRANCH }}
+      inputs:
+        targetType: 'inline'
+        script: |    
+          # Determine source branch based on current branch
+          case "$CURRENT_BRANCH" in
+              "dev")
+                  SOURCE_BRANCH="dev"
+                  ;;
+              "devops")
+                  SOURCE_BRANCH="dev"
+                  ;;
+              "alpha")
+                  SOURCE_BRANCH="dev"
+                  ;;
+              "beta")
+                  SOURCE_BRANCH="alpha"
+                  ;;
+              "master")
+                  SOURCE_BRANCH="beta"
+                  ;;
+              *)
+                  echo "Error: Current branch '$CURRENT_BRANCH' is not valid for promotion"
+                  echo "Expected: alpha, beta, or master"
+                  exit 1
+                  ;;
+          esac
+          
+          echo "Current branch: $CURRENT_BRANCH"
+          echo "Source branch: $SOURCE_BRANCH"
+          
+          # Export for use in pipeline
+          echo "##vso[task.setvariable variable=SOURCE_BRANCH;isOutput=true]$SOURCE_BRANCH"
+          echo "##vso[task.setvariable variable=TARGET_BRANCH;isOutput=true]$CURRENT_BRANCH"
+    
+    
+    - task: Bash@3
+      name: create_pr_multi_repo
+      displayName: 'Create & Complete PRs'
+      condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
+      env:
+        GIT_PAT: $(GIT_PAT)
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -e
+          
+          # Function to clean repository ID (extract only valid UUID)
+          clean_repo_id() {
+            local id="$1"
+            # Extract UUID format: 8-4-4-4-12 hex digits
+            local cleaned=$(echo "$id" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+            if [ -z "$cleaned" ]; then
+              echo "$id" | tr -d '\n\r ' | cut -c1-36
+            else
+              echo "$cleaned"
+            fi
+          }
+          
+          # Function to safely call curl and validate JSON response
+          call_api() {
+            local url="$1"
+            local method="${2:-GET}"
+            local data="${3:-}"
+            local temp_file=$(mktemp)
+            local http_code
+            
+            echo "🔵 Calling API: $method $url" >&2
+            
+            # Clean URL of any potential newlines or extra characters
+            url=$(echo "$url" | tr -d '\n\r ')
+            
+            # Add cache-control headers for all requests
+            if [ "$method" = "GET" ]; then
+              http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Cache-Control: no-cache" \
+                -H "Pragma: no-cache" \
+                -o "$temp_file" "$url")
+            else
+              http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Content-Type: application/json" \
+                -H "Cache-Control: no-cache" \
+                -H "Pragma: no-cache" \
+                -X "$method" \
+                -d "$data" \
+                -o "$temp_file" "$url")
+            fi
+            
+            if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+              echo "❌ API call failed with HTTP $http_code" >&2
+              if [ -s "$temp_file" ]; then
+                cat "$temp_file" >&2
+              fi
+              rm -f "$temp_file"
+              return 1
+            fi
+            
+            # Validate JSON response
+            if ! jq empty "$temp_file" 2>/dev/null; then
+              echo "❌ Invalid JSON response" >&2
+              cat "$temp_file" >&2
+              rm -f "$temp_file"
+              return 1
+            fi
+            
+            cat "$temp_file"
+            rm -f "$temp_file"
+            return 0
+          }
+          
+          # Function to check if a branch exists using Git (more reliable than REST API)
+          check_branch_exists_git() {
+            local repo_url="$1"
+            local branch_name="$2"
+            
+            echo "  🔍 Checking branch via Git: $branch_name" >&2
+            
+            # Use git ls-remote to check if branch exists
+            if git ls-remote --heads "$repo_url" "$branch_name" 2>/dev/null | grep -q "refs/heads/$branch_name"; then
+              # Extract the commit hash for the branch
+              local commit_hash=$(git ls-remote --heads "$repo_url" "$branch_name" 2>/dev/null | awk '{print $1}')
+              echo "  ✅ Branch confirmed via Git (Commit: $commit_hash)" >&2
+              echo "$commit_hash"
+              return 0
+            else
+              echo "  ❌ Branch not found via Git" >&2
+              return 1
+            fi
+          }
+          
+          # Git configuration
+          git config --global user.email "S_Bot_Azure@sadgan.int"
+          git config --global user.name "S_Bot_Azure"
+          git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64 -w 0)"
+          git config --global http.sslVerify false
+          git config --global --add safe.directory '*'
+          git config --global core.compression 0
+          git config --global http.postBuffer 1048576000
+          git config --global pack.threads 1
+          git config --global pull.rebase false
+          
+          SOURCE_BRANCH="$(init.SOURCE_BRANCH)"
+          TARGET_BRANCH="$(init.TARGET_BRANCH)"
+          
+          # Define all repositories to process based on component
+          # Always include shared repos, conditionally include component-specific repos
+          REPOSITORIES=(
+            "SadganShared/_git/1_Configs"
+            "SadganShared/_git/2_SharedLibrary"
+          )
+          
+          # Add server library for both (frontend needs it too? Check original frontend had 3_ClientLibrary and 4_ServerLibrary)
+          REPOSITORIES+=("SadganShared/_git/4_ServerLibrary")
+          
+          # Add client library for frontend
+          if [[ "${{ parameters.COMPONENT }}" == "frontend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+            REPOSITORIES+=("SadganShared/_git/3_ClientLibrary")
+            REPOSITORIES+=("SadganErp/_git/Sadgan.Erp.Client.Core")
+            REPOSITORIES+=("SadganErp/_git/Sadgan.Erp.Panel")
+          fi
+          
+          # Add backend API repo
+          if [[ "${{ parameters.COMPONENT }}" == "backend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+            REPOSITORIES+=("SadganErp/_git/SadganErpApi")
+          fi
+          
+          # Base URL for Git operations
+          GIT_BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+          
+          echo "========================================="
+          echo "Starting multi-repo PR creation for $SOURCE_BRANCH → $TARGET_BRANCH"
+          echo "Component: ${{ parameters.COMPONENT }}"
+          echo "Total repositories: ${#REPOSITORIES[@]}"
+          echo "========================================="
+          
+          # Initialize associative arrays
+          declare -A REPO_IDS
+          declare -A PR_IDS
+          declare -A MERGE_STATUSES
+          declare -A SOURCE_COMMITS
+          declare -A REPO_SKIPPED
+          declare -A SOURCE_COMMIT_HASHES
+          declare -A TARGET_COMMIT_HASHES
+          
+          # First pass: Check all repos for conflicts before any merges
+          echo ""
+          echo "========================================="
+          echo "PHASE 1: PRE-VALIDATION - Checking all repos for merge conflicts"
+          echo "========================================="
+          
+          for REPO_NAME in "${REPOSITORIES[@]}"; do
+            echo ""
+            echo "📦 Processing repository: $REPO_NAME"
+            echo "-----------------------------------------"
+            
+            # Extract project name and simple repo name from the path
+            PROJECT_NAME=$(echo "$REPO_NAME" | cut -d'/' -f1)
+            SIMPLE_REPO_NAME=$(basename "$REPO_NAME")
+            
+            echo "  📁 Project: $PROJECT_NAME"
+            echo "  📂 Repo: $SIMPLE_REPO_NAME"
+            
+            # Construct project-specific API URL
+            PROJECT_API_URL="$GIT_BASE_URL/$PROJECT_NAME/_apis"
+            echo "========  PROJECT_API_URL: $PROJECT_API_URL"
+            
+            # Get repository ID from REST API using project-specific URL
+            echo "  🔍 Looking up repository ID for: $SIMPLE_REPO_NAME"
+            REPOS_URL="$PROJECT_API_URL/git/repositories?api-version=7.0&_=$(date +%s%N)"
+            REPOS_RESPONSE=$(call_api "$REPOS_URL") || {
+              echo "  ❌ Failed to get repositories list for project $PROJECT_NAME"
+              exit 1
+            }
+            
+            # Extract and clean repository ID
+            RAW_REPO_ID=$(echo "$REPOS_RESPONSE" | jq -r --arg name "$SIMPLE_REPO_NAME" '.value[] | select(.name==$name) | .id')
+            REPO_ID=$(clean_repo_id "$RAW_REPO_ID")
+            
+            if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
+              echo "  ❌ Could not find repository: $SIMPLE_REPO_NAME in project $PROJECT_NAME"
+              echo "  Available repositories in project $PROJECT_NAME:"
+              echo "$REPOS_RESPONSE" | jq -r '.value[].name' | sed 's/^/    - /'
+              exit 1
+            fi
+            echo "  ✅ Found repository ID: $REPO_ID"
+            REPO_IDS["$REPO_NAME"]="$REPO_ID"
+            
+            # Construct Git URL for this repository
+            REPO_GIT_URL="$GIT_BASE_URL/$REPO_NAME"
+            echo "======== REPO_GIT_URL: $REPO_GIT_URL"
+            
+            # Validate source branch using Git
+            echo "  🔍 Validating source branch via Git: $SOURCE_BRANCH"
+            SOURCE_COMMIT=$(check_branch_exists_git "$REPO_GIT_URL" "$SOURCE_BRANCH") || {
+              echo "  ⚠️ Source branch '$SOURCE_BRANCH' not found via Git"
+              echo "  ⚠️ Skipping this repository for PR creation"
+              REPO_SKIPPED["$REPO_NAME"]="source_branch_missing"
+              continue
+            }
+            SOURCE_COMMIT_HASHES["$REPO_NAME"]="$SOURCE_COMMIT"
+            echo "  ✅ Source branch commit: $SOURCE_COMMIT"
+            
+            # Validate target branch using Git
+            echo "  🔍 Validating target branch via Git: $TARGET_BRANCH"
+            TARGET_COMMIT=$(check_branch_exists_git "$REPO_GIT_URL" "$TARGET_BRANCH") || {
+              echo "  ⚠️ Target branch '$TARGET_BRANCH' not found via Git"
+              echo "  ⚠️ Skipping this repository for PR creation"
+              REPO_SKIPPED["$REPO_NAME"]="target_branch_missing"
+              continue
+            }
+            TARGET_COMMIT_HASHES["$REPO_NAME"]="$TARGET_COMMIT"
+            echo "  ✅ Target branch commit: $TARGET_COMMIT"
+            
+            echo "  ✅ Both branches validated successfully via Git"
+            
+            # Check for existing PR using project-specific API URL
+            echo "  🔍 Checking for existing PRs..."
+            PR_SEARCH_URL="$PROJECT_API_URL/git/repositories/$REPO_ID/pullrequests?searchCriteria.status=active&api-version=7.0&_=$(date +%s%N)"
+            PR_SEARCH=$(call_api "$PR_SEARCH_URL") || {
+              echo "  ❌ Failed to search PRs"
+              exit 1
+            }
+            
+            EXISTING_PR=$(echo "$PR_SEARCH" | jq -r --arg source "refs/heads/$SOURCE_BRANCH" --arg target "refs/heads/$TARGET_BRANCH" \
+              '.value[] | select(.sourceRefName==$source and .targetRefName==$target) | .pullRequestId')
+            
+            if [ -n "$EXISTING_PR" ] && [ "$EXISTING_PR" != "null" ]; then
+              echo "  ⚠️ Active PR exists: $EXISTING_PR"
+              PR_IDS["$REPO_NAME"]="$EXISTING_PR"
+            else
+              # Create new PR with retry logic using project-specific API URL
+              echo "  🆕 Creating new PR..."
+              PR_URL="$PROJECT_API_URL/git/repositories/$REPO_ID/pullrequests?api-version=7.0"
+              PR_TITLE="BOT auto pr from $SOURCE_BRANCH to $TARGET_BRANCH"
+              PR_BODY="{
+                \"sourceRefName\": \"refs/heads/$SOURCE_BRANCH\",
+                \"targetRefName\": \"refs/heads/$TARGET_BRANCH\",
+                \"title\": \"$PR_TITLE\"
+              }"
+              
+              # Retry loop for PR creation
+              MAX_PR_RETRIES=10
+              PR_RETRY=0
+              PR_CREATED=false
+              
+              while [ $PR_RETRY -lt $MAX_PR_RETRIES ] && [ "$PR_CREATED" = false ]; do
+                if [ $PR_RETRY -gt 0 ]; then
+                  echo "  ⚠️ Retry $PR_RETRY creating PR (waiting 5 seconds)..."
+                  sleep 5
+                fi
+                
+                # Attempt PR creation via REST API with cache-busting headers
+                PR_RESPONSE=$(curl -s -u ":$GIT_PAT" \
+                  -H "Content-Type: application/json" \
+                  -H "Cache-Control: no-cache, no-store" \
+                  -H "Pragma: no-cache" \
+                  -H "Expires: 0" \
+                  -X POST \
+                  -d "$PR_BODY" \
+                  "$PR_URL" 2>/dev/null || echo '{"error":"connection failed"}')
+                
+                # Check if PR creation succeeded
+                if echo "$PR_RESPONSE" | jq -e '.pullRequestId' > /dev/null 2>&1; then
+                  PR_ID=$(echo "$PR_RESPONSE" | jq -r '.pullRequestId')
+                  echo "  ✅ PR created successfully with ID: $PR_ID"
+                  PR_IDS["$REPO_NAME"]="$PR_ID"
+                  PR_CREATED=true
+                elif echo "$PR_RESPONSE" | grep -q "TF401398"; then
+                  # Branch not found error
+                  echo "  ⚠️ REST API still doesn't see the branch (attempt $((PR_RETRY+1))/$MAX_PR_RETRIES)"
+                  PR_RETRY=$((PR_RETRY + 1))
+                else
+                  echo "  ❌ Failed to create PR - unexpected error"
+                  echo "  Response: $PR_RESPONSE"
+                  PR_RETRY=$((PR_RETRY + 1))
+                fi
+              done
+              
+              if [ "$PR_CREATED" = false ]; then
+                echo "  ❌ Could not create PR after $MAX_PR_RETRIES attempts"
+                echo "  ⚠️ Skipping this repository"
+                REPO_SKIPPED["$REPO_NAME"]="pr_creation_failed"
+                continue
+              fi
+            fi
+            
+            # Quick check for immediate conflicts using project-specific API URL
+            echo "  🔍 Checking initial merge status..."
+            PR_URL="$PROJECT_API_URL/git/repositories/$REPO_ID/pullrequests/${PR_IDS["$REPO_NAME"]}?api-version=7.0&_=$(date +%s%N)"
+            PR_DETAILS=$(call_api "$PR_URL") || {
+              echo "  ❌ Failed to get PR details"
+              exit 1
+            }
+            
+            MERGE_STATUS=$(echo "$PR_DETAILS" | jq -r '.mergeStatus')
+            MERGE_STATUSES["$REPO_NAME"]="$MERGE_STATUS"
+            
+            if [ "$MERGE_STATUS" = "conflicts" ]; then
+              echo "  ❌ IMMEDIATE CONFLICT detected in $REPO_NAME"
+              echo "  Aborting promotion - all repos must be conflict-free before proceeding"
+              exit 1
+            elif [ "$MERGE_STATUS" = "failure" ]; then
+              echo "  ❌ MERGE FAILURE detected in $REPO_NAME"
+              exit 1
+            fi
+            
+            echo "  ✅ Initial merge status: $MERGE_STATUS"
+          done
+          
+          # Filter out skipped repositories
+          ACTIVE_REPOS=()
+          for REPO_NAME in "${REPOSITORIES[@]}"; do
+            if [ -z "${REPO_SKIPPED["$REPO_NAME"]}" ]; then
+              ACTIVE_REPOS+=("$REPO_NAME")
+            else
+              echo ""
+              echo "⚠️ Skipping $REPO_NAME - Reason: ${REPO_SKIPPED["$REPO_NAME"]}"
+            fi
+          done
+          
+          if [ ${#ACTIVE_REPOS[@]} -eq 0 ]; then
+            echo ""
+            echo "❌ No active repositories to process. All were skipped."
+            exit 0
+          fi
+          
+          echo ""
+          echo "✅ Active repositories to process: ${#ACTIVE_REPOS[@]}"
+          
+          # Second pass: Wait for all merges to be ready
+          echo ""
+          echo "========================================="
+          echo "PHASE 2: WAITING FOR ALL MERGES TO BE READY"
+          echo "========================================="
+          
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+          ALL_READY=false
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ] && [ "$ALL_READY" = false ]; do
+            ALL_READY=true
+            ATTEMPT=$((ATTEMPT + 1))
+            
+            echo ""
+            echo "--- Check attempt $ATTEMPT/$MAX_ATTEMPTS ---"
+            
+            for REPO_NAME in "${ACTIVE_REPOS[@]}"; do
+              REPO_ID="${REPO_IDS["$REPO_NAME"]}"
+              PR_ID="${PR_IDS["$REPO_NAME"]}"
+              PROJECT_NAME=$(echo "$REPO_NAME" | cut -d'/' -f1)
+              PROJECT_API_URL="$GIT_BASE_URL/$PROJECT_NAME/_apis"
+              
+              # Clean IDs before constructing URL
+              REPO_ID_CLEAN=$(clean_repo_id "$REPO_ID")
+              PR_ID_CLEAN=$(echo "$PR_ID" | tr -d '\n\r ')
+              
+              PR_URL="$PROJECT_API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=7.0&_=$(date +%s%N)"
+              PR_DETAILS=$(call_api "$PR_URL") || {
+                echo "  ⚠️ Failed to get PR details for $REPO_NAME, will retry..."
+                ALL_READY=false
+                continue
+              }
+              
+              MERGE_STATUS=$(echo "$PR_DETAILS" | jq -r '.mergeStatus')
+              
+              printf "  %-40s: %s\n" "$REPO_NAME" "$MERGE_STATUS"
+              
+              if [ "$MERGE_STATUS" = "conflicts" ]; then
+                echo "  ❌ Merge conflict detected in $REPO_NAME"
+                exit 1
+              elif [ "$MERGE_STATUS" = "failure" ]; then
+                echo "  ❌ Merge failure in $REPO_NAME"
+                exit 1
+              elif [ "$MERGE_STATUS" != "succeeded" ]; then
+                ALL_READY=false
+                MERGE_STATUSES["$REPO_NAME"]="$MERGE_STATUS"
+              else
+                MERGE_STATUSES["$REPO_NAME"]="$MERGE_STATUS"
+                # Store source commit for later use
+                if [ -z "${SOURCE_COMMITS[$REPO_NAME]}" ]; then
+                  SOURCE_COMMITS["$REPO_NAME"]=$(echo "$PR_DETAILS" | jq -r '.lastMergeSourceCommit.commitId')
+                fi
+              fi
+            done
+            
+            if [ "$ALL_READY" = false ] && [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+              echo "Not all merges ready yet. Waiting 10 seconds..."
+              sleep 10
+            fi
+          done
+          
+          if [ "$ALL_READY" = false ]; then
+            echo "❌ Timeout waiting for merges to be ready"
+            echo "Current statuses:"
+            for REPO_NAME in "${ACTIVE_REPOS[@]}"; do
+              echo "  $REPO_NAME: ${MERGE_STATUSES["$REPO_NAME"]}"
+            done
+            exit 1
+          fi
+          
+          echo ""
+          echo "✅ ALL ACTIVE REPOSITORIES READY FOR MERGE"
+          
+          # Third pass: Approve and complete PRs sequentially
+          echo ""
+          echo "========================================="
+          echo "PHASE 3: SEQUENTIAL APPROVAL AND COMPLETION"
+          echo "========================================="
+          
+          COMPLETED_COUNT=0
+          for REPO_NAME in "${ACTIVE_REPOS[@]}"; do
+            COMPLETED_COUNT=$((COMPLETED_COUNT + 1))
+            echo ""
+            echo "[$COMPLETED_COUNT/${#ACTIVE_REPOS[@]}] Processing repository: $REPO_NAME"
+            echo "-----------------------------------------"
+            
+            REPO_ID="${REPO_IDS["$REPO_NAME"]}"
+            PR_ID="${PR_IDS["$REPO_NAME"]}"
+            SOURCE_COMMIT="${SOURCE_COMMITS["$REPO_NAME"]}"
+            PROJECT_NAME=$(echo "$REPO_NAME" | cut -d'/' -f1)
+            PROJECT_API_URL="$GIT_BASE_URL/$PROJECT_NAME/_apis"
+            
+            # Clean IDs
+            REPO_ID_CLEAN=$(clean_repo_id "$REPO_ID")
+            PR_ID_CLEAN=$(echo "$PR_ID" | tr -d '\n\r ')
+            
+            # Get current user identity
+            echo "  🔍 Getting PR details for approval..."
+            PR_URL="$PROJECT_API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=7.0&_=$(date +%s%N)"
+            PR_DETAILS=$(call_api "$PR_URL") || {
+              echo "  ❌ Failed to get PR details"
+              exit 1
+            }
+            
+            CURRENT_USER_ID=$(echo "$PR_DETAILS" | jq -r '.createdBy.id')
+            
+            # Add as reviewer and vote +10
+            echo "  👍 Approving PR $PR_ID..."
+            REVIEWER_URL="$PROJECT_API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN/reviewers/$CURRENT_USER_ID?api-version=7.0"
+            REVIEWER_BODY="{\"vote\": 10}"
+            
+            call_api "$REVIEWER_URL" "PUT" "$REVIEWER_BODY" > /dev/null || {
+              echo "  ⚠️ Failed to record vote, but continuing..."
+            }
+            
+            echo "  ✅ PR approved"
+            
+            # Complete the PR with bypass
+            echo "  🔄 Completing PR $PR_ID..."
+            COMPLETE_URL="$PROJECT_API_URL/git/repositories/$REPO_ID_CLEAN/pullrequests/$PR_ID_CLEAN?api-version=7.0"
+            COMPLETE_BODY="{
+              \"status\": \"completed\",
+              \"lastMergeSourceCommit\": {
+                \"commitId\": \"$SOURCE_COMMIT\"
+              },
+              \"completionOptions\": {
+                \"bypassPolicy\": true,
+                \"bypassReason\": \"Automated pr - sequential merge\",
+                \"mergeStrategy\": \"rebaseAndFastForward\",
+                \"deleteSourceBranch\": false
+              }
+            }"
+            
+            COMPLETE_RESPONSE=$(call_api "$COMPLETE_URL" "PATCH" "$COMPLETE_BODY") || {
+              echo "  ❌ Failed to complete PR for $REPO_NAME"
+              exit 1
+            }
+            
+            # Check completion
+            HAS_COMPLETION_QUEUE=$(echo "$COMPLETE_RESPONSE" | jq -r 'has("completionQueueTime")')
+            HAS_CLOSED_BY=$(echo "$COMPLETE_RESPONSE" | jq -r 'has("closedBy")')
+            CURRENT_STATUS=$(echo "$COMPLETE_RESPONSE" | jq -r '.status // "unknown"')
+            
+            if [ "$HAS_COMPLETION_QUEUE" = "true" ] || [ "$HAS_CLOSED_BY" = "true" ] || [ "$CURRENT_STATUS" = "completed" ]; then
+              echo "  ✅ PR $PR_ID completed successfully"
+              
+              # Wait for merge to fully complete before next repo
+              echo "  ⏱️ Waiting 5 seconds for merge to settle..."
+              sleep 5
+              
+              # Verify final status
+              FINAL_CHECK=$(call_api "$COMPLETE_URL") || true
+              FINAL_STATUS=$(echo "$FINAL_CHECK" | jq -r '.status // "unknown"')
+              echo "  📊 Final PR status: $FINAL_STATUS"
+            else
+              echo "  ❌ Failed to complete PR for $REPO_NAME"
+              echo "  Response: $COMPLETE_RESPONSE"
+              exit 1
+            fi
+          done
+          
+          echo ""
+          echo "========================================="
+          echo "✅ ALL $COMPLETED_COUNT ACTIVE REPOSITORIES PROCESSED SUCCESSFULLY"
+          if [ ${#REPOSITORIES[@]} -ne ${#ACTIVE_REPOS[@]} ]; then
+            echo "⚠️ Skipped repositories: $(( ${#REPOSITORIES[@]} - ${#ACTIVE_REPOS[@]} ))"
+          fi
+          echo "========================================="
+    
+    - bash: |
+        set -e
+        # Configure Git
+        git config --global user.email "S_Bot_Azure@sadgan.int"
+        git config --global user.name "S_Bot_Azure"
+        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+        git config --global http.sslVerify false
+        git config --global --add safe.directory '*'
+        git config --global core.compression 0
+        git config --global http.postBuffer 1048576000
+        git config --global pack.threads 1
+        git config --global pull.rebase false
+    
+        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+    
+        function clone_or_pull {
+            branch_name=$1
+            repo_url=$2
+            target_dir=$3
+            
+            echo "Cleaning up previous checkout ($target_dir)..."
+            if [ -d "$target_dir" ]; then
+                echo "Removing directory..."
+                rm -rf "$target_dir"
+            fi
+            
+            echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
+            git clone --branch "$branch_name" "$repo_url" "$target_dir"
+            
+            if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
+                cd "$target_dir"
+                echo "Current directory: $(pwd)"
+                echo "✅ Repository cloned to: $target_dir"
+                echo "📁 Directory contents:"
+                ls -la
+            else
+                echo "❌ Clone failed"
+                exit 1
+            fi
+        } 
+    
+        echo "================= isCreatePR: $(isCreatePR)"
+        echo "================= isBranchDevelop: $(isBranchDevelop)"
+        PULL_BRANCH_1_CONFIF=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True"  ] && echo "dev" || echo "alpha" )
+        
+        # Always clone shared repos
+        clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/1_Configs"              "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"       
+        clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/2_SharedLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary" 
+        clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/4_ServerLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"                
+        clone_or_pull  cicd                       "$BASE_URL/SadganErp/_git/CICD"                      "$(System.DefaultWorkingDirectory)/CICD"  
+        
+        # Clone component-specific repos
+        if [[ "${{ parameters.COMPONENT }}" == "frontend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+          clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganShared/_git/3_ClientLibrary"        "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary" 
+          clone_or_pull  $CURRENT_BRANCH           "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"          "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"          
+          clone_or_pull  $PULL_BRANCH_1_CONFIF     "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core"    "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"  
+        fi
+        
+        if [[ "${{ parameters.COMPONENT }}" == "backend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+          clone_or_pull  $CURRENT_BRANCH           "$BASE_URL/SadganErp/_git/SadganErpApi"              "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"          
+        fi
+        
+        # Determine main repo path and get commit hash
+        if [[ "${{ parameters.COMPONENT }}" == "frontend" ]]; then
+          MAIN_REPO_PATH="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+        elif [[ "${{ parameters.COMPONENT }}" == "backend" ]]; then
+          MAIN_REPO_PATH="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        elif [[ "${{ parameters.COMPONENT }}" == "both" ]]; then
+          # For both, we need to handle this in matrix strategy - will be set per job
+          MAIN_REPO_PATH="$(baseProjPath)"
+        fi
+        
+        MAIN_COMMIT_HASH=$(cd "$MAIN_REPO_PATH" && git rev-parse HEAD | cut -c1-8)
+        echo "Using commit hash for cache busting: $MAIN_COMMIT_HASH"
+        
+        COMMIT_HASH="$MAIN_COMMIT_HASH"
+        
+        echo "Commit hash: $COMMIT_HASH"
+        echo "##vso[task.setvariable variable=commit_hash;isOutput=true]$COMMIT_HASH"
+      displayName: "Git Checkout"
+      name: gitPull
+      env:
+        GIT_PAT: $(GIT_PAT)
+        HOME: $(Agent.HomeDirectory) 
+    
+    - task: Bash@3
+      name: tagSetting
+      displayName: 'Version Assign'
+      env:
+        SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      inputs:
+        targetType: 'inline'
+        script: |
+          ls -alh
+          CUR_BRANCH="$CURRENT_BRANCH"
+          echo "User name: ${{ variables['Build.RequestedFor'] }}"
+          echo "User ID: ${{ variables['Build.RequestedForId'] }}"
+          echo "Component: ${{ parameters.COMPONENT }}"
+          
+          compare_versions() {
+                local v1="$1" v2="$2"
+            
+                # 1. Strip leading “v” (case‑insensitive) & validate
+                for v in v1 v2; do
+                    local val=${!v}
+                    [[ $val =~ ^[vV]?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
+                        echo "Error – $val is not a valid semantic version (vMAJOR.MINOR.PATCH)" >&2
+                        return 3
+                    }
+                    # Save only the numeric parts
+                    eval "${v}=(${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]})"
+                done
+            
+                # 2. Compare major, then minor, then patch
+                local i
+                for i in 0 1 2; do
+                    if    (( v1[i] > v2[i] )); then printf "%s > %s\n" "$v1" "$v2"; return 1
+                    elif (( v1[i] < v2[i] )); then printf "%s < %s\n" "$v1" "$v2"; return 2
+                    fi
+                done
+            
+                # 3. All components equal
+                printf "%s == %s\n" "$v1" "$v2"
+                return 0
+          }
+          
+          # ------------------------------------------------------------------
+          #  Extract Version & Perform Sanity check
+          # ------------------------------------------------------------------
+          if [ "$(isBranchDevelop)" == "True" -o  "$(isBranchDevOps)" == "True" ]; then
+            NEW_TAG=$( [ "$(isBranchDevelop)" = true ] && echo "latest-dev" || echo "v0.0.0.0" )
+            echo "Using tag: $NEW_TAG"
+            echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+            echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+                              
+            cat <<EOF > $(Build.ArtifactStagingDirectory)/vars.json
+              {
+                "FQIN": "$(DOCKER_IMG):$NEW_TAG",
+                "DOCKER_TAG": "$NEW_TAG",
+                "CREATE_RELEASE": $SHOULD_RELEASE,
+                "BRANCH": "$CUR_BRANCH",
+                "COMPONENT": "${{ parameters.COMPONENT }}"
+              }
+          EOF
+          else
+            json_file="$(System.DefaultWorkingDirectory)/$(versionConfigPath)/version.$CUR_BRANCH.json"
+            echo "Reading version from: $json_file"
+            IFS=, read -r major minor patch < <(
+              jq -r '.major + "," + .minor + "," + .patch' "$json_file"
+            )
+          
+            # printf 'v%s.%s.%s\n' "$major" "$minor" "$patch"
+            baseVersion="v$major.$minor.$patch"
+            echo "baseVersion: $baseVersion"
+              
+            cd "$(baseProjPath)"
+            git tag -l | xargs git tag -d && git fetch --tags
+            TAGS=$(git tag -l "${baseVersion}-$CUR_BRANCH*")
+            LAST_TAG=$(git tag -l "${baseVersion}-$CUR_BRANCH.*" | sort -V | tail -n1)
+            echo "LAST_TAG = $LAST_TAG"
+            if [[ -z "$LAST_TAG" ]]; then
+                echo "⚠️  No tag found matching '$baseVersion-$CUR_BRANCH.*'"
+                _MAJOR=$major
+                _MINOR=$minor
+                _PATCH=$patch
+                _PRE=$CUR_BRANCH
+                _BN=0
+            else
+                IFS='.-' read -r _MAJOR _MINOR _PATCH _PRE _BN <<< "${LAST_TAG#v}"
+                # _BN=$(echo "$LAST_TAG" | rev | cut -d. -f1 | rev)
+            fi
+            LAST_TAG="v$_MAJOR.$_MINOR.$_PATCH-$_PRE.$_BN"
+            echo "LAST_TAG = $LAST_TAG"
+            lastTagVersion="v$_MAJOR.$_MINOR.$_PATCH"
+            echo "lastTagVersion: $lastTagVersion"
+            
+            if compare_versions "$lastTagVersion" "$baseVersion"; then # in case versions are equal
+              echo "input version matches base version; so increasing build number:"
+              _BN=$((_BN + 1))
+              NEW_TAG="v$_MAJOR.$_MINOR.$_PATCH-$CUR_BRANCH.$_BN"
+            elif [[ $? -eq 1 ]]; then # in case baseVersion is lower
+              echo "WRONG! base version cannot be lower than previously released version!"
+              exit 1
+            else # baseVersion is upper
+              NEW_TAG="v$major.$minor.$patch-$CUR_BRANCH.1"
+            fi
+            
+            echo "new tag is: $NEW_TAG"
+            cd "$(baseProjPath)"
+            if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+              echo "Tag $NEW_TAG already exists!"
+              echo "##vso[task.setvariable variable=isTagDuplicate]true"
+              exit 0
+            else
+              echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+              echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+              cat <<EOF > $(Build.ArtifactStagingDirectory)/vars.json
+                {
+                  "FQIN": "$(DOCKER_IMG):$NEW_TAG",
+                  "DOCKER_TAG": "$NEW_TAG",
+                  "CREATE_RELEASE": $SHOULD_RELEASE,
+                  "BRANCH": "$CUR_BRANCH",
+                  "COMPONENT": "${{ parameters.COMPONENT }}"
+                }
+          EOF
+            fi
+          fi
+    
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'build-vars-${{ parameters.COMPONENT }}'
+        publishLocation: 'Container'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    - bash: |
+        configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
+    
+        if [ "$(isBranchDevelop)" == "True" -o "$(isBranchDevOps)" = "True" ]; then
+          new_assembly_version="0.0.0.0"
+        else
+          assembly_version=$(awk -F '[<>]' '/<AssemblyVersion>/ {print $3}' $configPropsFile)
+          tag_version="$(tagSetting.DOCKER_TAG)"
+          tag_version="${tag_version#v}"
+          
+          # Simple solution: extract all numbers and join with dots
+          new_assembly_version=$(echo "$tag_version" | grep -oE '[0-9]+' | head -4 | paste -sd '.' -)
+          
+          # If we don't have 4 numbers, pad with zeros
+          if [ -z "$new_assembly_version" ]; then
+            new_assembly_version="0.0.0.0"
+          else
+            # Count how many numbers we have
+            num_count=$(echo "$new_assembly_version" | tr -cd '.' | wc -c)
+            num_count=$((num_count + 1))
+            
+            # Pad to 4 numbers
+            while [ $num_count -lt 4 ]; do
+              new_assembly_version="${new_assembly_version}.0"
+              num_count=$((num_count + 1))
+            done
+          fi
+        fi
+    
+        echo "current assembly version $assembly_version is changing to $new_assembly_version"
+        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$new_assembly_version</AssemblyVersion>|" $configPropsFile
+      displayName: "Assembly Version Fix"
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    # Override appsettings.json - conditional for frontend/backend
+    - bash: |
+        if [[ "${{ parameters.COMPONENT }}" == "frontend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+          sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/$(appsettingsSource)"
+          destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/$(appsettingsDest)"
+        else
+          sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/$(appsettingsSource)"
+          destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/$(appsettingsDest)"
+        fi
+    
+        if [ -f "$sourceFile" ]; then
+            cp -f "$sourceFile" "$destinationFile"
+            echo "Successfully copied appsettings.pipe.json to appsettings.json"
+        else
+            echo "❌ appsettings.pipe.json not found at $sourceFile!"
+            exit 1
+        fi
+      displayName: "Override appsettings.json"
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    # Create global NuGet.Config
+    - bash: |
+        # Nuget SSL
+        echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"    
+    
+        sudo mkdir -p /usr/share
+        echo '<?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <packageSources>
+            <clear />
+            <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            <add key="baget" value="https://nupkg.sadgan.int/v3/index.json" />
+            <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
+          </packageSources>
+          <packageSourceCredentials>
+            <NupkgWeb2>
+              <add key="Username" value="S_Bot_Azure" />
+              <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
+            </NupkgWeb2>
+          </packageSourceCredentials>
+        </configuration>' | sudo tee /usr/share/NuGet.Config > /dev/null
+    
+        # Remove project-specific NuGet.Config files
+        find $(Build.SourcesDirectory) -name "NuGet.Config" -type f -delete
+    
+        ls -l /usr/share/NuGet.Config
+        cat /usr/share/NuGet.Config
+      displayName: 'Create global NuGet.Config'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+      env:
+        BOT_TOKEN: $(BOT_TOKEN)
+    
+    # .Net Restore
+    - bash: |
+        export PATH="/home/azurebot/.dotnet:$PATH"
+        dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config --verbosity detailed
+      displayName: 'Dotnet Restore'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    # Fetch Release Notes (frontend only)
+    - task: Bash@3
+      displayName: 'Fetch Release Notes'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'), eq(variables['hasFrontendSteps'], 'true'))
+      env:
+        wikiPat: $(System.AccessToken)
+      inputs:
+        targetType: 'inline'
+        script: |
+          encoded_path=$(echo "/Release Notes" | sed 's|^/||' | sed 's/ /%20/g' | sed 's/#/%23/g')
+          echo "encoded_path = $encoded_path"
+          response=$(curl -s -u ":$wikiPat" "$(orgUrl)/$(project)/_apis/wiki/wikis/$(wikiId)/pages?path=$encoded_path&api-version=7.0&recursionLevel=full")
+          echo $response
+          
+          # Check if response is valid
+          if [ $? -ne 0 ] || [ -z "$response" ]; then
+            echo "Error: Failed to get response from Azure DevOps API"
+            exit 1
+          fi
+    
+          # Check if Release Notes exists and has subpages
+          if ! echo "$response" | jq -e '.subPages' > /dev/null 2>&1; then
+            echo "Error: Release Notes page not found or has no subpages"
+            echo "Response:"
+            echo "$response" | jq .
+            exit 1
+          fi
+    
+          # Extract subpages from Release Notes
+          subpages=$(echo "$response" | jq -c '.subPages[]?')
+          
+          if [ -z "$subpages" ]; then
+            echo "No subpages found under Release Notes"
+            echo "Response structure:"
+            echo "$response" | jq .
+            exit 0
+          fi
+    
+          echo "Subpages found under Release Notes:"
+          echo "$subpages" | jq -r '.path'
+    
+          TARGET_WWWROOT="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/$(wikiChangelogPath)"
+          mkdir -p "$TARGET_WWWROOT"
+          
+          # Download each subpage
+          echo "$subpages" | while read -r subpage; do
+            page_path=$(echo "$subpage" | jq -r '.path')
+            echo "Processing: $page_path"
+            
+            # URL encode the path (remove leading slash and encode)
+            encoded_path=$(echo "$page_path" | sed 's|^/||' | sed 's/ /%20/g' | sed 's/#/%23/g')
+            page_content=$(curl -s -u ":$wikiPat" "$(orgUrl)/$(project)/_apis/wiki/wikis/$(wikiId)/pages?path=$encoded_path&includeContent=true&api-version=7.0")
+            filename=$(basename "$page_path" | sed 's/ /_/g' | sed 's/\.md$//')
+            echo "$page_content" | jq -r '.content' > "$TARGET_WWWROOT/${filename}.md"
+            
+            echo "==== Downloaded: ${filename}.md"
+          done
+          
+          ls -la $TARGET_WWWROOT
+    
+    - bash: |
+        export PATH="/home/azurebot/.dotnet:$PATH"
+        dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
+      displayName: 'Build Solution'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    - bash: |
+        export PATH="/home/azurebot/.dotnet:$PATH"
+        dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish
+        
+        # Copy appsettings.json to appropriate location based on component
+        if [[ "${{ parameters.COMPONENT }}" == "frontend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+          cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/$(appsettingsDest) $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+        else
+          cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/$(appsettingsDest) $(Build.ArtifactStagingDirectory)/publish/
+        fi
+      displayName: 'Publish Solution'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
+    # Cache Busting (frontend only)
+    - bash: |
+        echo "Applying cache busting to all static assets..."
+        COMMIT_HASH="$(gitPull.commit_hash)"
+        
+        cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+        INDEX_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html
+        
+        if [ ! -f "$INDEX_FILE" ]; then
+          echo "INFO: Index file not found at $INDEX_FILE - skipping cache busting"
+          exit 0
+        fi
+    
+        rm -f $(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html.br
+        rm -f $(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html.gz
+        ls -alh $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+        
+        # Backup for verification
+        cp "$INDEX_FILE" "$INDEX_FILE.backup"
+        
+        # Remove ALL existing query parameters first
+        sed -i 's|\(href="[^"]*\)?[^"]*"|\1"|g' index.html
+        sed -i 's|\(src="[^"]*\)?[^"]*"|\1"|g' index.html
+        
+        # Apply cache busting to ALL assets (any file type in assets/ or favicon/)
+        sed -i "s|\(href=\"assets/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
+        sed -i "s|\(src=\"assets/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
+        sed -i "s|\(href=\"favicon/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
+        
+        echo "=== AFTER ==="
+        grep -E '(assets/|favicon/)' "$INDEX_FILE" | head -10
+        
+        echo "Targeted cache busting applied with commit: $COMMIT_HASH"
+        echo "=== CHANGES MADE ==="
+        diff -u "$INDEX_FILE.backup" "$INDEX_FILE" | grep -E "^[-+]" || echo "Changes applied successfully"
+        
+        echo "1. All cache-busted assets:"
+        grep -E '\.(css|js|png)\?v=' "$INDEX_FILE"
+        
+        echo ""
+        echo "2. Blazor assets (should be unchanged):"
+        grep -E '(_content/|_framework/|blazor\.webassembly\.js)' "$INDEX_FILE"
+        
+        echo ""
+        echo "3. Any remaining ?modified= params (should be none):"
+        grep '?modified=' "$INDEX_FILE" && echo "ERROR: Manual params still exist!" || echo "GOOD: No manual params found"
+        
+        echo ""
+        echo "4. Summary:"
+        echo "   - Cache-busted files: $(grep -c '?v=' "$INDEX_FILE" || echo 0)"
+        echo "   - Blazor files: $(grep -c -E '(_content/|_framework/)' "$INDEX_FILE" || echo 0)"
+      displayName: 'Cache Busting (Frontend only)'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'), eq(variables['hasFrontendSteps'], 'true'))
+    
+    - bash: |
+        mkdir -p $(Build.ArtifactStagingDirectory)/docker
+        
+        # Copy Dockerfile and nginx.conf (for frontend)
+        if [[ "${{ parameters.COMPONENT }}" == "frontend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+          cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Dockerfile.pipe  $(Build.ArtifactStagingDirectory)/docker/
+          if [ -f "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/nginx.conf" ]; then
+            cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/nginx.conf  $(Build.ArtifactStagingDirectory)/docker/
+          fi
+        else
+          cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/Dockerfile.pipe  $(Build.ArtifactStagingDirectory)/docker/
+        fi
+    
+        echo "$(NEXUS_DOCKER_PASSWORD)" | docker login $(DOCKER_REGISTRY) \
+          -u $(NEXUS_DOCKER_USERNAME) \
+          --password-stdin
+    
+        cd $(Build.ArtifactStagingDirectory)
+        
+        # Modify appsettings for frontend/backend
+        if [[ "${{ parameters.COMPONENT }}" == "frontend" || "${{ parameters.COMPONENT }}" == "both" ]]; then
+          APPSETTINGS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/appsettings.json
+          if [ -f "$APPSETTINGS_FILE" ]; then
+            sed -i 's/"IsDeveloperMode": false/"IsDeveloperMode": true/' $APPSETTINGS_FILE
+          fi
+        else
+          APPSETTINGS_FILE="publish/appsettings.json"
+          # Backend-specific appsettings modifications would go here if needed
+        fi
+    
+        if [ "$(isBranchDevelop)" == "True" -o  "$(isBranchDevOps)" = "True" ]; then
+          if [[ "${{ parameters.COMPONENT }}" == "frontend" || "${{ parameters.COMPONENT }}" == "both" ]] && [ -f "$APPSETTINGS_FILE" ]; then
+            sed -i 's|"BaseUrl": "[^"]*"|"BaseUrl": "https://dev.api.fx.sadgan.int"|' $APPSETTINGS_FILE
+          fi
+          
+          docker build \
+              -t $(tagSetting.FQIN) \
+              -f docker/Dockerfile.pipe \
+              .
+          docker push $(tagSetting.FQIN)
+        else
+          docker build \
+              -t "$(tagSetting.FQIN)" \
+              -f docker/Dockerfile.pipe \
+              .
+    
+          docker push "$(tagSetting.FQIN)"
+          
+          cd "$(baseProjPath)"
+          git tag -a "$(tagSetting.DOCKER_TAG)" -m "$(tagSetting.DOCKER_TAG)"
+          git push origin "$(tagSetting.DOCKER_TAG)" || { echo "Tag already available on remote repo!"; exit 1; }
+        fi
+      displayName: 'Build & Push Image'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+      env:
+        NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+        NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)

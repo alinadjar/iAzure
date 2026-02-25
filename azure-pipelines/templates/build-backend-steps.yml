@@ -1,0 +1,244 @@
+parameters:
+- name: SHOULD_RELEASE
+  type: string
+- name: BRANCH
+  type: string
+- name: isBranchDevelop
+  type: string
+- name: isBranchDevOps
+  type: string
+
+steps:
+- task: Bash@3
+  name: tagSetting
+  displayName: 'Version Assign (Frontend)'
+  env:
+    SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+  inputs:
+    targetType: 'inline'
+    script: |
+      ls -alh
+      CUR_BRANCH="${{ parameters.BRANCH }}"
+      echo "User name: $(Build.RequestedFor)"
+      echo "User ID: $(Build.RequestedForId)"
+      
+      compare_versions() {
+            local v1="$1" v2="$2"
+        
+            # 1. Strip leading “v” (case‑insensitive) & validate
+            for v in v1 v2; do
+                local val=${!v}
+                [[ $val =~ ^[vV]?([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
+                    echo "Error – $val is not a valid semantic version (vMAJOR.MINOR.PATCH)" >&2
+                    return 3
+                }
+                # Save only the numeric parts
+                eval "${v}=(${BASH_REMATCH[1]} ${BASH_REMATCH[2]} ${BASH_REMATCH[3]})"
+            done
+        
+            # 2. Compare major, then minor, then patch
+            local i
+            for i in 0 1 2; do
+                if    (( v1[i] > v2[i] )); then printf "%s > %s\n" "$v1" "$v2"; return 1
+                elif (( v1[i] < v2[i] )); then printf "%s < %s\n" "$v1" "$v2"; return 2
+                fi
+            done
+        
+            # 3. All components equal
+            printf "%s == %s\n" "$v1" "$v2"
+            return 0
+      }
+      
+      # ------------------------------------------------------------------
+      #  Extract Version & Perform Sanity check
+      # ------------------------------------------------------------------
+      if [ "${{ parameters.isBranchDevelop }}" == "True" -o  "${{ parameters.isBranchDevOps }}" == "True" ]; then
+        NEW_TAG=$( [ "${{ parameters.isBranchDevelop }}" = true ] && echo "latest-dev" || echo "v0.0.0.0" )
+        echo "Using tag: $NEW_TAG"
+        echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+        echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+                          
+        cat <<EOF > $(Build.ArtifactStagingDirectory)/vars.json
+          {
+            "FQIN": "$(DOCKER_IMG):$NEW_TAG",
+            "DOCKER_TAG": "$NEW_TAG",
+            "CREATE_RELEASE": ${{ parameters.SHOULD_RELEASE }},
+            "BRANCH": "$CUR_BRANCH"
+          }
+      EOF
+      else
+        json_file="$(System.DefaultWorkingDirectory)/$(versionConfigPath)/version.$CUR_BRANCH.json"
+        echo "Reading version from: $json_file"
+        IFS=, read -r major minor patch < <(
+          jq -r '.major + "," + .minor + "," + .patch' "$json_file"
+        )
+      
+        baseVersion="v$major.$minor.$patch"
+        echo "baseVersion: $baseVersion"
+          
+        cd "$(baseProjPath)"
+        git tag -l | xargs git tag -d && git fetch --tags
+        TAGS=$(git tag -l "${baseVersion}-$CUR_BRANCH*")
+        LAST_TAG=$(git tag -l "${baseVersion}-$CUR_BRANCH.*" | sort -V | tail -n1)
+        echo "LAST_TAG = $LAST_TAG"
+        if [[ -z "$LAST_TAG" ]]; then
+            echo "⚠️  No tag found matching '$baseVersion-$CUR_BRANCH.*'"
+            _MAJOR=$major
+            _MINOR=$minor
+            _PATCH=$patch
+            _PRE=$CUR_BRANCH
+            _BN=0
+        else
+            IFS='.-' read -r _MAJOR _MINOR _PATCH _PRE _BN <<< "${LAST_TAG#v}"
+        fi
+        LAST_TAG="v$_MAJOR.$_MINOR.$_PATCH-$_PRE.$_BN"
+        echo "LAST_TAG = $LAST_TAG"
+        lastTagVersion="v$_MAJOR.$_MINOR.$_PATCH"
+        echo "lastTagVersion: $lastTagVersion"
+        
+        if compare_versions "$lastTagVersion" "$baseVersion"; then # in case versions are equal
+          echo "input version matches base version; so increasing build number:"
+          _BN=$((_BN + 1))
+          NEW_TAG="v$_MAJOR.$_MINOR.$_PATCH-$CUR_BRANCH.$_BN"
+        elif [[ $? -eq 1 ]]; then # in case baseVersion is lower
+          echo "WRONG! base version cannot be lower than previously released version!"
+          exit 1
+        else # baseVersion is upper
+          NEW_TAG="v$major.$minor.$patch-$CUR_BRANCH.1"
+        fi
+        
+        echo "new tag is: $NEW_TAG"
+        cd "$(baseProjPath)"
+        if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+          echo "Tag $NEW_TAG already exists!"
+          echo "##vso[task.setvariable variable=isTagDuplicate]true"
+          exit 0
+        else
+          echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+          echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+          cat <<EOF > $(Build.ArtifactStagingDirectory)/vars.json
+            {
+              "FQIN": "$(DOCKER_IMG):$NEW_TAG",
+              "DOCKER_TAG": "$NEW_TAG",
+              "CREATE_RELEASE": ${{ parameters.SHOULD_RELEASE }},
+              "BRANCH": "$CUR_BRANCH"
+            }
+      EOF
+        fi
+      fi
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'front-build-vars'
+    publishLocation: 'Container'
+  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+
+
+# Override appsettings.json for frontend
+- bash: |
+    sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.pipe.json"
+    destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json"
+
+    if [ -f "$sourceFile" ]; then
+        cp -f "$sourceFile" "$destinationFile"
+        echo "Successfully copied appsettings.pipe.json to appsettings.json"
+    else
+        echo "❌ appsettings.pipe.json not found!"
+        exit 1
+    fi
+  displayName: "Override appsettings.json (Frontend)"
+  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+
+# Create global NuGet.Config
+- bash: |
+    # Nuget SSL
+    echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"    
+
+    sudo mkdir -p /usr/share
+    echo '<?xml version="1.0" encoding="utf-8"?>
+    <configuration>
+      <packageSources>
+        <clear />
+        <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+        <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
+      </packageSources>
+      <packageSourceCredentials>
+        <NupkgWeb2>
+          <add key="Username" value="S_Bot_Azure" />
+          <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
+        </NupkgWeb2>
+      </packageSourceCredentials>
+    </configuration>' | sudo tee /usr/share/NuGet.Config > /dev/null
+
+    # Remove project-specific NuGet.Config files
+    find $(Build.SourcesDirectory) -name "NuGet.Config" -type f -delete
+
+    ls -l /usr/share/NuGet.Config
+    cat /usr/share/NuGet.Config
+  displayName: 'Create global NuGet.Config (Frontend)'
+  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  env:
+    BOT_TOKEN: $(BOT_TOKEN)
+
+# .Net Restore
+- bash: |
+    export PATH="/home/azurebot/.dotnet:$PATH"
+    dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config --verbosity detailed
+  displayName: 'Dotnet Restore (Frontend)'
+  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+
+
+- bash: |
+    export PATH="/home/azurebot/.dotnet:$PATH"
+    dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
+  displayName: 'Build Solution (Frontend)'
+  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+
+- bash: |
+    export PATH="/home/azurebot/.dotnet:$PATH"
+    dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish
+    cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+  displayName: 'Publish Solution (Frontend)'
+  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+
+
+
+- bash: |
+    mkdir -p $(Build.ArtifactStagingDirectory)/docker
+    cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Dockerfile.pipe  $(Build.ArtifactStagingDirectory)/docker/
+    cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/nginx.conf       $(Build.ArtifactStagingDirectory)/docker/
+
+    echo "$(NEXUS_DOCKER_PASSWORD)" | docker login $(DOCKER_REGISTRY) \
+      -u $(NEXUS_DOCKER_USERNAME) \
+      --password-stdin
+
+    cd $(Build.ArtifactStagingDirectory)
+    APPSETTINGS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/appsettings.json
+    sed -i 's/"IsDeveloperMode": false/"IsDeveloperMode": true/' $APPSETTINGS_FILE
+
+    if [ "${{ parameters.isBranchDevelop }}" == "True" -o  "${{ parameters.isBranchDevOps }}" = "True" ]; then
+      sed -i 's|"BaseUrl": "[^"]*"|"BaseUrl": "https://dev.api.fx.sadgan.int"|' $APPSETTINGS_FILE
+      docker build \
+          -t $(tagSetting.FQIN) \
+          -f docker/Dockerfile.pipe \
+          .
+      docker push $(tagSetting.FQIN)
+    else
+      docker build \
+          -t "$(tagSetting.FQIN)" \
+          -f docker/Dockerfile.pipe \
+          .
+
+      docker push "$(tagSetting.FQIN)"
+
+      cd "$(baseProjPath)"
+      git tag -a "$(tagSetting.DOCKER_TAG)" -m "$(tagSetting.DOCKER_TAG)"
+      git push origin "$(tagSetting.DOCKER_TAG)" || { echo "Tag already available on remote repo!"; exit 1; }
+    fi
+  displayName: 'Build & Push Image (Frontend)'
+  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  env:
+    NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+    NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
