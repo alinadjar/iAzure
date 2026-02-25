@@ -620,7 +620,7 @@ stages:
 # Stage 2: Build
 - stage: Build
   displayName: 'Build Stage'
-  dependsOn: Assembly_Fix
+  dependsOn: PR_Creation
   condition: succeededOrFailed()  # Run even if PR stage was skipped
   jobs:
   - job: Git_Checkout
