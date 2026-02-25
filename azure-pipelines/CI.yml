@@ -25,14 +25,7 @@ parameters:
     - 'alpha'
     - 'beta'
     - 'master'
-# - name: COMPONENT
-#   displayName: "Component to build"
-#   type: string
-#   default: 'both'
-#   values:
-#     - frontend
-#     - backend
-#     - both
+
 
 variables:
   # Common variables
