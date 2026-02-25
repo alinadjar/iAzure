@@ -741,42 +741,42 @@ stages:
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))        
 
   # Parallel build jobs
-  - ${{ if eq(parameters.COMPONENT, 'both') }}:
-    - job: Build_Frontend
-      displayName: 'Build Frontend'
-      dependsOn: Assembly_Fix
-      pool: 'WEB-1'
-      variables:
-        solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
-        DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
-        baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel'
-        versionConfigPath: 'CICD/branch-versions/frontend'
-        commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.FRONTEND_COMMIT'] ]
-      steps:
-      - template: templates/build-frontend-steps.yml
-        parameters:
-          SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
-          BRANCH: ${{ parameters.BRANCH }}
-          isBranchDevelop: $(isBranchDevelop)
-          isBranchDevOps: $(isBranchDevOps)
+  # - ${{ if eq(parameters.COMPONENT, 'both') }}:
+  - job: Build_Frontend
+    displayName: 'Build Frontend'
+    dependsOn: Assembly_Fix
+    pool: 'WEB-1'
+    variables:
+      solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
+      DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
+      baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel'
+      versionConfigPath: 'CICD/branch-versions/frontend'
+      commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.FRONTEND_COMMIT'] ]
+    steps:
+    - template: templates/build-frontend-steps.yml
+      parameters:
+        SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
+        BRANCH: ${{ parameters.BRANCH }}
+        isBranchDevelop: $(isBranchDevelop)
+        isBranchDevOps: $(isBranchDevOps)
 
-    - job: Build_Backend
-      displayName: 'Build Backend'
-      dependsOn: Assembly_Fix
-      pool: 'WEB-1'
-      variables:
-        solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
-        DOCKER_IMG: $(DOCKER_REGISTRY)/fx/backend
-        baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi'
-        versionConfigPath: 'CICD/branch-versions/backend'
-        commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.BACKEND_COMMIT'] ]
-      steps:
-      - template: templates/build-backend-steps.yml
-        parameters:
-          SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
-          BRANCH: ${{ parameters.BRANCH }}
-          isBranchDevelop: $(isBranchDevelop)
-          isBranchDevOps: $(isBranchDevOps)
+  - job: Build_Backend
+    displayName: 'Build Backend'
+    dependsOn: Assembly_Fix
+    pool: 'WEB-1'
+    variables:
+      solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
+      DOCKER_IMG: $(DOCKER_REGISTRY)/fx/backend
+      baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi'
+      versionConfigPath: 'CICD/branch-versions/backend'
+      commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.BACKEND_COMMIT'] ]
+    steps:
+    - template: templates/build-backend-steps.yml
+      parameters:
+        SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
+        BRANCH: ${{ parameters.BRANCH }}
+        isBranchDevelop: $(isBranchDevelop)
+        isBranchDevOps: $(isBranchDevOps)
 
   # - ${{ if eq(parameters.COMPONENT, 'frontend') }}:
   #   - job: Build_Frontend_Only
