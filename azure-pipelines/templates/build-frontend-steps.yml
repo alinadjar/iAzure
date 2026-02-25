@@ -187,6 +187,14 @@ steps:
         fi
       fi
 
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'front-build-vars'
+    publishLocation: 'Container'
+  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+
+
 - bash: |
         ls -alh 
         configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
@@ -220,13 +228,7 @@ steps:
         echo "current assembly version $assembly_version is changing to $new_assembly_version"
         sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$new_assembly_version</AssemblyVersion>|" $configPropsFile
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false')) 
-
-- task: PublishBuildArtifacts@1
-  inputs:
-    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-    ArtifactName: 'front-build-vars'
-    publishLocation: 'Container'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  displayName: 'Assembly Version Set'
 
 
 # Override appsettings.json for frontend
