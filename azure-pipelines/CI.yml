@@ -70,6 +70,7 @@ stages:
   jobs: 
   - job: InitJob
     steps:
+    - checkout: none
     - task: Bash@3
       name: init
       displayName: 'init'
@@ -104,7 +105,7 @@ stages:
 - stage: PR_Creation
   displayName: 'PR Creation Stage'
   dependsOn: INIT
-  condition: and(eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
+  condition: and(succeeded(), eq(variables['isCreatePR'], 'True'), eq(variables['isBranchDevelop'], 'False'))
   variables:
     SOURCE_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.SOURCE_BRANCH'] ]
     TARGET_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.TARGET_BRANCH'] ]
@@ -112,7 +113,7 @@ stages:
   - job: CreatePRs
     displayName: 'Create PRs & Merge'
     steps:
-    - checkout: none        
+    - checkout: none
     
     - task: Bash@3
       name: create_pr_multi_repo
