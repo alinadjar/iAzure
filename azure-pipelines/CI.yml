@@ -697,7 +697,9 @@ stages:
     displayName: 'Assembly Version Set'
     dependsOn: Git_Checkout
     steps:
+    - checkout: none
     - bash: |
+        ls -alh 
         configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
     
         if [ "$(isBranchDevelop)" == "True" -o "$(isBranchDevOps)" = "True" ]; then
