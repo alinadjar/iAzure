@@ -7,65 +7,10 @@ parameters:
   type: string
 - name: isBranchDevOps
   type: string
+- name: COMMIT_HASH
+  type: string  
 
 steps:
-- bash: |
-        set -e
-        # Configure Git
-        git config --global user.email "S_Bot_Azure@sadgan.int"
-        git config --global user.name "S_Bot_Azure"
-        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
-        git config --global http.sslVerify false
-        git config --global --add safe.directory '*'
-        
-        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
-        
-        function clone_or_pull {
-            branch_name=$1
-            repo_url=$2
-            target_dir=$3
-            
-            echo "Cleaning up previous checkout ($target_dir)..."
-            if [ -d "$target_dir" ]; then
-                echo "Removing directory..."
-                rm -rf "$target_dir"
-            fi
-            
-            echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
-            git clone --branch "$branch_name" "$repo_url" "$target_dir"
-            
-            if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
-                cd "$target_dir"
-                echo "Current directory: $(pwd)"
-                echo "✅ Repository cloned to: $target_dir"
-                echo "📁 Directory contents:"
-                ls -la
-            else
-                echo "❌ Clone failed"
-                exit 1
-            fi
-        }
-        
-        PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True" ] && echo "dev" || echo "$CURRENT_BRANCH" )
-        
-        # Clone shared repos (common to both)
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/1_Configs"            "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/2_SharedLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/4_ServerLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
-        clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/SadganErpApi"            "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
-        clone_or_pull  cicd          "$BASE_URL/SadganErp/_git/CICD"                    "$(System.DefaultWorkingDirectory)/CICD"
-
-
-        # Get backend commit hash
-        cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
-        BACKEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
-        echo "##vso[task.setvariable variable=BACKEND_COMMIT;isOutput=true]$BACKEND_COMMIT"
-        
-  displayName: "Git Checkout"
-  name: gitPull
-  env:
-    GIT_PAT: $(GIT_PAT)
-
 - task: Bash@3
   name: tagSetting
   displayName: 'Version Assign (Backend)'
@@ -184,6 +129,10 @@ steps:
       EOF
         fi
       fi
+
+      # Export the tag as a job output variable for the final tagging job
+      echo "##vso[task.setvariable variable=BACKEND_TAG;isOutput=true]$(DOCKER_TAG)"
+      echo "##vso[task.setvariable variable=BACKEND_FQIN;isOutput=true]$(FQIN)"
 
 - task: PublishBuildArtifacts@1
   inputs:
@@ -328,11 +277,7 @@ steps:
           -f docker/Dockerfile.pipe \
           .
 
-      docker push "$(tagSetting.FQIN)"
-
-      cd "$(baseProjPath)"
-      git tag -a "$(tagSetting.DOCKER_TAG)" -m "$(tagSetting.DOCKER_TAG)"
-      git push origin "$(tagSetting.DOCKER_TAG)" || { echo "Tag already available on remote repo!"; exit 1; }
+      docker push "$(tagSetting.FQIN)"      
     fi
   displayName: 'Build & Push Image (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
