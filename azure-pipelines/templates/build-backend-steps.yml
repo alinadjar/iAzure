@@ -11,7 +11,7 @@ parameters:
 steps:
 - task: Bash@3
   name: tagSetting
-  displayName: 'Version Assign (Frontend)'
+  displayName: 'Version Assign (Backend)'
   env:
     SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
@@ -114,7 +114,7 @@ steps:
           echo "Tag $NEW_TAG already exists!"
           echo "##vso[task.setvariable variable=isTagDuplicate]true"
           exit 0
-        else
+        else              
           echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
           echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
           cat <<EOF > $(Build.ArtifactStagingDirectory)/vars.json
@@ -128,18 +128,12 @@ steps:
         fi
       fi
 
-- task: PublishBuildArtifacts@1
-  inputs:
-    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-    ArtifactName: 'front-build-vars'
-    publishLocation: 'Container'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
 
-# Override appsettings.json for frontend
+# Override appsettings.json for backend
 - bash: |
-    sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.pipe.json"
-    destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json"
+    sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.pipe.json"
+    destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json"
 
     if [ -f "$sourceFile" ]; then
         cp -f "$sourceFile" "$destinationFile"
@@ -148,7 +142,7 @@ steps:
         echo "❌ appsettings.pipe.json not found!"
         exit 1
     fi
-  displayName: "Override appsettings.json (Frontend)"
+  displayName: "Override appsettings.json (Backend)"
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
 # Create global NuGet.Config
@@ -177,49 +171,55 @@ steps:
 
     ls -l /usr/share/NuGet.Config
     cat /usr/share/NuGet.Config
-  displayName: 'Create global NuGet.Config (Frontend)'
+  displayName: 'Create global NuGet.Config (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
   env:
     BOT_TOKEN: $(BOT_TOKEN)
+    
 
 # .Net Restore
 - bash: |
     export PATH="/home/azurebot/.dotnet:$PATH"
-    dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config --verbosity detailed
-  displayName: 'Dotnet Restore (Frontend)'
+    dotnet --info
+    dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config
+  displayName: 'Dotnet Restore (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-
+            
 
 - bash: |
     export PATH="/home/azurebot/.dotnet:$PATH"
     dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
-  displayName: 'Build Solution (Frontend)'
+  displayName: 'Build Solution (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
 
 - bash: |
     export PATH="/home/azurebot/.dotnet:$PATH"
     dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish
-    cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json $(Build.ArtifactStagingDirectory)/publish/wwwroot/
-  displayName: 'Publish Solution (Frontend)'
+    cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json $(Build.ArtifactStagingDirectory)/publish/
+  displayName: 'Publish Solution (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-
-
+    
 
 - bash: |
     mkdir -p $(Build.ArtifactStagingDirectory)/docker
-    cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Dockerfile.pipe  $(Build.ArtifactStagingDirectory)/docker/
-    cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/nginx.conf       $(Build.ArtifactStagingDirectory)/docker/
+    cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/Dockerfile.pipe  $(Build.ArtifactStagingDirectory)/docker/
 
     echo "$(NEXUS_DOCKER_PASSWORD)" | docker login $(DOCKER_REGISTRY) \
       -u $(NEXUS_DOCKER_USERNAME) \
       --password-stdin
 
     cd $(Build.ArtifactStagingDirectory)
-    APPSETTINGS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/appsettings.json
-    sed -i 's/"IsDeveloperMode": false/"IsDeveloperMode": true/' $APPSETTINGS_FILE
+    APPSETTINGS_FILE="publish/appsettings.json"
 
     if [ "${{ parameters.isBranchDevelop }}" == "True" -o  "${{ parameters.isBranchDevOps }}" = "True" ]; then
-      sed -i 's|"BaseUrl": "[^"]*"|"BaseUrl": "https://dev.api.fx.sadgan.int"|' $APPSETTINGS_FILE
+      # Backend-specific appsettings modifications for dev branch
+      # Uncomment and customize these as needed
+      # sed -i '/"ConnectionStrings": {/,/}/s/pg/pg-dev/g' "$APPSETTINGS_FILE"
+      # sed -i '/"App": {/,/}/ s|"SelfUrl": ".*"|"SelfUrl": "https://dev.api.fx.sadgan.int"|'     "$APPSETTINGS_FILE"
+      # sed -i '/"App": {/,/}/ s|"CorsOrigins": ".*"|"CorsOrigins": "https://dev.api.fx.sadgan.int,https://dev.fx.sadgan.int"|' "$APPSETTINGS_FILE"
+      # cat "$APPSETTINGS_FILE" | jq .
+      
       docker build \
           -t $(tagSetting.FQIN) \
           -f docker/Dockerfile.pipe \
@@ -237,7 +237,7 @@ steps:
       git tag -a "$(tagSetting.DOCKER_TAG)" -m "$(tagSetting.DOCKER_TAG)"
       git push origin "$(tagSetting.DOCKER_TAG)" || { echo "Tag already available on remote repo!"; exit 1; }
     fi
-  displayName: 'Build & Push Image (Frontend)'
+  displayName: 'Build & Push Image (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
   env:
     NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
