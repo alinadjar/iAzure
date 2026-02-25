@@ -798,6 +798,55 @@ stages:
     
     - bash: |
         set -e
+        
+        # Function to create tag for a repository
+        create_tag() {
+          local repo_name="$1"
+          local repo_url="$2"
+          local tag="$3"
+          local expected_commit="$4"
+          local branch="$5"
+          
+          echo ""
+          echo "📦 Processing $repo_name..."
+          echo "  Tag: $tag"
+          echo "  Expected commit: $expected_commit"
+          
+          # Clean up any existing directory
+          rm -rf "$repo_name-repo"
+          
+          # Clone the repository
+          git clone --branch "$branch" --depth 1 "$repo_url" "$repo_name-repo"
+          cd "$repo_name-repo"
+          
+          # Verify and get the correct commit
+          CURRENT_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+          if [ "$CURRENT_COMMIT" != "$expected_commit" ]; then
+            echo "⚠️  Current commit $CURRENT_COMMIT differs from expected $expected_commit"
+            echo "   Fetching specific commit..."
+            git fetch --depth 1 origin "$expected_commit"
+            git checkout "$expected_commit"
+          fi
+          
+          # Create tag if it doesn't exist
+          if git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "⚠️  Tag $tag already exists locally"
+          else
+            git tag -a "$tag" -m "Release $tag [commit: $expected_commit]"
+            echo "✅ Tag created locally"
+          fi
+          
+          # Push tag
+          if git push origin "$tag" 2>/dev/null; then
+            echo "✅ Tag pushed to remote"
+          else
+            echo "⚠️  Tag may already exist on remote (push failed)"
+          fi
+          
+          cd ..
+          rm -rf "$repo_name-repo"
+        }
+        
         # Configure Git
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
@@ -808,57 +857,32 @@ stages:
         echo "========================================="
         echo "Creating Git tags for successful builds"
         echo "========================================="
-        echo "Frontend tag: $(FRONTEND_TAG) (commit: $(FRONTEND_COMMIT))"
-        echo "Backend tag: $(BACKEND_TAG) (commit: $(BACKEND_COMMIT))"
         
         BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
         
-        # Create frontend tag using the commit hash we already have
-        echo ""
-        echo "📦 Creating frontend tag..."
-        # Clone with minimal depth to get the specific commit
-        git clone --branch ${{ parameters.BRANCH }} --depth 1 "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel" frontend-repo
-        cd frontend-repo
+        # Create frontend tag
+        create_tag \
+          "frontend" \
+          "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel" \
+          "$(FRONTEND_TAG)" \
+          "$(FRONTEND_COMMIT)" \
+          "${{ parameters.BRANCH }}"
         
-        # Verify we're on the right commit (optional safety check)
-        CURRENT_COMMIT=$(git rev-parse HEAD | cut -c1-8)
-        if [ "$CURRENT_COMMIT" != "$(FRONTEND_COMMIT)" ]; then
-          echo "⚠️ Warning: Current commit $CURRENT_COMMIT differs from expected $(FRONTEND_COMMIT)"
-          echo "Fetching specific commit..."
-          git fetch --depth 1 origin $(FRONTEND_COMMIT)
-          git checkout $(FRONTEND_COMMIT)
-        fi
-        
-        git tag -a "$(FRONTEND_TAG)" -m "Release $(FRONTEND_TAG) [commit: $(FRONTEND_COMMIT)]"
-        git push origin "$(FRONTEND_TAG)" || echo "⚠️ Tag may already exist"
-        cd ..
-        
-        # Create backend tag using the commit hash we already have
-        echo ""
-        echo "📦 Creating backend tag..."
-        git clone --branch ${{ parameters.BRANCH }} --depth 1 "$BASE_URL/SadganErp/_git/SadganErpApi" backend-repo
-        cd backend-repo
-        
-        # Verify we're on the right commit (optional safety check)
-        CURRENT_COMMIT=$(git rev-parse HEAD | cut -c1-8)
-        if [ "$CURRENT_COMMIT" != "$(BACKEND_COMMIT)" ]; then
-          echo "⚠️ Warning: Current commit $CURRENT_COMMIT differs from expected $(BACKEND_COMMIT)"
-          echo "Fetching specific commit..."
-          git fetch --depth 1 origin $(BACKEND_COMMIT)
-          git checkout $(BACKEND_COMMIT)
-        fi
-        
-        git tag -a "$(BACKEND_TAG)" -m "Release $(BACKEND_TAG) [commit: $(BACKEND_COMMIT)]"
-        git push origin "$(BACKEND_TAG)" || echo "⚠️ Tag may already exist"
-        cd ..
+        # Create backend tag
+        create_tag \
+          "backend" \
+          "$BASE_URL/SadganErp/_git/SadganErpApi" \
+          "$(BACKEND_TAG)" \
+          "$(BACKEND_COMMIT)" \
+          "${{ parameters.BRANCH }}"
         
         echo ""
         echo "========================================="
         echo "✅ Git tags created successfully"
         echo "========================================="
         echo "Frontend: $(FRONTEND_TAG) -> $(FRONTEND_COMMIT)"
-        echo "Backend: $(BACKEND_TAG) -> $(BACKEND_COMMIT)"
+        echo "Backend:  $(BACKEND_TAG) -> $(BACKEND_COMMIT)"
         
       displayName: 'Create and Push Git Tags'
       env:
-        GIT_PAT: $(GIT_PAT)    
+        GIT_PAT: $(GIT_PAT)
