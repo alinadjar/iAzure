@@ -1,0 +1,492 @@
+parameters:
+- name: Suite
+  type: string
+  default: 'test:smoke'
+  values:
+  - 'test:module'
+  - 'test:all'
+  - 'test:smoke'
+  - 'test:regression'
+  - 'test:custom'
+
+- name: screenshotMode
+  type: string
+  default: 'only-on-failure'
+  values:
+  - 'on'
+  - 'off'
+  - 'only-on-failure'
+
+- name: videoMode
+  type: string
+  default: 'only-on-failure'
+  values:
+  - 'on'
+  - 'off'
+  - 'only-on-failure'
+
+- name: headless
+  type: string
+  default: 'true'
+  values:
+  - 'true'
+  - 'false'
+
+- name: retries
+  type: number
+  default: 2
+
+- name: workers
+  type: number
+  default: 1
+
+- name: module
+  type: string
+  default: 'citizenship'
+  displayName: 'Module Name (required for test:module)'
+
+- name: testFile
+  type: string
+  default: 'tests/specs/citizenship/e2e/citizenship.crud.spec.js'
+  displayName: 'File Path (required for test:custom)'
+
+variables:
+  NODE_ENV: 'test'
+  CI: true
+  rootDir: "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.ERP.Laboratory"
+  MINIO_BUCKET: 'playwright-artifacts'
+  # Set default Playwright environment variables
+  PLAYWRIGHT_BROWSERS_PATH: '0'
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 'false'
+  
+  # Timeout settings
+  testTimeout: 30000
+  expectTimeout: 10000
+
+jobs:
+  - job: E2E_Tests
+    displayName: 'Playwright E2E Tests - ${{ parameters.Suite }}'
+    pool:
+      name: 'Playwright_FX'
+    # Add job timeout to prevent hanging
+    timeoutInMinutes: 150
+    
+    steps:
+    - checkout: none
+    
+    - script: |
+        set -e
+        WORKSPACE="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.ERP.Laboratory"
+        
+        # Clean up old directory if exists
+        if [ -d "$WORKSPACE" ]; then
+            echo "🧹 Cleaning up existing directory..."
+            rm -rf "$WORKSPACE"
+        fi
+
+        # Configure Git to use the provided access token
+        # git config --global credential.helper store
+        git config --global http.sslVerify false
+        git config --global --add safe.directory '*'
+        git config --global core.compression 0
+        git config --global http.postBuffer 1048576000
+        git config --global pack.threads 1
+        git config --global pull.rebase false
+        
+        # Create parent directory
+        mkdir -p "$(System.DefaultWorkingDirectory)/SadganErp"
+        
+        echo "📥 Cloning repository..."
+        echo "Branch: $(Build.SourceBranchName)"
+        # git clone --depth 1 --branch "$(Build.SourceBranchName)" \
+        #   "http://$(System.AccessToken)@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.ERP.Laboratory"  "$WORKSPACE"
+
+        git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" \
+                clone --branch $(Build.SourceBranchName) \
+                "http://$(System.AccessToken)@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.ERP.Laboratory" "$WORKSPACE"
+        
+        cd "$WORKSPACE"
+        echo "✅ Repository cloned successfully"
+        echo "   Current directory: $(pwd)"
+        echo "📁 Directory contents:"
+        ls -la
+        echo "📝 Latest commit: $(git log -1 --oneline)"
+      displayName: 'Git Checkout'
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        
+    # - task: NodeTool@0
+    #   inputs:
+    #     versionSpec: '18.x'
+    #   displayName: 'Setup Node.js 18.x'
+
+    - script: |
+        # Source NVM directly
+        export NVM_DIR="/root/.nvm"
+        [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+        [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+      
+        # Ensure Node.js 18 is installed and activated
+        if ! nvm list 18 > /dev/null 2>&1; then
+            echo "Installing Node.js 18..."
+            nvm install 18
+        fi
+
+        # Use Node.js 18
+        nvm use 18
+        export PATH="$NVM_DIR/versions/node/v18*/bin:$PATH"
+
+        if ! command -v npx &> /dev/null; then
+          echo "npx not found, installing..."
+          npm install -g npx
+        fi
+
+        echo "Node.js: $(node --version)"
+        echo "npm: $(npm --version)"
+        echo "npx: $(npx --version)"
+        echo "PATH: $PATH"
+        
+        # set -e
+        cd "$(rootDir)"
+        
+        echo "📦 Configuring npm..."
+        
+        # Configure npm registry
+        npm config set registry https://npm.sadgan.int
+        npm config set strict-ssl false
+        
+        # Set cache directory for faster installs
+        # npm config set cache "$(Pipeline.Workspace)/.npm"
+        # npm config set prefer-offline true
+        
+        # Add authentication if token is provided
+        # if [ -n "$(NPM_AUTH_TOKEN)" ]; then
+        #   echo "🔐 Configuring npm authentication..."
+        #   npm config set //npm.sadgan.int/:_authToken "$(NPM_AUTH_TOKEN)"
+        #   npm config set //npm.sadgan.int/:always-auth true
+        # fi
+        
+        echo "✅ NPM Registry: $(npm config get registry)"
+        echo "✅ Node version: $(node --version)"
+        echo "✅ NPM version: $(npm --version)"
+
+        npm ci
+        npx playwright install --with-deps
+        
+        # echo "📥 Installing dependencies..."
+        # # Use ci for consistent installs, skip audit for speed
+        # npm ci --no-audit --prefer-offline
+        
+        # echo "🌐 Installing Playwright browsers..."
+        # # Install only Chrome for faster execution (add firefox/webkit if needed)
+        # npx playwright install --with-deps chromium
+        
+        echo "✅ Playwright version:"
+        npx playwright --version
+        echo "##vso[task.setvariable variable=NODE_PATH]$(which node)"
+        echo "##vso[task.setvariable variable=NPM_PATH]$(which npm)"
+        echo "##vso[task.setvariable variable=NPX_PATH]$(which npx)"
+      
+        # Export PATH for subsequent steps
+        export PATH="$(dirname $(which node)):$PATH"
+        echo "##vso[task.setvariable variable=PATH;issecret=false]$PATH"
+      displayName: 'Install Dependencies'
+      env:
+        NODE_TLS_REJECT_UNAUTHORIZED: '0'
+        NVM_DIR: /root/.nvm
+        # Uncomment and set in pipeline variables if needed:
+        # NPM_AUTH_TOKEN: $(NPM_AUTH_TOKEN)
+
+    - script: |
+        cd "$(rootDir)"
+        
+        echo "=================================================="
+        echo "🧪 TEST CONFIGURATION"
+        echo "=================================================="
+        echo "📊 Suite:          $SUITE_NAME"
+        echo "📦 Module:         $MODULE_NAME"
+        echo "📁 Test File:      $TEST_FILE"
+        echo "👻 Headless:       $HEADLESS"
+        echo "👥 Workers:        $WORKERS"
+        echo "🔄 Retries:        $RETRIES"
+        echo "🌐 Base URL:       $(echo $BASE_URL | cut -c1-50)..."
+        echo "🎥 Video:          $VIDEO_MODE"
+        echo "📸 Screenshot:     $SCREENSHOT_MODE"
+        echo "=================================================="
+        
+        # Validate required parameters
+        if [ -z "$SUITE_NAME" ]; then
+          echo "##vso[task.logissue type=error]❌ Error: Suite parameter is required"
+          exit 1
+        fi
+        
+        if [ "$SUITE_NAME" = "test:module" ] && [ -z "$MODULE_NAME" ]; then
+          echo "##vso[task.logissue type=error]❌ Error: Module Name is required for test:module suite"
+          exit 1
+        fi
+        
+        # Set environment variables for Playwright
+        export PLAYWRIGHT_TEST_TIMEOUT=$(testTimeout)
+        export PLAYWRIGHT_EXPECT_TIMEOUT=$(expectTimeout)
+        
+        # Build Playwright command arguments
+        PW_ARGS=""
+        PW_ARGS="$PW_ARGS --reporter=html,list,junit"
+        PW_ARGS="$PW_ARGS --workers=$WORKERS"
+        PW_ARGS="$PW_ARGS --retries=$RETRIES"
+        PW_ARGS="$PW_ARGS --timeout=$(testTimeout)"
+        
+        # # For custom suite, run specific test file
+        # if [ "$SUITE_NAME" = "test:custom" ]; then
+        #   echo "🎯 Running custom test file: $TEST_FILE"
+        #   CMD="npx playwright test \"$TEST_FILE\" $PW_ARGS"
+          
+        # # For module suite, set MODULE env var
+        # elif [ "$SUITE_NAME" = "test:module" ]; then
+        #   echo "🎯 Running module tests for: $MODULE_NAME"
+        #   export MODULE="$MODULE_NAME"
+        #   CMD="npm run $SUITE_NAME"
+          
+        # # For other suites, run npm script
+        # else
+        #   echo "🎯 Running test suite: $SUITE_NAME"
+        #   CMD="npm run $SUITE_NAME"
+        # fi
+        
+        npx playwright test ${{ parameters.testFile }} --retries=${{ parameters.retries }} --workers=${{ parameters.workers }}
+                
+        
+        # Run tests with timeout protection
+        # timeout 3600 bash -c "$CMD" || true
+        
+        TEST_EXIT_CODE=$?
+        
+        # Check if timeout occurred (exit code 124)
+        if [ $TEST_EXIT_CODE -eq 124 ]; then
+          echo "##vso[task.logissue type=error]⏰ Tests timed out after 1 hour"
+          TEST_EXIT_CODE=1
+        elif [ $TEST_EXIT_CODE -eq 0 ]; then
+          echo "✅ All tests passed!"
+        else
+          echo "⚠️  Tests failed with exit code: $TEST_EXIT_CODE"
+        fi
+        
+        echo "##vso[task.setvariable variable=testExitCode;isOutput=true]$TEST_EXIT_CODE"
+      displayName: 'Run ${{ parameters.Suite }} Tests'
+      env:
+        BASE_URL: $(BASE_URL)
+        SUITE_NAME: ${{ parameters.Suite }}
+        MODULE_NAME: ${{ parameters.module }}
+        TEST_FILE: ${{ parameters.testFile }}
+        VIDEO_MODE: ${{ parameters.videoMode }}
+        HEADLESS: ${{ parameters.headless }}
+        SCREENSHOT_MODE: ${{ parameters.screenshotMode }}
+        WORKERS: ${{ parameters.workers }}
+        RETRIES: ${{ parameters.retries }}
+        PLAYWRIGHT_VIDEO: ${{ parameters.videoMode }}
+        PLAYWRIGHT_SCREENSHOT: ${{ parameters.screenshotMode }}
+        PLAYWRIGHT_HEADLESS: ${{ parameters.headless }}
+        NODE_TLS_REJECT_UNAUTHORIZED: '0'
+      continueOnError: true
+      # Set step timeout
+      timeoutInMinutes: 70
+
+    - task: PublishTestResults@2
+      condition: always()
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '**/test-results/**/*.xml'
+        testRunTitle: 'Playwright ${{ parameters.Suite }} - $(Build.BuildNumber)'
+        mergeTestResults: true
+        failTaskOnFailedTests: false
+      displayName: '📊 Publish Test Results'
+
+    - script: |
+        echo "📦 Creating artifacts directory..."
+        mkdir -p $(Build.ArtifactStagingDirectory)/playwright-artifacts
+        
+        echo "📁 Copying test results and reports..."
+        cd "$(rootDir)"
+        
+        # Copy test results if they exist
+        if [ -d "test-results" ]; then
+          echo "📂 Copying test-results..."
+          cp -r test-results $(Build.ArtifactStagingDirectory)/playwright-artifacts/
+          echo "✅ test-results copied"
+        else
+          echo "⚠️  test-results directory not found"
+        fi
+        
+        # Copy playwright report if it exists
+        if [ -d "playwright-report" ]; then
+          echo "📂 Copying playwright-report..."
+          cp -r playwright-report $(Build.ArtifactStagingDirectory)/playwright-artifacts/
+          echo "✅ playwright-report copied"
+        else
+          echo "⚠️  playwright-report directory not found"
+        fi
+        
+        # Copy configuration files
+        if [ -f "playwright.config.js" ]; then
+          cp playwright.config.js $(Build.ArtifactStagingDirectory)/playwright-artifacts/
+        fi
+        
+        if [ -f "package.json" ]; then
+          cp package.json $(Build.ArtifactStagingDirectory)/playwright-artifacts/
+        fi
+        
+        echo "📋 Artifact directory contents:"
+        ls -la $(Build.ArtifactStagingDirectory)/playwright-artifacts/
+      displayName: '📦 Prepare Artifacts'
+      condition: always()
+
+    - task: ArchiveFiles@2
+      condition: always()
+      inputs:
+        rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/playwright-artifacts'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/playwright-results-$(Build.BuildId).zip'
+        replaceExistingArchive: true
+        verbose: true
+      displayName: '📦 Create ZIP Archive'
+
+    # - script: |
+    #     echo "☁️  Setting up MinIO upload..."
+        
+    #     # Download MinIO client with retry
+    #     MAX_RETRIES=3
+    #     RETRY_COUNT=0
+        
+    #     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    #       echo "Attempt $(($RETRY_COUNT + 1)) to download mc..."
+    #       wget -q --no-check-certificate -O mc https://get.sadgan.int/mc && break
+    #       RETRY_COUNT=$((RETRY_COUNT + 1))
+    #       sleep 5
+    #     done
+        
+    #     if [ ! -f "mc" ]; then
+    #       echo "##vso[task.logissue type=error]Failed to download MinIO client"
+    #       exit 1
+    #     fi
+        
+    #     chmod +x mc
+        
+    #     # Configure MinIO client
+    #     echo "🔧 Configuring MinIO connection..."
+    #     ./mc alias set myminio $(MINIO_ENDPOINT) $(MINIO_ACCESS_KEY) $(MINIO_SECRET_KEY) --insecure
+        
+    #     # Test connection
+    #     echo "🔌 Testing MinIO connection..."
+    #     if ! ./mc ls myminio > /dev/null 2>&1; then
+    #       echo "##vso[task.logissue type=warning]MinIO connection test failed, continuing anyway..."
+    #     else
+    #       echo "✅ MinIO connection successful"
+    #     fi
+        
+    #     FILENAME="playwright-results-$(Build.BuildId).zip"
+    #     FILE_PATH="$(Build.ArtifactStagingDirectory)/$FILENAME"
+    #     FOLDER_PATH="FX/playwright-results/build-$(Build.BuildId)"
+    #     BUCKET_PATH="$FOLDER_PATH/$FILENAME"
+        
+    #     echo "📤 Uploading: $FILENAME"
+    #     echo "📁 MinIO Path: $(MINIO_BUCKET)/$BUCKET_PATH"
+        
+    #     # Create folder structure
+    #     ./mc mb --ignore-existing "myminio/$(MINIO_BUCKET)/$FOLDER_PATH"
+        
+    #     # Upload with retry
+    #     UPLOAD_RETRIES=3
+    #     for i in $(seq 1 $UPLOAD_RETRIES); do
+    #       echo "Upload attempt $i of $UPLOAD_RETRIES..."
+    #       if ./mc cp "$FILE_PATH" "myminio/$(MINIO_BUCKET)/$BUCKET_PATH" --insecure; then
+    #         echo "✅ Upload successful"
+    #         break
+    #       elif [ $i -eq $UPLOAD_RETRIES ]; then
+    #         echo "##vso[task.logissue type=error]Failed to upload after $UPLOAD_RETRIES attempts"
+    #         exit 1
+    #       fi
+    #       sleep 3
+    #     done
+        
+    #     # Set folder permissions
+    #     echo "🔓 Setting folder permissions..."
+    #     ./mc anonymous set download "myminio/$(MINIO_BUCKET)/FX/playwright-results" --insecure || true
+        
+    #     # Generate public URL
+    #     PUBLIC_URL="https://console.minio.sadgan.int/$(MINIO_BUCKET)/$BUCKET_PATH"
+        
+    #     echo "🔗 Public Download URL: $PUBLIC_URL"
+    #     echo "##vso[task.setvariable variable=MINIO_DOWNLOAD_URL]$PUBLIC_URL"
+        
+    #     # Create download info file
+    #     echo "🔗 Download URL: $PUBLIC_URL" > $(Build.ArtifactStagingDirectory)/download-info.txt
+    #     echo "📦 File: $FILENAME" >> $(Build.ArtifactStagingDirectory)/download-info.txt
+    #     echo "🏷️  Build ID: $(Build.BuildId)" >> $(Build.ArtifactStagingDirectory)/download-info.txt
+    #     echo "📅 Timestamp: $(date)" >> $(Build.ArtifactStagingDirectory)/download-info.txt
+    #     echo "🚀 Pipeline: $(Build.DefinitionName)" >> $(Build.ArtifactStagingDirectory)/download-info.txt
+    #     echo "🌿 Branch: $(Build.SourceBranchName)" >> $(Build.ArtifactStagingDirectory)/download-info.txt
+        
+    #     echo "✅ MinIO upload completed successfully"
+    #   displayName: '☁️  Upload to MinIO'
+    #   condition: always()
+    #   env:
+    #     MINIO_ACCESS_KEY: $(MINIO_ACCESS_KEY)
+    #     MINIO_SECRET_KEY: $(MINIO_SECRET_KEY)
+    #     MINIO_ENDPOINT: $(MINIO_ENDPOINT)
+    #     MINIO_BUCKET: $(MINIO_BUCKET)
+
+    - task: PublishBuildArtifacts@1
+      condition: always()
+      inputs:
+        pathToPublish: '$(Build.ArtifactStagingDirectory)/playwright-results-$(Build.BuildId).zip'
+        artifactName: 'playwright-results-zip'
+        artifactType: 'container'
+      displayName: '📦 Publish ZIP Archive'
+
+    # - task: PublishBuildArtifacts@1
+    #   condition: always()
+    #   inputs:
+    #     pathToPublish: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.ERP.Laboratory/playwright-report'
+    #     artifactName: 'playwright-report'
+    #     artifactType: 'container'
+    #   displayName: '📊 Publish HTML Report'
+
+    # - task: PublishBuildArtifacts@1
+    #   condition: always()
+    #   inputs:
+    #     pathToPublish: '$(Build.ArtifactStagingDirectory)/download-info.txt'
+    #     artifactName: 'download-info'
+    #     artifactType: 'container'
+    #   displayName: '🔗 Publish Download Info'
+
+    - script: |
+        echo "================================================"
+        echo "🎯 TEST EXECUTION COMPLETE"
+        echo "================================================"
+        echo "📊 Test Suite: ${{ parameters.Suite }}"
+        echo "✅ Exit Code: $(testExitCode)"
+        
+        if [ "$(testExitCode)" -eq 0 ]; then
+          echo "🏆 STATUS: ALL TESTS PASSED"
+        else
+          echo "❌ STATUS: TESTS FAILED"
+        fi
+        
+        echo "🔗 MinIO Download: $(MINIO_DOWNLOAD_URL)"
+        echo "📁 Artifacts: Available in pipeline artifacts"
+        echo "⏱️  Duration: $(date)"
+        echo "================================================"
+      displayName: '📋 Final Summary'
+      condition: always()
+
+    # Optional: Clean up workspace to save space
+    # - script: |
+    #     echo "🧹 Cleaning up workspace..."
+    #     cd "$(rootDir)"
+    #     # Keep only essential files
+    #     rm -rf node_modules 2>/dev/null || true
+    #     rm -rf .npm 2>/dev/null || true
+    #     echo "✅ Cleanup complete"
+    #   displayName: '🧹 Cleanup Workspace'
+    #   condition: always()
