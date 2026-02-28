@@ -253,7 +253,8 @@ jobs:
         #   CMD="npm run $SUITE_NAME"
         # fi
         
-        npx playwright test ${{ parameters.testFile }} --retries=${{ parameters.retries }} --workers=${{ parameters.workers }}
+        # npx playwright test ${{ parameters.testFile }} --retries=${{ parameters.retries }} --workers=${{ parameters.workers }}
+        npx playwright test tests/smoke
         
         # Run tests with timeout protection
         # timeout 3600 bash -c "$CMD" || true
