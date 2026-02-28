@@ -57,7 +57,7 @@ variables:
   MINIO_BUCKET: 'playwright-artifacts'
   # Set default Playwright environment variables
   PLAYWRIGHT_BROWSERS_PATH: '0'
-  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 'false'
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 'true'
   
   # Timeout settings
   testTimeout: 30000
@@ -84,8 +84,9 @@ jobs:
             rm -rf "$WORKSPACE"
         fi
 
-        # Configure Git to use the provided access token
-        # git config --global credential.helper store
+        git config --global user.email "S_Bot_Azure@sadgan.int"
+        git config --global user.name "S_Bot_Azure"
+        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
         git config --global http.sslVerify false
         git config --global --add safe.directory '*'
         git config --global core.compression 0
@@ -98,12 +99,11 @@ jobs:
         
         echo "📥 Cloning repository..."
         echo "Branch: $(Build.SourceBranchName)"
-        # git clone --depth 1 --branch "$(Build.SourceBranchName)" \
-        #   "http://$(System.AccessToken)@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.ERP.Laboratory"  "$WORKSPACE"
+        git clone --depth 1 --branch "$(Build.SourceBranchName)" "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.ERP.Laboratory"  "$WORKSPACE"
 
-        git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" \
-                clone --branch $(Build.SourceBranchName) \
-                "http://$(System.AccessToken)@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.ERP.Laboratory" "$WORKSPACE"
+        # git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" \
+        #         clone --branch $(Build.SourceBranchName) \
+        #         "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.ERP.Laboratory" "$WORKSPACE"
         
         cd "$WORKSPACE"
         echo "✅ Repository cloned successfully"
@@ -113,7 +113,7 @@ jobs:
         echo "📝 Latest commit: $(git log -1 --oneline)"
       displayName: 'Git Checkout'
       env:
-        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        GIT_PAT: $(GIT_PAT)
         
     # - task: NodeTool@0
     #   inputs:
@@ -254,7 +254,6 @@ jobs:
         # fi
         
         npx playwright test ${{ parameters.testFile }} --retries=${{ parameters.retries }} --workers=${{ parameters.workers }}
-                
         
         # Run tests with timeout protection
         # timeout 3600 bash -c "$CMD" || true
