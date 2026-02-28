@@ -230,11 +230,11 @@ jobs:
         export PLAYWRIGHT_EXPECT_TIMEOUT=$(expectTimeout)
         
         # Build Playwright command arguments
-        PW_ARGS=""
-        PW_ARGS="$PW_ARGS --reporter=html,list,junit"
-        PW_ARGS="$PW_ARGS --workers=$WORKERS"
-        PW_ARGS="$PW_ARGS --retries=$RETRIES"
-        PW_ARGS="$PW_ARGS --timeout=$(testTimeout)"
+        # PW_ARGS=""
+        # PW_ARGS="$PW_ARGS --reporter=html,list,junit"
+        # PW_ARGS="$PW_ARGS --workers=$WORKERS"
+        # PW_ARGS="$PW_ARGS --retries=$RETRIES"
+        # PW_ARGS="$PW_ARGS --timeout=$(testTimeout)"
         
         # # For custom suite, run specific test file
         # if [ "$SUITE_NAME" = "test:custom" ]; then
@@ -351,8 +351,7 @@ jobs:
       displayName: '📦 Create ZIP Archive'
 
     # - script: |
-    #     echo "☁️  Setting up MinIO upload..."
-        
+    #     echo "☁️  Setting up MinIO upload..."      
     #     # Download MinIO client with retry
     #     MAX_RETRIES=3
     #     RETRY_COUNT=0
