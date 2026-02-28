@@ -55,9 +55,8 @@ variables:
   CI: true
   rootDir: "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.ERP.Laboratory"
   MINIO_BUCKET: 'playwright-artifacts'
-  # Set default Playwright environment variables
-  PLAYWRIGHT_BROWSERS_PATH: '0'
-  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 'true'
+  PLAYWRIGHT_BROWSERS_PATH: '/opt/playwright-browsers'  # Shared location on agent
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 'false'  # Allow download if not exists
   
   # Timeout settings
   testTimeout: 30000
@@ -171,11 +170,29 @@ jobs:
         echo "✅ NPM version: $(npm --version)"
 
         npm ci
-        npx playwright install --with-deps
+        # npx playwright install --with-deps
+        if [ -d "$PLAYWRIGHT_BROWSERS_PATH/chromium-1208" ]; then
+          echo "✅ Playwright browsers already exist in shared location"
+          echo "   Browsers path: $PLAYWRIGHT_BROWSERS_PATH"
+          
+          # Create symlink to node_modules if needed (some setups require this)
+          mkdir -p node_modules/playwright-core/.local-browsers
+          ln -sfn "$PLAYWRIGHT_BROWSERS_PATH" node_modules/playwright-core/.local-browsers
+        else
+          echo "📥 Downloading Playwright browsers to shared location..."
+          # Ensure the directory exists
+          mkdir -p "$PLAYWRIGHT_BROWSERS_PATH"
+          
+          # Install browsers to shared location
+          PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" npx playwright install chromium --with-deps
+          
+          echo "✅ Browsers downloaded to shared location: $PLAYWRIGHT_BROWSERS_PATH"
+          
+          # Create symlink for future runs
+          mkdir -p node_modules/playwright-core/.local-browsers
+          ln -sfn "$PLAYWRIGHT_BROWSERS_PATH" node_modules/playwright-core/.local-browsers
+        fi
         
-        # echo "📥 Installing dependencies..."
-        # # Use ci for consistent installs, skip audit for speed
-        # npm ci --no-audit --prefer-offline
         
         # echo "🌐 Installing Playwright browsers..."
         # # Install only Chrome for faster execution (add firefox/webkit if needed)
@@ -229,12 +246,6 @@ jobs:
         export PLAYWRIGHT_TEST_TIMEOUT=$(testTimeout)
         export PLAYWRIGHT_EXPECT_TIMEOUT=$(expectTimeout)
         
-        # Build Playwright command arguments
-        # PW_ARGS=""
-        # PW_ARGS="$PW_ARGS --reporter=html,list,junit"
-        # PW_ARGS="$PW_ARGS --workers=$WORKERS"
-        # PW_ARGS="$PW_ARGS --retries=$RETRIES"
-        # PW_ARGS="$PW_ARGS --timeout=$(testTimeout)"
         
         # # For custom suite, run specific test file
         # if [ "$SUITE_NAME" = "test:custom" ]; then
@@ -254,7 +265,7 @@ jobs:
         # fi
         
         # npx playwright test ${{ parameters.testFile }} --retries=${{ parameters.retries }} --workers=${{ parameters.workers }}
-        npx playwright test tests/smoke
+        npx playwright test tests/master/master.test.js
         
         # Run tests with timeout protection
         # timeout 3600 bash -c "$CMD" || true
