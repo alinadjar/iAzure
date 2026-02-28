@@ -98,11 +98,11 @@ jobs:
         mkdir -p "$(System.DefaultWorkingDirectory)/SadganErp"
         
         echo "📥 Cloning repository..."
-        echo "Branch: $(Build.SourceBranchName)"
-        git clone --depth 1 --branch "$(Build.SourceBranchName)" "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.ERP.Laboratory"  "$WORKSPACE"
+        echo "Branch: autorun"
+        git clone --depth 1 --branch "autorun" "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.ERP.Laboratory"  "$WORKSPACE"
 
         # git -c http.extraheader="AUTHORIZATION: bearer $(System.AccessToken)" \
-        #         clone --branch $(Build.SourceBranchName) \
+        #         clone --branch autorun \
         #         "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.ERP.Laboratory" "$WORKSPACE"
         
         cd "$WORKSPACE"
@@ -423,7 +423,7 @@ jobs:
     #     echo "🏷️  Build ID: $(Build.BuildId)" >> $(Build.ArtifactStagingDirectory)/download-info.txt
     #     echo "📅 Timestamp: $(date)" >> $(Build.ArtifactStagingDirectory)/download-info.txt
     #     echo "🚀 Pipeline: $(Build.DefinitionName)" >> $(Build.ArtifactStagingDirectory)/download-info.txt
-    #     echo "🌿 Branch: $(Build.SourceBranchName)" >> $(Build.ArtifactStagingDirectory)/download-info.txt
+    #     echo "🌿 Branch: main" >> $(Build.ArtifactStagingDirectory)/download-info.txt
         
     #     echo "✅ MinIO upload completed successfully"
     #   displayName: '☁️  Upload to MinIO'
