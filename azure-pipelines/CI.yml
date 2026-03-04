@@ -126,9 +126,6 @@ stages:
         targetType: 'inline'
         script: |
           set -e
-          # [Your existing PR creation script here, but with ALL repositories]
-          # Include all repos from both frontend and backend          
-          
           # Function to clean repository ID (extract only valid UUID)
           clean_repo_id() {
             local id="$1"
