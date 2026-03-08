@@ -494,7 +494,7 @@ jobs:
           echo "❌ STATUS: TESTS FAILED"
         fi
         
-        echo "🔗 MinIO Download: $(MINIO_DOWNLOAD_URL)"
+        # echo "🔗 MinIO Download: $(MINIO_DOWNLOAD_URL)"
         echo "📁 Artifacts: Available in pipeline artifacts"
         echo "⏱️  Duration: $(date)"
         echo "================================================"
