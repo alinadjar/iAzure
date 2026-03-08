@@ -10,8 +10,8 @@ parameters:
   default: 'v0.0.0.0'
 
 variables:  
-  SOURCE_IMG_FRONT: $(DOCKER_REGISTRY)/front_fx
-  SOURCE_IMG_BACKEND: $(DOCKER_REGISTRY)/backend_fx
+  SOURCE_IMG_FRONT: $(DOCKER_REGISTRY)/fx/front
+  SOURCE_IMG_BACKEND: $(DOCKER_REGISTRY)/fx/backend
   TARGET_IMG_FRONT: $(HARBOR_REGISTRY)/fx/front
   TARGET_IMG_BACKEND: $(HARBOR_REGISTRY)/fx/backend
 
