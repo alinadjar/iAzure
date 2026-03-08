@@ -9,6 +9,15 @@ parameters:
   - 'test:regression'
   - 'test:custom'
 
+- name: BaseUrl
+  type: string
+  default: 'alpha.fx.sadgan.int'
+  values:
+  - 'alpha.fx.sadgan.int'
+  - 'beta.fx.sadgan.int'
+  - 'master.fx.sadgan.int'
+  - 'stage.fx.sadgan.int'
+
 - name: screenshotMode
   type: string
   default: 'only-on-failure'
@@ -54,6 +63,7 @@ variables:
   NODE_ENV: 'test'
   CI: true
   rootDir: "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.ERP.Laboratory"
+  BASE_URL: ${{ parameters.BaseUrl }}
   MINIO_BUCKET: 'playwright-artifacts'
   PLAYWRIGHT_BROWSERS_PATH: '/opt/playwright-browsers'  # Shared location on agent
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 'false'  # Allow download if not exists
