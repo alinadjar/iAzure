@@ -73,7 +73,7 @@ stages:
     - checkout: none
     - task: Bash@3
       name: init
-      displayName: 'init'
+      displayName: "init 🌿 ${{ parameters.BRANCH }}"
       env:
         CURRENT_BRANCH: ${{ parameters.BRANCH }}
       inputs:
