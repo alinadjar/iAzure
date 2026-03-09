@@ -66,7 +66,7 @@ variables:
 stages:
 # Stage 0: INIT
 - stage: INIT
-  displayName: 'Initialize'
+  displayName: "Initialize ${{ parameters.BRANCH }}"
   jobs: 
   - job: InitJob
     steps:
