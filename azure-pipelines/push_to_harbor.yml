@@ -56,8 +56,10 @@ steps:
       
       
       # -------- update version index:
-      ASSEMBLY="${DOCKER_TAG%%-*}"
-      redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY#v}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+      ASSEMBLY="$VERSION"
+      IFS='.-' read -r _MAJOR _MINOR _PATCH _PRE _BN <<< "${ASSEMBLY#v}"
+      ASSEMBLY_4Segment="$_MAJOR.$_MINOR.$_PATCH.$_BN"
+      redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
       # redis-cli -h  "$(REDIS_HOST)" -p 6379   GET v_one:version | jq .
 
 
