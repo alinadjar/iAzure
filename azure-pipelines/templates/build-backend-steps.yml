@@ -231,11 +231,11 @@ steps:
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
             
 
-- bash: |
-    export PATH="/home/azurebot/.dotnet:$PATH"
-    dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
-  displayName: 'Build Solution (Backend)'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+# - bash: |
+#     export PATH="/home/azurebot/.dotnet:$PATH"
+#     dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
+#   displayName: 'Build Solution (Backend)'
+#   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
     
 
 - bash: |
