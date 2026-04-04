@@ -290,11 +290,11 @@ steps:
       ls -la $TARGET_WWWROOT
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
-- bash: |
-    export PATH="/home/azurebot/.dotnet:$PATH"
-    dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
-  displayName: 'Build Solution (Frontend)'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+# - bash: |
+#     export PATH="/home/azurebot/.dotnet:$PATH"
+#     dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
+#   displayName: 'Build Solution (Frontend)'
+#   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
 - bash: |
     export PATH="/home/azurebot/.dotnet:$PATH"
