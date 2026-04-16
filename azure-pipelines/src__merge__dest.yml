@@ -22,14 +22,6 @@ parameters:
 
 
 variables:
-  - name: buildPlatform
-    value: 'Any CPU'
-  - name: buildConfiguration
-    value: 'Release'
-  - name: isTagDuplicate
-    value: 'false'
-  - name: orgUrl
-    value: 'http://azure.sadgan.int/WebApp'
   - name: project
     value: 'SadganErp'
 
