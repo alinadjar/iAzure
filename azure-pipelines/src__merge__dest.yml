@@ -52,7 +52,7 @@ stages:
           # Case-sensitive
           if [[ "$SOURCE_BRANCH" == "$DEST_BRANCH" ]]; then
               echo "❌  Error: Branches are equal !"
-              exit 0
+              exit 1
           fi
 
           # Case-insensitive
