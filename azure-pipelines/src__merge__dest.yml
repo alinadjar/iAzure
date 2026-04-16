@@ -18,7 +18,7 @@ parameters:
     - 'dev'
     - 'alpha'
     - 'beta'
-    - 'master'    
+    - 'master'
 
 
 variables:
@@ -53,9 +53,22 @@ stages:
         DEST_BRANCH: ${{ parameters.DEST_BRANCH }}
       inputs:
         targetType: 'inline'
-        script: |    
+        script: |
           echo "source branch: $SOURCE_BRANCH"
           echo "dest   branch: $DEST_BRANCH"
+
+          # Case-sensitive
+          if [[ "$SOURCE_BRANCH" == "$DEST_BRANCH" ]]; then
+              echo "❌  Error: Branches are equal !"
+              exit 0
+          fi
+
+          # Case-insensitive
+          # if [[ "${SOURCE_BRANCH,,}" == "${DEST_BRANCH,,}" ]]; then
+          #     echo "Case-insensitive: Branches are equal"
+          # else
+          #     echo "Case-insensitive: Branches are different"
+          # fi
           
           echo "##vso[task.setvariable variable=SOURCE_BRANCH;isOutput=true]$SOURCE_BRANCH"
           echo "##vso[task.setvariable variable=DEST_BRANCH;isOutput=true]$DEST_BRANCH"
@@ -525,8 +538,9 @@ stages:
               \"completionOptions\": {
                 \"bypassPolicy\": true,
                 \"bypassReason\": \"Automated pr - sequential merge\",
-                \"mergeStrategy\": \"rebaseAndFastForward\",
-                \"deleteSourceBranch\": false
+                \"mergeStrategy\": \"squashMerge\",
+                \"deleteSourceBranch\": false,
+                \"transitionWorkItems\": true
               }
             }"
             
