@@ -163,6 +163,8 @@ jobs:
         # Configure npm registry
         npm config set registry https://npm.sadgan.int
         npm config set strict-ssl false
+        # to revert back: 
+        # npm config set registry https://registry.npmjs.org/
         
         # Set cache directory for faster installs
         # npm config set cache "$(Pipeline.Workspace)/.npm"
