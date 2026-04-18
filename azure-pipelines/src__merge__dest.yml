@@ -528,7 +528,7 @@ stages:
                 \"bypassReason\": \"Automated pr - sequential merge\",
                 \"mergeStrategy\": \"squashMerge\",
                 \"deleteSourceBranch\": false,
-                \"transitionWorkItems\": true
+                \"transitionWorkItems\": false
               }
             }"
             
