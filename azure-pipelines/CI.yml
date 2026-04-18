@@ -813,16 +813,26 @@ stages:
           rm -rf "$repo_name-repo"
           
           # Clone the repository
-          git clone --branch "$branch" --depth 1 "$repo_url" "$repo_name-repo"
+          git clone --branch "$branch" "$repo_url" "$repo_name-repo"
           cd "$repo_name-repo"
           
           # Verify and get the correct commit
           CURRENT_COMMIT=$(git rev-parse HEAD | cut -c1-8)
           if [ "$CURRENT_COMMIT" != "$expected_commit" ]; then
             echo "⚠️  Current commit $CURRENT_COMMIT differs from expected $expected_commit"
-            echo "   Fetching specific commit..."
-            git fetch --depth 1 origin "$expected_commit"
-            git checkout "$expected_commit"
+            echo "   Checking out specific commit..."
+            
+            # Try to checkout the commit directly
+            if git checkout "$expected_commit" 2>/dev/null; then
+              echo "✅ Successfully checked out commit $expected_commit"
+            else
+              echo "❌ ERROR: Commit $expected_commit not found in repository!"
+              echo "   Available commits near HEAD:"
+              git log --oneline -10
+              cd ..
+              rm -rf "$repo_name-repo"
+              return 1
+            fi
           fi
           
           # Create tag if it doesn't exist
@@ -883,3 +893,43 @@ stages:
       displayName: 'Create and Push Git Tags'
       env:
         GIT_PAT: $(GIT_PAT)
+
+
+  - job: 
+    displayName: 'Update Version_Hub'
+    dependsOn: 
+      - Git_Tagging
+      - Build_Frontend
+      - Build_Backend
+    condition: and(succeeded(), eq(variables['isBranchALPHA'], 'True'))
+    pool: 'WEB-1'
+    variables:
+      DOCKER_TAG: $[ dependencies.Build_Frontend.outputs['tagSetting.DOCKER_TAG'] ]
+    steps:
+    - checkout: none
+    - task: Bash@3
+      displayName: 'Pushing'
+      inputs:
+        targetType: 'inline'
+        script: |
+          export REDISCLI_AUTH="3N5O__p!U72lzd801f"
+
+          
+          VERSION="$(DOCKER_TAG)"
+          DOCKER_TAG="$(DOCKER_TAG)"
+
+          echo "VERSION = $VERSION"
+          echo "DOCKER_TAG = $DOCKER_TAG"
+          
+
+          # -------- update version index:
+          ASSEMBLY="$VERSION"
+          IFS='.-' read -r _MAJOR _MINOR _PATCH _PRE _BN <<< "${ASSEMBLY#v}"
+          ASSEMBLY_4Segment="$_MAJOR.$_MINOR.$_PATCH.$_BN"
+          echo "ASSEMBLY_4Segment: $ASSEMBLY_4Segment"
+          redis-cli -h "192.168.10.176" -p 6377   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+          
+    
+    
+          echo "curling https://get.sadgan.int/releases/fx:"
+          curl -k -fsSL https://get.sadgan.int/releases/fx | jq .
