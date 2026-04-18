@@ -927,7 +927,7 @@ stages:
           IFS='.-' read -r _MAJOR _MINOR _PATCH _PRE _BN <<< "${ASSEMBLY#v}"
           ASSEMBLY_4Segment="$_MAJOR.$_MINOR.$_PATCH.$_BN"
           echo "ASSEMBLY_4Segment: $ASSEMBLY_4Segment"
-          redis-cli -h "192.168.10.176" -p 6377   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+          redis-cli -h "192.168.10.241" -p 6377   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
           
     
     
