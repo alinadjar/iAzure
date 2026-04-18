@@ -931,5 +931,5 @@ stages:
           
     
     
-          echo "curling https://get.sadgan.int/releases/fx:"
-          curl -k -fsSL https://get.sadgan.int/releases/fx | jq .
+          echo "curling http://localget.sadgan.com/releases/fx:"
+          curl -k -fsSL http://localget.sadgan.com/releases/fx | jq .
