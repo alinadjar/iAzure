@@ -232,6 +232,8 @@ jobs:
 
     - script: |
         cd "$(rootDir)"
+        # Create test-results directory if it doesn't exist
+        mkdir -p test-results
         
         echo "=================================================="
         echo "🧪 TEST CONFIGURATION"
@@ -310,14 +312,25 @@ jobs:
       # continueOnError: true
       
 
+    # - task: PublishTestResults@2
+    #   condition: always()
+    #   inputs:
+    #     testResultsFormat: 'JUnit'
+    #     testResultsFiles: '**/test-results/**/*.xml'
+    #     testRunTitle: 'Playwright ${{ parameters.Suite }} - $(Build.BuildNumber)'
+    #     mergeTestResults: true
+    #     failTaskOnFailedTests: false
+    #   displayName: '📊 Publish Test Results'
+
     - task: PublishTestResults@2
       condition: always()
       inputs:
         testResultsFormat: 'JUnit'
-        testResultsFiles: '**/test-results/**/*.xml'
+        testResultsFiles: '**/test-results/junit.xml'  # Changed from **/*.xml to specific file
         testRunTitle: 'Playwright ${{ parameters.Suite }} - $(Build.BuildNumber)'
         mergeTestResults: true
         failTaskOnFailedTests: false
+        searchFolder: '$(rootDir)'  # Explicitly set search folder
       displayName: '📊 Publish Test Results'
 
     - script: |
