@@ -25,7 +25,6 @@ parameters:
   - 'citizenship'
   displayName: 'Module Name (required for test:module)'
 
-
 - name: screenshotMode
   type: string
   default: 'only-on-failure'
@@ -239,7 +238,6 @@ jobs:
         echo "=================================================="
         echo "📊 Suite:          $SUITE_NAME"
         echo "📦 Module:         $MODULE_NAME"
-        # echo "📁 Test File:      $TEST_FILE"
         echo "👻 Headless:       $PLAYWRIGHT_HEADLESS"
         echo "👥 Workers:        $WORKERS"
         echo "🔄 Retries:        $RETRIES"
@@ -265,7 +263,6 @@ jobs:
         
 
          
-         # npx playwright test ${{ parameters.testFile }} --retries=${{ parameters.retries }} --workers=${{ parameters.workers }}
         # npx playwright test "tests/specs/financial/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         npx playwright test "tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         
