@@ -297,6 +297,7 @@ jobs:
         
         echo "##vso[task.setvariable variable=testExitCode;isOutput=true]$TEST_EXIT_CODE"
       displayName: 'Run ${{ parameters.Suite }} Tests'
+      name: RunTests
       env:
         BASE_URL: $(BASE_URL)
         SUITE_NAME: ${{ parameters.Suite }}
@@ -485,9 +486,9 @@ jobs:
         echo "🎯 TEST EXECUTION COMPLETE"
         echo "================================================"
         echo "📊 Test Suite: ${{ parameters.Suite }}"
-        echo "✅ Exit Code: $(testExitCode)"
+        echo "✅ Exit Code: $(RunTests.testExitCode)"
         
-        if [ "$(testExitCode)" -eq 0 ]; then
+        if [ "$(RunTests.testExitCode)" -eq 0 ]; then
           echo "🏆 STATUS: ALL TESTS PASSED"
         else
           echo "❌ STATUS: TESTS FAILED"
