@@ -283,7 +283,7 @@ jobs:
          
          # npx playwright test ${{ parameters.testFile }} --retries=${{ parameters.retries }} --workers=${{ parameters.workers }}
          # npx playwright test tests/master/master.test.js
-        npx playwright test "tests/specs/financial/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
+        # npx playwright test "tests/specs/financial/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         npx playwright test "tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         
         # Run tests with timeout protection
