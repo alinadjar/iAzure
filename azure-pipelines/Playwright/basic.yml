@@ -263,6 +263,9 @@ jobs:
         export PLAYWRIGHT_TEST_TIMEOUT=$(testTimeout)
         export PLAYWRIGHT_EXPECT_TIMEOUT=$(expectTimeout)
 
+        ls -alh
+        pwd
+        echo "⚠️ run test command: npx playwright test tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         npx playwright test "tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         
 
