@@ -263,8 +263,20 @@ jobs:
         
 
          
-        # npx playwright test "tests/specs/financial/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
-        npx playwright test "tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
+        # Run tests based on module name
+        if [ "$MODULE_NAME" = "citizenship" ]; then
+          echo "🎯 Running citizenship module tests..."
+          npx playwright test tests/specs/financial/citizenship/e2e/citizenship.crud.spec.js
+          
+        elif [ "$MODULE_NAME" = "master" ]; then
+          echo "🎯 Running master tests..."
+          npx playwright test tests/master/master.test.js
+          
+        else
+          echo "##vso[task.logissue type=error]❌ Error: Invalid module name '$MODULE_NAME'"
+          echo "##vso[task.logissue type=error]Allowed values: citizenship, master"
+          exit 1
+        fi
         
         # Run tests with timeout protection
         # timeout 3600 bash -c "$CMD" || true
@@ -284,6 +296,7 @@ jobs:
         echo "##vso[task.setvariable variable=testExitCode;isOutput=true]$TEST_EXIT_CODE"
       displayName: 'Run ${{ parameters.Suite }} Tests'
       name: RunTests
+      timeoutInMinutes: 70
       env:
         BASE_URL: $(BASE_URL)
         SUITE_NAME: ${{ parameters.Suite }}
@@ -294,9 +307,8 @@ jobs:
         RETRIES: ${{ parameters.retries }}
         PLAYWRIGHT_HEADLESS: ${{ parameters.headless }}
         NODE_TLS_REJECT_UNAUTHORIZED: '0'
-      continueOnError: true
-      # Set step timeout
-      timeoutInMinutes: 70
+      # continueOnError: true
+      
 
     - task: PublishTestResults@2
       condition: always()
