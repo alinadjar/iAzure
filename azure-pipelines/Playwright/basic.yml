@@ -340,11 +340,20 @@ jobs:
         echo "📁 Copying test results and reports..."
         cd "$(rootDir)"
         
-        # Copy test results if they exist
+        # Copy JUnit test results if they exist
+        if [ -f "test-results/junit.xml" ]; then
+          echo "📂 Copying JUnit test results..."
+          cp test-results/junit.xml $(Build.ArtifactStagingDirectory)/playwright-artifacts/
+          echo "✅ JUnit results copied"
+        else
+          echo "⚠️  JUnit test results not found"
+        fi
+        
+        # Copy other test results
         if [ -d "test-results" ]; then
-          echo "📂 Copying test-results..."
+          echo "📂 Copying test-results directory..."
           cp -r test-results $(Build.ArtifactStagingDirectory)/playwright-artifacts/
-          echo "✅ test-results copied"
+          echo "✅ test-results directory copied"
         else
           echo "⚠️  test-results directory not found"
         fi
