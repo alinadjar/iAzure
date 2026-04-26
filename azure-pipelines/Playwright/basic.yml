@@ -263,26 +263,9 @@ jobs:
         export PLAYWRIGHT_TEST_TIMEOUT=$(testTimeout)
         export PLAYWRIGHT_EXPECT_TIMEOUT=$(expectTimeout)
         
-        
-         # # For custom suite, run specific test file
-         # if [ "$SUITE_NAME" = "test:custom" ]; then
-         #   echo "🎯 Running custom test file: $TEST_FILE"
-         #   CMD="npx playwright test \"$TEST_FILE\" $PW_ARGS"
-           
-         # # For module suite, set MODULE env var
-         # elif [ "$SUITE_NAME" = "test:module" ]; then
-         #   echo "🎯 Running module tests for: $MODULE_NAME"
-         #   export MODULE="$MODULE_NAME"
-         #   CMD="npm run $SUITE_NAME"
-           
-         # # For other suites, run npm script
-         # else
-         #   echo "🎯 Running test suite: $SUITE_NAME"
-         #   CMD="npm run $SUITE_NAME"
-         # fi
+
          
          # npx playwright test ${{ parameters.testFile }} --retries=${{ parameters.retries }} --workers=${{ parameters.workers }}
-         # npx playwright test tests/master/master.test.js
         # npx playwright test "tests/specs/financial/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         npx playwright test "tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         
