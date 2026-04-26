@@ -1,22 +1,30 @@
 parameters:
-- name: Suite
-  type: string
-  default: 'test:smoke'
-  values:
-  - 'test:module'
-  - 'test:all'
-  - 'test:smoke'
-  - 'test:regression'
-  - 'test:custom'
-
 - name: BaseUrl
   type: string
   default: 'alpha.fx.sadgan.int'
   values:
   - 'alpha.fx.sadgan.int'
-  - 'beta.fx.sadgan.int'
-  - 'master.fx.sadgan.int'
+  # - 'beta.fx.sadgan.int'
+  # - 'master.fx.sadgan.int'
   - 'stage.fx.sadgan.int'
+
+- name: Suite
+  type: string
+  values:
+  - 'test:module'
+  # - 'test:all'
+  # - 'test:smoke'
+  # - 'test:regression'
+  # - 'test:custom'
+
+- name: module
+  type: string
+  default: 'citizenship'
+  values:
+  - 'master'
+  - 'citizenship'
+  displayName: 'Module Name (required for test:module)'
+
 
 - name: screenshotMode
   type: string
@@ -49,15 +57,12 @@ parameters:
   type: number
   default: 1
 
-- name: module
-  type: string
-  default: 'citizenship'
-  displayName: 'Module Name (required for test:module)'
 
-- name: testFile
-  type: string
-  default: 'tests/specs/citizenship/e2e/citizenship.crud.spec.js'
-  displayName: 'File Path (required for test:custom)'
+
+# - name: testFile
+#   type: string
+#   default: 'tests/specs/citizenship/e2e/citizenship.crud.spec.js'
+#   displayName: 'File Path (required for test:custom)'
 
 variables:
   NODE_ENV: 'test'
@@ -278,7 +283,8 @@ jobs:
         
         # npx playwright test ${{ parameters.testFile }} --retries=${{ parameters.retries }} --workers=${{ parameters.workers }}
         # npx playwright test tests/master/master.test.js
-        npx playwright test tests/specs/financial/citizenship/e2e/citizenship.crud.spec.js
+        # npx playwright test "tests/specs/financial/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
+        npx playwright test "tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         
         # Run tests with timeout protection
         # timeout 3600 bash -c "$CMD" || true
