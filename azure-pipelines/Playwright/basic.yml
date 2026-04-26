@@ -308,7 +308,7 @@ jobs:
         BASE_URL: $(BASE_URL)
         SUITE_NAME: ${{ parameters.Suite }}
         MODULE_NAME: ${{ parameters.module }}
-        TEST_FILE: ${{ parameters.testFile }}
+        # TEST_FILE: ${{ parameters.testFile }}
         VIDEO_MODE: ${{ parameters.videoMode }}
         SCREENSHOT_MODE: ${{ parameters.screenshotMode }}
         WORKERS: ${{ parameters.workers }}
