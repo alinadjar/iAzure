@@ -235,7 +235,7 @@ jobs:
         echo "📊 Suite:          $SUITE_NAME"
         echo "📦 Module:         $MODULE_NAME"
         echo "📁 Test File:      $TEST_FILE"
-        echo "👻 Headless:       $HEADLESS"
+        echo "👻 Headless:       $PLAYWRIGHT_HEADLESS"
         echo "👥 Workers:        $WORKERS"
         echo "🔄 Retries:        $RETRIES"
         echo "🌐 Base URL:       $(echo $BASE_URL | cut -c1-50)..."
@@ -303,12 +303,9 @@ jobs:
         MODULE_NAME: ${{ parameters.module }}
         TEST_FILE: ${{ parameters.testFile }}
         VIDEO_MODE: ${{ parameters.videoMode }}
-        HEADLESS: ${{ parameters.headless }}
         SCREENSHOT_MODE: ${{ parameters.screenshotMode }}
         WORKERS: ${{ parameters.workers }}
         RETRIES: ${{ parameters.retries }}
-        PLAYWRIGHT_VIDEO: ${{ parameters.videoMode }}
-        PLAYWRIGHT_SCREENSHOT: ${{ parameters.screenshotMode }}
         PLAYWRIGHT_HEADLESS: ${{ parameters.headless }}
         NODE_TLS_REJECT_UNAUTHORIZED: '0'
       continueOnError: true
