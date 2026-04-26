@@ -19,10 +19,10 @@ parameters:
 
 - name: module
   type: string
-  default: 'citizenship'
-  values:
-  - 'master'
-  - 'citizenship'
+  # default: 'citizenship'
+  # values:
+  # - 'master'
+  # - 'citizenship'
   displayName: 'Module Name (required for test:module)'
 
 - name: screenshotMode
@@ -262,23 +262,25 @@ jobs:
         # Set environment variables for Playwright
         export PLAYWRIGHT_TEST_TIMEOUT=$(testTimeout)
         export PLAYWRIGHT_EXPECT_TIMEOUT=$(expectTimeout)
+
+        npx playwright test "tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
         
 
          
         # Run tests based on module name
-        if [ "$MODULE_NAME" = "citizenship" ]; then
-          echo "🎯 Running citizenship module tests..."
-          npx playwright test tests/specs/financial/citizenship/e2e/citizenship.crud.spec.js
+        # if [ "$MODULE_NAME" = "citizenship" ]; then
+        #   echo "🎯 Running citizenship module tests..."
+        #   npx playwright test tests/specs/financial/citizenship/e2e/citizenship.crud.spec.js
           
-        elif [ "$MODULE_NAME" = "master" ]; then
-          echo "🎯 Running master tests..."
-          npx playwright test tests/master/master.test.js
+        # elif [ "$MODULE_NAME" = "master" ]; then
+        #   echo "🎯 Running master tests..."
+        #   npx playwright test tests/master/master.test.js
           
-        else
-          echo "##vso[task.logissue type=error]❌ Error: Invalid module name '$MODULE_NAME'"
-          echo "##vso[task.logissue type=error]Allowed values: citizenship, master"
-          exit 1
-        fi
+        # else
+        #   echo "##vso[task.logissue type=error]❌ Error: Invalid module name '$MODULE_NAME'"
+        #   echo "##vso[task.logissue type=error]Allowed values: citizenship, master"
+        #   exit 1
+        # fi
         
         # Run tests with timeout protection
         # timeout 3600 bash -c "$CMD" || true
