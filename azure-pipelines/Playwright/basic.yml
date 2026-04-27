@@ -25,6 +25,10 @@ parameters:
   # - 'citizenship'
   displayName: 'Module Name (required for test:module)'
 
+- name: submodule
+  type: string
+
+
 - name: screenshotMode
   type: string
   default: 'only-on-failure'
@@ -265,8 +269,8 @@ jobs:
 
         ls -alh
         pwd
-        echo "⚠️ run test command: npx playwright test tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
-        npx playwright test "tests/specs/$MODULE_NAME/e2e/$MODULE_NAME.crud.spec.js"
+        echo "⚠️ run test command: npx playwright test tests/specs/$MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
+        npx playwright test "tests/specs/$MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
         
 
          
@@ -308,6 +312,7 @@ jobs:
         BASE_URL: $(BASE_URL)
         SUITE_NAME: ${{ parameters.Suite }}
         MODULE_NAME: ${{ parameters.module }}
+        SUB_MODULE_NAME: ${{ parameters.submodule }}
         VIDEO_MODE: ${{ parameters.videoMode }}
         SCREENSHOT_MODE: ${{ parameters.screenshotMode }}
         WORKERS: ${{ parameters.workers }}
