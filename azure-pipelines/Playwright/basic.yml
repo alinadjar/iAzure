@@ -269,8 +269,8 @@ jobs:
 
         ls -alh
         pwd
-        echo "⚠️ run test command: npx playwright test tests/specs/$MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
-        npx playwright test "tests/specs/$MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
+        echo "⚠️ run test command: npx playwright test tests/specs/$MODULE_NAME/$SUB_MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
+        npx playwright test "tests/specs/$MODULE_NAME/$SUB_MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
         
 
          
