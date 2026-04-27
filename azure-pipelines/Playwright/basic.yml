@@ -23,7 +23,7 @@ parameters:
   # values:
   # - 'master'
   # - 'citizenship'
-  displayName: 'Module Name (required for test:module)'
+  displayName: 'module name (required for test:module)'
 
 - name: submodule
   type: string
