@@ -630,16 +630,24 @@ stages:
       baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel'
       versionConfigPath: 'CICD/branch-versions/frontend'
       # commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.FRONTEND_COMMIT'] ]
+      # Isolate Git configuration for this job
+      GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_frontend
+      GIT_HOME: $(Agent.TempDirectory)/home_$(Build.BuildId)_frontend
     steps:
     - checkout: none
     - bash: |
         set -e
         # Configure Git
-        git config --global user.email "S_Bot_Azure@sadgan.int"
-        git config --global user.name "S_Bot_Azure"
-        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
-        git config --global http.sslVerify false
-        git config --global --add safe.directory '*'
+        mkdir -p "$GIT_HOME"
+         # Use isolated git config file (not global)
+        export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
+
+         # Configure Git with isolated config
+        git config --file "$GIT_CONFIG_GLOBAL"  user.email "S_Bot_Azure@sadgan.int"
+        git config --file "$GIT_CONFIG_GLOBAL"  user.name "S_Bot_Azure"
+        git config --file "$GIT_CONFIG_GLOBAL"  http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+        git config --file "$GIT_CONFIG_GLOBAL"  http.sslVerify false
+        git config --file "$GIT_CONFIG_GLOBAL"  --add safe.directory '*'
         
         BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
         
@@ -691,6 +699,8 @@ stages:
       name: gitPull
       env:
         GIT_PAT: $(GIT_PAT)
+        GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
+        GIT_HOME: $(GIT_HOME)
 
     - template: templates/build-frontend-steps.yml
       parameters:
@@ -709,16 +719,22 @@ stages:
       baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi'
       versionConfigPath: 'CICD/branch-versions/backend'
       # commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.BACKEND_COMMIT'] ]
+      # Isolate Git configuration for this job
+      GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_backend
+      GIT_HOME: $(Agent.TempDirectory)/home_$(Build.BuildId)_backend
     steps:
     - checkout: none
     - bash: |
         set -e
         # Configure Git
-        git config --global user.email "S_Bot_Azure@sadgan.int"
-        git config --global user.name "S_Bot_Azure"
-        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
-        git config --global http.sslVerify false
-        git config --global --add safe.directory '*'
+        mkdir -p "$GIT_HOME"
+        export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
+
+        git config --file "$GIT_CONFIG_GLOBAL" user.email "S_Bot_Azure@sadgan.int"
+        git config --file "$GIT_CONFIG_GLOBAL" user.name "S_Bot_Azure"
+        git config --file "$GIT_CONFIG_GLOBAL" http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+        git config --file "$GIT_CONFIG_GLOBAL" http.sslVerify false
+        git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory '*'
         
         BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
         
@@ -769,6 +785,8 @@ stages:
       name: gitPull
       env:
         GIT_PAT: $(GIT_PAT)
+        GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
+        GIT_HOME: $(GIT_HOME)
 
     - template: templates/build-backend-steps.yml
       parameters:
