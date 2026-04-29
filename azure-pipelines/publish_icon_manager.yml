@@ -56,14 +56,14 @@ steps:
         repo_url=$2
         target_dir=$3
         
-        # echo "Cleaning up previous checkout ($target_dir)..."
-        # if [ -d "$target_dir" ]; then
-        #     echo "Removing directory..."
-        #     rm -rf "$target_dir"
-        # fi
+        echo "Cleaning up previous checkout ($target_dir)..."
+        if [ -d "$target_dir" ]; then
+            echo "Removing directory..."
+            rm -rf "$target_dir"
+        fi
         
         echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
-        git pull --branch "$branch_name" "$repo_url" "$target_dir"
+        git clone --branch "$branch_name" "$repo_url" "$target_dir"
         
         if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
             cd "$target_dir"
