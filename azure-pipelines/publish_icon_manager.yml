@@ -89,6 +89,7 @@ steps:
     echo "Frontend commit: $FRONTEND_COMMIT"
 
 
+    mkdir -p $(Build.ArtifactStagingDirectory)/ico
     cat <<EOF > $(Build.ArtifactStagingDirectory)/ico/vars.json
           {
             "CLONE_PATH": "$(solution)",
