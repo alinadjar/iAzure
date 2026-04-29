@@ -22,7 +22,7 @@ variables:
   - name: project
     value: 'SadganErp'
   - name: solution
-    value: '/opt/Sadgan.Erp.Icon_Manage'
+    value: "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Icon_Manage"
   - name: GIT_CONFIG_GLOBAL
     value: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_ico
   - name: GIT_HOME 
@@ -44,6 +44,10 @@ steps:
     git config --file "$GIT_CONFIG_GLOBAL"  http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
     git config --file "$GIT_CONFIG_GLOBAL"  http.sslVerify false
     git config --file "$GIT_CONFIG_GLOBAL"  --add safe.directory '*'
+    git config --file "$GIT_CONFIG_GLOBAL" core.compression 0
+    git config --file "$GIT_CONFIG_GLOBAL" http.postBuffer 1048576000
+    git config --file "$GIT_CONFIG_GLOBAL" pack.threads 1
+    git config --file "$GIT_CONFIG_GLOBAL" pull.rebase false
     
     BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
     
@@ -74,7 +78,7 @@ steps:
     }
     
     CUR_BRANCH="main"
-    clone_or_pull  "$CUR_BRANCH"  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Icon_Manage"  "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Icon_Manage"
+    clone_or_pull  "$CUR_BRANCH"  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Icon_Manage"  "$(solution)"
 
     # Get frontend commit hash and export as output variable
     # cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Icon_Manage"
@@ -87,7 +91,7 @@ steps:
 
     cat <<EOF > $(Build.ArtifactStagingDirectory)/ico/vars.json
           {
-            "CLONE_PATH": "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Icon_Manage",
+            "CLONE_PATH": "$(solution)",
             "BRANCH": "$CUR_BRANCH"
           }
       EOF
