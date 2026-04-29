@@ -94,10 +94,7 @@ steps:
             "CLONE_PATH": "$(solution)",
             "BRANCH": "$CUR_BRANCH"
           }
-      EOF
-
-    
-
+    EOF
   displayName: "Git Checkout"
   name: gitPull
   env:
