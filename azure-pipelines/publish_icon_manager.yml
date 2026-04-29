@@ -1,0 +1,235 @@
+http://azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.Erp.Icon_Manage
+
+trigger: none
+pool:
+  name: 'WEB-1'
+
+parameters:
+- name: CREATE_PR
+  displayName: "Create PR to ERP?"
+  type: string
+  default: 'NO'
+  values:
+    - YES
+    - NO
+
+
+
+variables:
+  - name: appName
+    value: 'icon-manage'
+  - name: orgUrl
+    value: 'http://azure.sadgan.int/WebApp'
+  - name: project
+    value: 'SadganErp'
+  - name: solution
+    value: '/opt/Sadgan.Erp.Icon_Manage'  
+  - name: GIT_CONFIG_GLOBAL
+    value: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_ico
+  - name: GIT_HOME 
+    value: $(Agent.TempDirectory)/home_$(Build.BuildId)_ico
+
+
+steps:
+- checkout: none
+- bash: |
+        set -e
+        # Configure Git
+        mkdir -p "$GIT_HOME"
+         # Use isolated git config file (not global)
+        export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
+
+         # Configure Git with isolated config
+        git config --file "$GIT_CONFIG_GLOBAL"  user.email "S_Bot_Azure@sadgan.int"
+        git config --file "$GIT_CONFIG_GLOBAL"  user.name "S_Bot_Azure"
+        git config --file "$GIT_CONFIG_GLOBAL"  http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+        git config --file "$GIT_CONFIG_GLOBAL"  http.sslVerify false
+        git config --file "$GIT_CONFIG_GLOBAL"  --add safe.directory '*'
+        
+        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+        
+        function clone_or_pull {
+            branch_name=$1
+            repo_url=$2
+            target_dir=$3
+            
+            # echo "Cleaning up previous checkout ($target_dir)..."
+            # if [ -d "$target_dir" ]; then
+            #     echo "Removing directory..."
+            #     rm -rf "$target_dir"
+            # fi
+            
+            echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
+            git pull --branch "$branch_name" "$repo_url" "$target_dir"
+            
+            if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
+                cd "$target_dir"
+                echo "Current directory: $(pwd)"
+                echo "✅ Repository cloned to: $target_dir"
+                echo "📁 Directory contents:"
+                ls -la
+            else
+                echo "❌ Clone failed"
+                exit 1
+            fi
+        }
+        
+        
+        # clone_or_pull  'main'  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Icon_Manage"  "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Icon_Manage"
+        clone_or_pull  'main'  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Icon_Manage"  "$(solution)"
+
+        # Get frontend commit hash and export as output variable
+        # cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Icon_Manage"
+        cd "$(solution)"
+        FRONTEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+        echo "##vso[task.setvariable variable=FRONTEND_COMMIT;isOutput=true]$FRONTEND_COMMIT"
+        echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$FRONTEND_COMMIT"
+        echo "Frontend commit: $FRONTEND_COMMIT"
+        
+      displayName: "Git Checkout"
+      name: gitPull
+      env:
+        GIT_PAT: $(GIT_PAT)
+        GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
+        GIT_HOME: $(GIT_HOME)
+
+
+
+
+    - bash: |              
+        # Configuration
+        APP_NAME="$(appName)"
+        WORK_DIR="$(solution)"
+        ENV_FILE=".env"
+        ENV_PIPE_FILE=".env.pipe"
+
+        # Default values 
+        PORT=3000
+        HOST="127.0.0.1"
+                
+        log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"; }
+        error() { log "ERROR: $1"; exit 1; }
+        has() { command -v "$1" >/dev/null 2>&1; }
+        
+        load_env() {
+            if [ -f "$1" ]; then
+                log "Loading environment from $1"
+                set -a  # Automatically export all variables
+                source "$1"
+                set +a
+                return 0
+            fi
+            return 1
+        }
+        
+        # Clean up PM2 process
+        clean_pm2() {
+            pm2 list | grep -q "$APP_NAME" && {
+                log "Stopping and deleting $APP_NAME"
+                pm2 stop "$APP_NAME" 2>/dev/null || true
+                pm2 delete "$APP_NAME" 2>/dev/null || true
+                pm2 save --force 2>/dev/null || true
+            }
+        }
+
+
+        # Setup PM2 to start on reboot
+        setup_pm2_startup() {
+            log "Setting up PM2 startup script"
+            
+            # Generate startup script (this survives reboots)
+            local startup_cmd=$(pm2 startup systemd -u $USER --hp $HOME 2>/dev/null | grep "sudo env" | tail -1)
+            
+            if [ -n "$startup_cmd" ]; then
+                log "Running PM2 startup command"
+                eval "$startup_cmd" || log "Warning: Failed to setup PM2 startup (may need sudo)"
+            else
+                log "Warning: Could not generate PM2 startup command"
+            fi
+            
+            # Save current process list
+            pm2 save --force || log "Warning: Failed to save PM2 process list"
+        }
+        
+
+        
+        # Main deployment
+        main() {
+            log "Deploying $APP_NAME"
+            
+            # Verify prerequisites
+            has node || error "Node.js not installed"
+            has npm || error "npm not installed"
+            has pm2 || error "PM2 not installed (run: npm install -g pm2)"
+            
+            # Change to working directory
+            cd "$WORK_DIR" || error "Cannot access $WORK_DIR"
+            log "Working in: $(pwd)"
+            
+            # Setup and load environment file
+            if [ -f "$ENV_PIPE_FILE" ]; then
+                cp "$ENV_PIPE_FILE" "$ENV_FILE" || error "Failed to create .env"
+                chmod 600 "$ENV_FILE" 2>/dev/null || true
+                log "Environment file created from $ENV_PIPE_FILE"
+            elif [ ! -f "$ENV_FILE" ]; then
+                log "No environment file found, creating minimal .env"
+                cat > "$ENV_FILE" << EOF
+        NODE_ENV=production
+        PORT=$PORT
+        HOST=$HOST
+        EOF
+            fi
+            
+            # Load environment variables
+            load_env "$ENV_FILE" || error "Failed to load $ENV_FILE"
+            
+            # Use loaded values (with defaults if not set in .env)
+            PORT=${PORT:-3000}
+            HOST=${HOST:-127.0.0.1}
+            log "Using PORT=$PORT, HOST=$HOST"
+            
+            # Install dependencies
+            [ -f "package.json" ] || error "package.json not found"
+            log "Installing dependencies"
+            npm ci --only=production --no-audit --no-fund 2>/dev/null || \
+                npm install --production --no-audit --no-fund || \
+                error "Failed to install dependencies"
+            
+            # Start application
+            [ -f "server.js" ] || error "server.js not found"
+            clean_pm2
+            
+            log "Starting application"
+            # Pass environment variables explicitly to PM2 (ensures they survive reboot)
+            # Reboot → systemd starts PM2 → PM2 reads saved process list → PM2 starts your app with .env file
+            pm2 start server.js \
+                --name "$APP_NAME" \
+                --log "logs/$APP_NAME.log" \
+                --time \
+                --env "$ENV_FILE" \
+                -- \
+                --port="$PORT" \
+                --host="$HOST" || error "Failed to start"
+            
+            # CRITICAL: Save PM2 config and setup auto-start on reboot
+            setup_pm2_startup
+            
+            sleep 2
+            
+            # Verify it's running
+            pm2 show "$APP_NAME" | grep -q "online" || error "Application not running"
+            
+            # Show PM2 status
+            pm2 list
+            
+            log "✅ Deployment successful - $APP_NAME is running on $HOST:$PORT"
+            log "✅ PM2 will auto-start on system reboot"
+        }
+        
+        # Run it
+        trap 'log "Interrupted"; exit 130' INT TERM
+        main "$@"
+
+      displayName: 'deployment'
+      condition: succeeded()
+
