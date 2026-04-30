@@ -24,7 +24,7 @@ variables:
   - name: solution
     value: "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Icon_Manage"
   - name: DOCKER_IMG
-    value: "$(DOCKER_REGISTRY)/iconLib"
+    value: "$(DOCKER_REGISTRY)/icon-lib"
   - name: GIT_CONFIG_GLOBAL
     value: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_ico
   - name: GIT_HOME 
