@@ -54,7 +54,7 @@ parameters:
 
 - name: retries
   type: number
-  default: 2
+  default: 0
 
 - name: workers
   type: number
