@@ -74,10 +74,11 @@ stages:
         echo "password:$(System.AccessToken)" >> ~/.git-credentials
     
         # Configure Git
-        git config --global credential.helper store
-        git config --global credential.useHttpPath true
+        # git config --global credential.helper store
+        # git config --global credential.useHttpPath true
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
+        git config --file "$GIT_CONFIG_GLOBAL"  http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
         git config --global http.sslVerify false
         git config --global --add safe.directory '*'
         git config --global core.compression 0
@@ -86,7 +87,8 @@ stages:
         git config --global pull.rebase false
         
         
-        BASE_URL="http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp"
+        # BASE_URL="http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp"
+        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
         
         function clone_or_pull {
     
@@ -140,7 +142,9 @@ stages:
         ls -R | head -15
       displayName: 'Git Checkout'
       env:
-        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        GIT_PAT: $(GIT_PAT)
+        # SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        
 
     - template: azure-pipelines/templates/promote-version.yml@templates
       parameters:
@@ -187,10 +191,11 @@ stages:
         echo "password:$(System.AccessToken)" >> ~/.git-credentials
     
         # Configure Git
-        git config --global credential.helper store
-        git config --global credential.useHttpPath true
+        # git config --global credential.helper store
+        # git config --global credential.useHttpPath true
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
+        git config --file "$GIT_CONFIG_GLOBAL"  http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
         git config --global http.sslVerify false
         git config --global --add safe.directory '*'
         git config --global core.compression 0
@@ -199,7 +204,8 @@ stages:
         git config --global pull.rebase false
         
         
-        BASE_URL="http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp"
+        # BASE_URL="http://S_Bot_Azure:$(System.AccessToken)@azure.sadgan.int/WebApp"
+        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
         
         function clone_or_pull {
     
@@ -253,7 +259,8 @@ stages:
         ls -R | head -15
       displayName: 'Git Checkout'
       env:
-        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        GIT_PAT: $(GIT_PAT)
+        # SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
     - template: azure-pipelines/templates/promote-version.yml@templates
       parameters:
