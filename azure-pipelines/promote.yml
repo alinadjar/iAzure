@@ -78,7 +78,7 @@ stages:
         # git config --global credential.useHttpPath true
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
-        git config --file "$GIT_CONFIG_GLOBAL"  http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
         git config --global http.sslVerify false
         git config --global --add safe.directory '*'
         git config --global core.compression 0
@@ -195,7 +195,7 @@ stages:
         # git config --global credential.useHttpPath true
         git config --global user.email "S_Bot_Azure@sadgan.int"
         git config --global user.name "S_Bot_Azure"
-        git config --file "$GIT_CONFIG_GLOBAL"  http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
         git config --global http.sslVerify false
         git config --global --add safe.directory '*'
         git config --global core.compression 0
