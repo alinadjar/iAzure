@@ -92,8 +92,8 @@ stages:
         
         function clone_or_pull {
     
-            git config --global http.sslVerify false
-            git config --global --add safe.directory '*'
+            # git config --global http.sslVerify false
+            # git config --global --add safe.directory '*'
     
             branch_name=$1
             repo_url=$2
@@ -209,8 +209,8 @@ stages:
         
         function clone_or_pull {
     
-            git config --global http.sslVerify false
-            git config --global --add safe.directory '*'
+            # git config --global http.sslVerify false
+            # git config --global --add safe.directory '*'
     
             branch_name=$1
             repo_url=$2
