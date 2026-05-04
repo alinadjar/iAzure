@@ -70,8 +70,8 @@ stages:
     
     - bash: |
         set -e
-        echo "username:S_Bot_Azure" >> ~/.git-credentials
-        echo "password:$(System.AccessToken)" >> ~/.git-credentials
+        # echo "username:S_Bot_Azure" >> ~/.git-credentials
+        # echo "password:$(System.AccessToken)" >> ~/.git-credentials
     
         # Configure Git
         # git config --global credential.helper store
@@ -187,8 +187,8 @@ stages:
     
     - bash: |
         set -e
-        echo "username:S_Bot_Azure" >> ~/.git-credentials
-        echo "password:$(System.AccessToken)" >> ~/.git-credentials
+        # echo "username:S_Bot_Azure" >> ~/.git-credentials
+        # echo "password:$(System.AccessToken)" >> ~/.git-credentials
     
         # Configure Git
         # git config --global credential.helper store
