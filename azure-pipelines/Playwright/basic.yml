@@ -12,10 +12,18 @@ parameters:
   type: string
   values:
   - 'test:module'
+  - 'MASTERS'
   # - 'test:all'
   # - 'test:smoke'
   # - 'test:regression'
   # - 'test:custom'
+
+- name: MASTER_NAME
+  type: string
+  values:
+  - 'bank'
+  - 'cash-cost-citizen'
+  - 'currency'
 
 - name: module
   type: string
@@ -269,8 +277,16 @@ jobs:
 
         ls -alh
         pwd
-        echo "⚠️ run test command: npx playwright test tests/specs/$MODULE_NAME/$SUB_MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
-        npx playwright test "tests/specs/$MODULE_NAME/$SUB_MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
+        if [ "$SUITE_NAME" = "MASTERS" ]; then
+            echo "⚠️ run test command: node master-$MASTER_NAME-runner.js"
+            node "master-$MASTER_NAME-runner.js"
+        else 
+            echo "⚠️ run test command: npx playwright test tests/specs/$MODULE_NAME/$SUB_MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
+            npx playwright test "tests/specs/$MODULE_NAME/$SUB_MODULE_NAME/e2e/$SUB_MODULE_NAME.crud.spec.js"
+        fi
+
+        
+        
         
 
          
@@ -318,6 +334,7 @@ jobs:
         WORKERS: ${{ parameters.workers }}
         RETRIES: ${{ parameters.retries }}
         PLAYWRIGHT_HEADLESS: ${{ parameters.headless }}
+        MASTER_NAME: ${{ parameters.MASTER_NAME }}
         NODE_TLS_REJECT_UNAUTHORIZED: '0'
       # continueOnError: true
       
