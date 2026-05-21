@@ -3,14 +3,14 @@ trigger: none
 pool:
   name: 'WEB-1'
 
-parameters:
-- name: CREATE_PR
-  displayName: "Create PR to ERP?"
-  type: string
-  default: 'NO'
-  values:
-    - YES
-    - NO
+# parameters:
+# - name: CREATE_PR
+#   displayName: "Create PR to ERP?"
+#   type: string
+#   default: 'NO'
+#   values:
+#     - YES
+#     - NO
 
 
 
