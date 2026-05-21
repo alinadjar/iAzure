@@ -27,6 +27,7 @@ parameters:
 
 - name: module
   type: string
+  default: '-'
   # default: 'citizenship'
   # values:
   # - 'master'
@@ -35,6 +36,7 @@ parameters:
 
 - name: submodule
   type: string
+  default: '-'
 
 
 - name: screenshotMode
