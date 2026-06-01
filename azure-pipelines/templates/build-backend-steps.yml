@@ -240,7 +240,7 @@ steps:
 
 - bash: |
     export PATH="/home/azurebot/.dotnet:$PATH"
-    dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish
+    dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) -p:Optimize=false --output $(Build.ArtifactStagingDirectory)/publish
     cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json $(Build.ArtifactStagingDirectory)/publish/
   displayName: 'Publish Solution (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
