@@ -225,7 +225,8 @@ steps:
 
 # .Net Restore
 - bash: |
-    export PATH="/home/azurebot/.dotnet:$PATH"
+    export PATH="/opt/net_sdk_10:$PATH"
+    
     dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config --verbosity detailed
   displayName: 'Dotnet Restore (Frontend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
@@ -291,13 +292,13 @@ steps:
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
 # - bash: |
-#     export PATH="/home/azurebot/.dotnet:$PATH"
+#     export PATH="/opt/net_sdk_10:$PATH"
 #     dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
 #   displayName: 'Build Solution (Frontend)'
 #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
 - bash: |
-    export PATH="/home/azurebot/.dotnet:$PATH"
+    export PATH="/opt/net_sdk_10:$PATH"
     dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish
     cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json $(Build.ArtifactStagingDirectory)/publish/wwwroot/
   displayName: 'Publish Solution (Frontend)'
