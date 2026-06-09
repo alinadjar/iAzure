@@ -299,7 +299,18 @@ steps:
 
 - bash: |
     export PATH="/opt/net_sdk_10:$PATH"
-    dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish
+    dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish  --disable-parallel  -p:BuildInParallel=false  -p:NodeReuse=false
+
+    # Retry build up to 3 times
+    # for i in 1 2 3; do
+    #   dotnet publish "$(solution)" \
+    #     --no-restore \
+    #     --configuration $(buildConfiguration) \
+    #     --output $(Build.ArtifactStagingDirectory)/publish \
+    #     --disable-parallel && break || sleep 5
+    # done
+
+
     cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json $(Build.ArtifactStagingDirectory)/publish/wwwroot/
   displayName: 'Publish Solution (Frontend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
