@@ -299,6 +299,24 @@ steps:
 
 - bash: |
     export PATH="/opt/net_sdk_10:$PATH"
+    # export PATH="/opt/dotnet-sdk-9.0.313:$PATH"
+    node -v
+    cd $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp
+    rm global.json
+    ls -alh
+     # npm i
+    cp -r /opt/node_modules .
+    chmod -R +x node_modules/.bin
+    ls -l node_modules/.bin/tailwindcss
+    npm run build:css
+    dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration) # this command will need node v20.22 or higher
+    # rm -rf node_modules/
+  displayName: 'Build Solution'
+  condition: succeeded()
+
+
+- bash: |
+    export PATH="/opt/net_sdk_10:$PATH"
     dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish  --disable-parallel  -p:BuildInParallel=false  -p:NodeReuse=false
 
     # Retry build up to 3 times
@@ -316,58 +334,72 @@ steps:
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
 # Cache Busting (Frontend only)
+# - bash: |
+#     echo "Applying cache busting to all static assets..."
+#     COMMIT_HASH="$(commit_hash)"
+    
+#     cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+#     INDEX_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html
+
+#     if [ ! -f "$INDEX_FILE" ]; then
+#       echo "ERROR: Index file not found at $INDEX_FILE"
+#       exit 1
+#     fi
+
+#     rm -f $(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html.br
+#     rm -f $(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html.gz
+#     ls -alh $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+
+#     # Backup for verification
+#     cp "$INDEX_FILE" "$INDEX_FILE.backup"
+    
+#     # Remove ALL existing query parameters first
+#     sed -i 's|\(href="[^"]*\)?[^"]*"|\1"|g' index.html
+#     sed -i 's|\(src="[^"]*\)?[^"]*"|\1"|g' index.html
+    
+#     # Apply cache busting to ALL assets (any file type in assets/ or favicon/)
+#     sed -i "s|\(href=\"assets/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
+#     sed -i "s|\(src=\"assets/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
+#     sed -i "s|\(href=\"favicon/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
+
+#     echo "=== AFTER ==="
+#     grep -E '(assets/|favicon/)' "$INDEX_FILE" | head -10
+
+#     echo "Targeted cache busting applied with commit: $COMMIT_HASH"
+#     echo "=== CHANGES MADE ==="
+#     diff -u "$INDEX_FILE.backup" "$INDEX_FILE" | grep -E "^[-+]" || echo "Changes applied successfully"
+
+#     echo "1. All cache-busted assets:"
+#     grep -E '\.(css|js|png)\?v=' "$INDEX_FILE"
+    
+#     echo ""
+#     echo "2. Blazor assets (should be unchanged):"
+#     grep -E '(_content/|_framework/|blazor\.webassembly\.js)' "$INDEX_FILE"
+
+#     echo ""
+#     echo "3. Any remaining ?modified= params (should be none):"
+#     grep '?modified=' "$INDEX_FILE" && echo "ERROR: Manual params still exist!" || echo "GOOD: No manual params found"
+
+#     echo ""
+#     echo "4. Summary:"
+#     echo "   - Cache-busted files: $(grep -c '?v=' "$INDEX_FILE" || echo 0)"
+#     echo "   - Blazor files: $(grep -c -E '(_content/|_framework/)' "$INDEX_FILE" || echo 0)"
+#   displayName: 'Cache Busting (Frontend)'
+#   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 - bash: |
-    echo "Applying cache busting to all static assets..."
-    COMMIT_HASH="$(commit_hash)"
+    # echo "Applying cache busting to all static assets..."
+    COMMIT_HASH="$(gitPull.COMMIT_HASH)"
+    NEW_VALUE="fx-pwa-cache-v$COMMIT_HASH"
     
     cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
-    INDEX_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html
+    JS_FILE=assets/js/service-worker.js
 
-    if [ ! -f "$INDEX_FILE" ]; then
-      echo "ERROR: Index file not found at $INDEX_FILE"
-      exit 1
-    fi
+    sed -i "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = '$NEW_VALUE'/" "$JS_FILE"
+    echo "Updated CACHE_NAME to $NEW_VALUE in $JS_FILE"
 
-    rm -f $(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html.br
-    rm -f $(Build.ArtifactStagingDirectory)/publish/wwwroot/index.html.gz
-    ls -alh $(Build.ArtifactStagingDirectory)/publish/wwwroot/
-
-    # Backup for verification
-    cp "$INDEX_FILE" "$INDEX_FILE.backup"
-    
-    # Remove ALL existing query parameters first
-    sed -i 's|\(href="[^"]*\)?[^"]*"|\1"|g' index.html
-    sed -i 's|\(src="[^"]*\)?[^"]*"|\1"|g' index.html
-    
-    # Apply cache busting to ALL assets (any file type in assets/ or favicon/)
-    sed -i "s|\(href=\"assets/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
-    sed -i "s|\(src=\"assets/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
-    sed -i "s|\(href=\"favicon/[^\"]*\.\w\{1,10\}\)\"|\1?v=$COMMIT_HASH\"|g" index.html
-
-    echo "=== AFTER ==="
-    grep -E '(assets/|favicon/)' "$INDEX_FILE" | head -10
-
-    echo "Targeted cache busting applied with commit: $COMMIT_HASH"
-    echo "=== CHANGES MADE ==="
-    diff -u "$INDEX_FILE.backup" "$INDEX_FILE" | grep -E "^[-+]" || echo "Changes applied successfully"
-
-    echo "1. All cache-busted assets:"
-    grep -E '\.(css|js|png)\?v=' "$INDEX_FILE"
-    
-    echo ""
-    echo "2. Blazor assets (should be unchanged):"
-    grep -E '(_content/|_framework/|blazor\.webassembly\.js)' "$INDEX_FILE"
-
-    echo ""
-    echo "3. Any remaining ?modified= params (should be none):"
-    grep '?modified=' "$INDEX_FILE" && echo "ERROR: Manual params still exist!" || echo "GOOD: No manual params found"
-
-    echo ""
-    echo "4. Summary:"
-    echo "   - Cache-busted files: $(grep -c '?v=' "$INDEX_FILE" || echo 0)"
-    echo "   - Blazor files: $(grep -c -E '(_content/|_framework/)' "$INDEX_FILE" || echo 0)"
-  displayName: 'Cache Busting (Frontend)'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    cat $(Build.ArtifactStagingDirectory)/publish/wwwroot/assets/js/service-worker.js
+  displayName: 'Cache Busting'
+  condition: succeeded()
 
 - bash: |
     mkdir -p $(Build.ArtifactStagingDirectory)/docker
