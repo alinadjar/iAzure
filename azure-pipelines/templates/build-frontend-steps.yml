@@ -299,7 +299,6 @@ steps:
 
 - bash: |
     export PATH="/opt/net_sdk_10:$PATH"
-    # export PATH="/opt/dotnet-sdk-9.0.313:$PATH"
     node -v
     cd $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp
     rm global.json
