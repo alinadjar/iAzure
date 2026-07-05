@@ -227,7 +227,7 @@ steps:
 - bash: |
     export PATH="/opt/net_sdk_10:$PATH"
     
-    dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config --verbosity detailed
+    dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config # --verbosity detailed
   displayName: 'Dotnet Restore (Frontend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
@@ -299,10 +299,11 @@ steps:
 
 - bash: |
     export PATH="/home/azurebot/.dotnet:$PATH"
+    dotnet --info
      # export PATH="/opt/net_sdk_10:$PATH"
     node -v
     cd $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp
-    rm global.json
+    rm global.json 2>/dev/null || true
     ls -alh
      # npm i
     cp -r /opt/node_modules .
