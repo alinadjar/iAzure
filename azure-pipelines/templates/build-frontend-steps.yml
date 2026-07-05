@@ -298,7 +298,8 @@ steps:
 #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
 - bash: |
-    export PATH="/home/azurebot/.dotnet:$PATH"
+    export PATH="/opt/net_sdk_10:$PATH"
+     # export PATH="/home/azurebot/.dotnet:$PATH"
     dotnet --info
      # export PATH="/opt/net_sdk_10:$PATH"
     node -v
@@ -310,6 +311,7 @@ steps:
     chmod -R +x node_modules/.bin
     ls -l node_modules/.bin/tailwindcss
     # npm run build:css
+    rm global.json 2>/dev/null || true
     dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration) # this command will need node v20.22 or higher
     # rm -rf node_modules/
   displayName: 'Build TailWind'
