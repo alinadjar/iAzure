@@ -298,7 +298,8 @@ steps:
 #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
 - bash: |
-    export PATH="/opt/net_sdk_10:$PATH"
+    export PATH="/home/azurebot/.dotnet:$PATH"
+     # export PATH="/opt/net_sdk_10:$PATH"
     node -v
     cd $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp
     rm global.json
