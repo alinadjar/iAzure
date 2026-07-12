@@ -956,7 +956,7 @@ stages:
         if [ -n "$WORK_ITEM_IDS" ]; then
           echo "Found work items: $WORK_ITEM_IDS"
           
-          # Create wiki page content
+          # Create wiki page content (plain text, NOT base64 encoded in the variable)
           WIKI_PAGE="---"
           WIKI_PAGE="${WIKI_PAGE}\ntitle: Build $(Build.BuildId) - Work Items"
           WIKI_PAGE="${WIKI_PAGE}\n---"
@@ -993,8 +993,11 @@ stages:
           WIKI_PAGE="${WIKI_PAGE}\n$(curl -s -u ":$(GIT_PAT)" "http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/tags?api-version=6.0" | jq -r '.value[]')"
           WIKI_PAGE="${WIKI_PAGE}\n\`\`\`"
           
-          # URL encode the wiki page name
-          WIKI_PAGE_NAME="Build%20$(Build.BuildId)"
+          # Create subpage path under "Released-WITS"
+          WIKI_PAGE_PATH="/Released-WITS/Build-$(Build.BuildId)"
+          
+          # URL encode the wiki page path
+          WIKI_PAGE_PATH_ENCODED=$(echo -n "$WIKI_PAGE_PATH" | sed 's/ /%20/g' | sed 's/\//%2F/g')
           
           # Get the wiki ID
           echo "Getting wiki ID..."
@@ -1012,20 +1015,18 @@ stages:
           echo "Wiki ID: $WIKI_ID"
           
           if [ -n "$WIKI_ID" ] && [ "$WIKI_ID" != "null" ]; then
-            # Try to create/update the wiki page using REST API
-            WIKI_UPDATE_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?path=${WIKI_PAGE_NAME}&api-version=6.0"
+            # Send the content as plain text, NOT base64 encoded
+            # The API expects the raw markdown content
+            WIKI_UPDATE_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?path=${WIKI_PAGE_PATH_ENCODED}&api-version=6.0"
             
-            echo "Publishing wiki page: Build $(Build.BuildId)"
+            echo "Publishing wiki page: $WIKI_PAGE_PATH"
             echo "Wiki URL: $WIKI_UPDATE_URL"
             
-            # URL encode the content
-            WIKI_PAGE_ENCODED=$(echo -n "$WIKI_PAGE" | base64 -w 0)
-            
-            # Create/update the wiki page
+            # Send the content as raw markdown (NOT base64)
             WIKI_RESPONSE=$(curl -s -X PUT \
               -u ":$(GIT_PAT)" \
               -H "Content-Type: application/json" \
-              -d "{\"content\": \"$WIKI_PAGE_ENCODED\", \"comment\": \"Auto-generated from build $(Build.BuildId)\"}" \
+              -d "{\"content\": \"$(echo -e "$WIKI_PAGE" | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}')\"}" \
               "$WIKI_UPDATE_URL" 2>&1)
             
             echo "Wiki API Response: $WIKI_RESPONSE"
@@ -1033,31 +1034,28 @@ stages:
             # Check if successful
             if echo "$WIKI_RESPONSE" | grep -q '"eTag"'; then
               echo "✅ Wiki page published successfully!"
-              WIKI_PAGE_URL="http://azure.sadgan.int/WebApp/SadganErp/_wiki/wikis/${WIKI_ID}?pagePath=/Build%20$(Build.BuildId)"
+              WIKI_PAGE_URL="http://azure.sadgan.int/WebApp/SadganErp/_wiki/wikis/${WIKI_ID}?pagePath=${WIKI_PAGE_PATH}"
               echo "📄 Wiki page URL: $WIKI_PAGE_URL"
             else
               echo "❌ Failed to publish wiki page"
-              echo "Error: $WIKI_RESPONSE"
               
-              # Try alternative method: create page with PUT (for Azure DevOps Server)
-              echo "Trying alternative method..."
-              WIKI_ALT_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?api-version=6.0"
+              # Fallback: Save as artifact
+              mkdir -p "$(Build.ArtifactStagingDirectory)/wiki"
+              echo -e "$WIKI_PAGE" > "$(Build.ArtifactStagingDirectory)/wiki/Build-$(Build.BuildId).md"
+              echo "✅ Wiki page saved as build artifact: wiki/Build-$(Build.BuildId).md"
               
-              WIKI_ALT_RESPONSE=$(curl -s -X PUT \
-                -u ":$(GIT_PAT)" \
-                -H "Content-Type: application/json" \
-                -d "{\"path\": \"${WIKI_PAGE_NAME}\", \"content\": \"$WIKI_PAGE_ENCODED\"}" \
-                "$WIKI_ALT_URL")
-              
-              echo "Alternative response: $WIKI_ALT_RESPONSE"
+              # Also save as artifact with the correct path structure
+              mkdir -p "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS"
+              cp "$(Build.ArtifactStagingDirectory)/wiki/Build-$(Build.BuildId).md" "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/"
+              echo "✅ Also saved in Released-WITS subfolder"
             fi
           else
-            echo "❌ Could not find wiki ID. Uploading as artifact instead."
+            echo "❌ Could not find wiki ID. Saving as artifact instead."
             
-            # Fallback: Upload as build artifact
-            mkdir -p "$(Build.ArtifactStagingDirectory)/wiki"
-            echo -e "$WIKI_PAGE" > "$(Build.ArtifactStagingDirectory)/wiki/build-$(Build.BuildId).md"
-            echo "✅ Wiki page saved as build artifact: wiki/build-$(Build.BuildId).md"
+            # Fallback: Save as artifact
+            mkdir -p "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS"
+            echo -e "$WIKI_PAGE" > "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/Build-$(Build.BuildId).md"
+            echo "✅ Wiki page saved as build artifact: wiki/Released-WITS/Build-$(Build.BuildId).md"
           fi
           
         else
