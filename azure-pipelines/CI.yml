@@ -878,6 +878,70 @@ stages:
     #   #   SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
 
+    # - bash: |
+    #     # Get the commit message from the API repo
+    #     cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        
+    #     # Extract work item IDs from commit message
+    #     COMMIT_MSG=$(git log -1 --pretty=%B)
+    #     echo "Commit message: $COMMIT_MSG"
+        
+    #     # Extract work item IDs (supports both #123 and AB#123 formats)
+    #     WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
+        
+    #     if [ -n "$WORK_ITEM_IDS" ]; then
+    #       echo "Found work items: $WORK_ITEM_IDS"
+          
+    #       # Add work items as build tags using Azure DevOps built-in command
+    #       echo "Adding work items as build tags..."
+          
+    #       for WI_ID in $WORK_ITEM_IDS; do
+    #         echo "Adding tag: WorkItem-$WI_ID"
+    #         echo "##vso[build.addbuildtag]WorkItem-$WI_ID"
+    #       done
+          
+    #       echo "✅ Added work items as build tags"
+          
+    #       # The build will automatically associate these tags as work items
+    #       # Wait a moment for the system to process the tags
+    #       echo "Waiting 3 seconds for tags to be processed..."
+    #       sleep 3
+          
+    #       # Verify the association using the API (optional)
+    #       echo "Verifying work item association..."
+    #       VERIFY_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+          
+    #       VERIFY_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$VERIFY_URL")
+          
+    #       echo "=== Work Items Associated with Build $(Build.BuildId) ==="
+    #       echo "$VERIFY_RESPONSE" | jq '.'
+          
+    #       # Check if verification was successful
+    #       COUNT=$(echo "$VERIFY_RESPONSE" | jq '.count')
+    #       if [ "$COUNT" -gt 0 ]; then
+    #         echo "✅ Successfully verified $COUNT work items associated with build"
+    #         echo "Work item IDs:"
+    #         echo "$VERIFY_RESPONSE" | jq '.value[].id'
+    #       else
+    #         echo "⚠️ No work items found in verification (they may take a moment to appear)"
+    #         echo "The tags have been added and should appear shortly"
+            
+    #         # List all build tags
+    #         echo "Current build tags:"
+    #         TAGS_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/tags?api-version=6.0"
+    #         curl -s -u ":$(GIT_PAT)" "$TAGS_URL" | jq '.'
+    #       fi
+          
+    #     else
+    #       echo "No work items found in commit message"
+    #     fi
+        
+    #   displayName: 'Associate Work Items to Build (Backend)'
+    #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    #   env:
+    #     GIT_PAT: $(GIT_PAT)
+
+
     - bash: |
         # Get the commit message from the API repo
         cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
@@ -892,54 +956,119 @@ stages:
         if [ -n "$WORK_ITEM_IDS" ]; then
           echo "Found work items: $WORK_ITEM_IDS"
           
-          # Add work items as build tags using Azure DevOps built-in command
-          echo "Adding work items as build tags..."
+          # Create wiki page content
+          WIKI_PAGE="---"
+          WIKI_PAGE="${WIKI_PAGE}\ntitle: Build $(Build.BuildId) - Work Items"
+          WIKI_PAGE="${WIKI_PAGE}\n---"
+          WIKI_PAGE="${WIKI_PAGE}\n\n# Work Items Associated with Build $(Build.BuildId)"
+          WIKI_PAGE="${WIKI_PAGE}\n\n**Build Number:** $(Build.BuildNumber)"
+          WIKI_PAGE="${WIKI_PAGE}\n\n**Build ID:** $(Build.BuildId)"
+          WIKI_PAGE="${WIKI_PAGE}\n\n**Branch:** $(Build.SourceBranch)"
+          WIKI_PAGE="${WIKI_PAGE}\n\n**Commit:** $(Build.SourceVersion)"
+          WIKI_PAGE="${WIKI_PAGE}\n\n## Associated Work Items\n\n"
+          
+          # Add work items with links
+          WIKI_PAGE="${WIKI_PAGE}| Work Item ID | Title | Type | Status |"
+          WIKI_PAGE="${WIKI_PAGE}\n|--------------|-------|------|--------|"
           
           for WI_ID in $WORK_ITEM_IDS; do
-            echo "Adding tag: WorkItem-$WI_ID"
-            echo "##vso[build.addbuildtag]WorkItem-$WI_ID"
+            # Get work item details using API
+            WI_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wit/workitems/${WI_ID}?api-version=6.0"
+            WI_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$WI_URL")
+            
+            # Extract work item details
+            WI_TITLE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.Title"] // "N/A"')
+            WI_TYPE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.WorkItemType"] // "N/A"')
+            WI_STATUS=$(echo "$WI_RESPONSE" | jq -r '.fields["System.State"] // "N/A"')
+            
+            # Add to wiki page with link
+            WIKI_PAGE="${WIKI_PAGE}\n| [#${WI_ID}](http://azure.sadgan.int/WebApp/SadganErp/_workitems/edit/${WI_ID}) | ${WI_TITLE} | ${WI_TYPE} | ${WI_STATUS} |"
           done
           
-          echo "✅ Added work items as build tags"
+          WIKI_PAGE="${WIKI_PAGE}\n\n## Build Details\n\n"
+          WIKI_PAGE="${WIKI_PAGE}- **Build URL:** http://azure.sadgan.int/WebApp/SadganErp/_build/results?buildId=$(Build.BuildId)"
+          WIKI_PAGE="${WIKI_PAGE}\n- **Artifacts:** http://azure.sadgan.int/WebApp/SadganErp/_build/results?buildId=$(Build.BuildId)&view=artifacts"
+          WIKI_PAGE="${WIKI_PAGE}\n\n## Tags\n\n"
+          WIKI_PAGE="${WIKI_PAGE}\`\`\`"
+          WIKI_PAGE="${WIKI_PAGE}\n$(curl -s -u ":$(GIT_PAT)" "http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/tags?api-version=6.0" | jq -r '.value[]')"
+          WIKI_PAGE="${WIKI_PAGE}\n\`\`\`"
           
-          # The build will automatically associate these tags as work items
-          # Wait a moment for the system to process the tags
-          echo "Waiting 3 seconds for tags to be processed..."
-          sleep 3
+          # URL encode the wiki page name
+          WIKI_PAGE_NAME="Build%20$(Build.BuildId)"
           
-          # Verify the association using the API (optional)
-          echo "Verifying work item association..."
-          VERIFY_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+          # Get the wiki ID
+          echo "Getting wiki ID..."
+          WIKI_LIST_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis?api-version=6.0"
+          WIKI_LIST_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$WIKI_LIST_URL")
           
-          VERIFY_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$VERIFY_URL")
+          # Get the wiki ID for SadganErp.wiki
+          WIKI_ID=$(echo "$WIKI_LIST_RESPONSE" | jq -r '.value[] | select(.name=="SadganErp.wiki") | .id')
           
-          echo "=== Work Items Associated with Build $(Build.BuildId) ==="
-          echo "$VERIFY_RESPONSE" | jq '.'
+          if [ -z "$WIKI_ID" ] || [ "$WIKI_ID" = "null" ]; then
+            echo "⚠️ Wiki 'SadganErp.wiki' not found. Trying to get first available wiki..."
+            WIKI_ID=$(echo "$WIKI_LIST_RESPONSE" | jq -r '.value[0].id')
+          fi
           
-          # Check if verification was successful
-          COUNT=$(echo "$VERIFY_RESPONSE" | jq '.count')
-          if [ "$COUNT" -gt 0 ]; then
-            echo "✅ Successfully verified $COUNT work items associated with build"
-            echo "Work item IDs:"
-            echo "$VERIFY_RESPONSE" | jq '.value[].id'
-          else
-            echo "⚠️ No work items found in verification (they may take a moment to appear)"
-            echo "The tags have been added and should appear shortly"
+          echo "Wiki ID: $WIKI_ID"
+          
+          if [ -n "$WIKI_ID" ] && [ "$WIKI_ID" != "null" ]; then
+            # Try to create/update the wiki page using REST API
+            WIKI_UPDATE_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?path=${WIKI_PAGE_NAME}&api-version=6.0"
             
-            # List all build tags
-            echo "Current build tags:"
-            TAGS_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/tags?api-version=6.0"
-            curl -s -u ":$(GIT_PAT)" "$TAGS_URL" | jq '.'
+            echo "Publishing wiki page: Build $(Build.BuildId)"
+            echo "Wiki URL: $WIKI_UPDATE_URL"
+            
+            # URL encode the content
+            WIKI_PAGE_ENCODED=$(echo -n "$WIKI_PAGE" | base64 -w 0)
+            
+            # Create/update the wiki page
+            WIKI_RESPONSE=$(curl -s -X PUT \
+              -u ":$(GIT_PAT)" \
+              -H "Content-Type: application/json" \
+              -d "{\"content\": \"$WIKI_PAGE_ENCODED\", \"comment\": \"Auto-generated from build $(Build.BuildId)\"}" \
+              "$WIKI_UPDATE_URL" 2>&1)
+            
+            echo "Wiki API Response: $WIKI_RESPONSE"
+            
+            # Check if successful
+            if echo "$WIKI_RESPONSE" | grep -q '"eTag"'; then
+              echo "✅ Wiki page published successfully!"
+              WIKI_PAGE_URL="http://azure.sadgan.int/WebApp/SadganErp/_wiki/wikis/${WIKI_ID}?pagePath=/Build%20$(Build.BuildId)"
+              echo "📄 Wiki page URL: $WIKI_PAGE_URL"
+            else
+              echo "❌ Failed to publish wiki page"
+              echo "Error: $WIKI_RESPONSE"
+              
+              # Try alternative method: create page with PUT (for Azure DevOps Server)
+              echo "Trying alternative method..."
+              WIKI_ALT_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?api-version=6.0"
+              
+              WIKI_ALT_RESPONSE=$(curl -s -X PUT \
+                -u ":$(GIT_PAT)" \
+                -H "Content-Type: application/json" \
+                -d "{\"path\": \"${WIKI_PAGE_NAME}\", \"content\": \"$WIKI_PAGE_ENCODED\"}" \
+                "$WIKI_ALT_URL")
+              
+              echo "Alternative response: $WIKI_ALT_RESPONSE"
+            fi
+          else
+            echo "❌ Could not find wiki ID. Uploading as artifact instead."
+            
+            # Fallback: Upload as build artifact
+            mkdir -p "$(Build.ArtifactStagingDirectory)/wiki"
+            echo -e "$WIKI_PAGE" > "$(Build.ArtifactStagingDirectory)/wiki/build-$(Build.BuildId).md"
+            echo "✅ Wiki page saved as build artifact: wiki/build-$(Build.BuildId).md"
           fi
           
         else
           echo "No work items found in commit message"
         fi
         
-      displayName: 'Associate Work Items to Build (Backend)'
+      displayName: 'Create Wiki Page with Work Items (Backend)'
       condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
       env:
         GIT_PAT: $(GIT_PAT)
+
 
     - template: templates/build-backend-steps.yml
       parameters:
