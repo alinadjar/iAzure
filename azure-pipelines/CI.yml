@@ -732,7 +732,7 @@ stages:
           # Create a temporary file for the wiki content
           WIKI_TEMP_FILE=$(mktemp)
           
-          # Build the new build section
+          # Build the new build section (this will be appended)
           {
             echo ""
             echo "## Build $(Build.BuildId) - $(date '+%Y-%m-%d %H:%M:%S')"
@@ -773,8 +773,8 @@ stages:
           # Read the new section content
           NEW_SECTION=$(cat "$WIKI_TEMP_FILE")
           
-          # Prepare wiki path
-          WIKI_PAGE_PATH="/Released-WITS/Build-$(Build.BuildId)"
+          # IMPORTANT: Use the PARENT page path (Released-WITS), NOT build-specific subpage
+          WIKI_PAGE_PATH="/Released-WITS"
           WIKI_PAGE_PATH_ENCODED=$(echo -n "$WIKI_PAGE_PATH" | sed 's/ /%20/g' | sed 's/\//%2F/g')
           
           # Get wiki ID
@@ -790,7 +790,7 @@ stages:
           echo "Wiki ID: $WIKI_ID"
           
           if [ -n "$WIKI_ID" ] && [ "$WIKI_ID" != "null" ]; then
-            # Try to get existing content
+            # Try to get existing content from the parent page
             GET_WIKI_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?path=${WIKI_PAGE_PATH_ENCODED}&api-version=6.0&includeContent=true"
             EXISTING_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$GET_WIKI_URL")
             EXISTING_CONTENT=$(echo "$EXISTING_RESPONSE" | jq -r '.content // ""')
@@ -798,11 +798,50 @@ stages:
             # Build the final content
             if [ -n "$EXISTING_CONTENT" ] && [ "$EXISTING_CONTENT" != "null" ] && [ "$EXISTING_CONTENT" != "" ]; then
               echo "📄 Existing wiki page found. Appending new build information..."
-              FINAL_CONTENT="${EXISTING_CONTENT}${NEW_SECTION}"
+              
+              # Check if we need to add the header or if it already exists
+              if echo "$EXISTING_CONTENT" | grep -q "# Released Work Items - Build History"; then
+                # Page already has header, just append the new section
+                FINAL_CONTENT="${EXISTING_CONTENT}${NEW_SECTION}"
+              else
+                # Page exists but doesn't have the header (maybe it's a different format)
+                # Add header and then append
+                HEADER="---"
+                HEADER="${HEADER}\ntitle: Released Work Items"
+                HEADER="${HEADER}\n---"
+                HEADER="${HEADER}\n\n# Released Work Items - Build History"
+                HEADER="${HEADER}\n\n## Summary"
+                HEADER="${HEADER}\n\nThis page tracks all builds and their associated work items."
+                HEADER="${HEADER}\n\n| Build ID | Build Number | Type | Developer | Date | Work Items |"
+                HEADER="${HEADER}\n|----------|--------------|------|-----------|------|------------|"
+                
+                # Extract existing builds and add to summary
+                # For simplicity, we'll just prepend the header
+                FINAL_CONTENT="${HEADER}\n\n## Build History\n${EXISTING_CONTENT}${NEW_SECTION}"
+              fi
+              
+              # Also update the summary table at the top
+              # Find the summary table and add a new row
+              WI_COUNT=$(echo "$WORK_ITEM_IDS" | wc -l)
+              WI_LIST=$(echo "$WORK_ITEM_IDS" | tr '\n' ',' | sed 's/,$//')
+              NEW_SUMMARY_ROW="| $(Build.BuildId) | $(Build.BuildNumber) | ${BUILD_TYPE} | ${DEVELOPER_NAME} | $(date '+%Y-%m-%d') | ${WI_COUNT} items (#${WI_LIST}) |"
+              
+              # Insert the new row into the summary table
+              FINAL_CONTENT=$(echo "$FINAL_CONTENT" | awk -v new_row="$NEW_SUMMARY_ROW" '
+                /^\| [0-9]+ \|/ { 
+                  # Found a row in the summary table, insert new row before the first data row
+                  if (!inserted) {
+                    print new_row
+                    inserted = 1
+                  }
+                }
+                { print }
+              ')
+              
             else
               echo "🆕 Creating new wiki page..."
               
-              # Create header
+              # Create brand new page with header and this build
               HEADER="---"
               HEADER="${HEADER}\ntitle: Released Work Items"
               HEADER="${HEADER}\n---"
@@ -823,10 +862,10 @@ stages:
             # Write final content to temp file
             echo -e "$FINAL_CONTENT" > "$WIKI_TEMP_FILE"
             
-            # Escape content for JSON - using a simpler approach
-            CONTENT_ESCAPED=$(cat "$WIKI_TEMP_FILE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || cat "$WIKI_TEMP_FILE" | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}')
+            # Escape content for JSON
+            CONTENT_ESCAPED=$(cat "$WIKI_TEMP_FILE" | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}')
             
-            # Update the wiki page
+            # Update the wiki page (ALWAYS use the parent path /Released-WITS)
             WIKI_UPDATE_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?path=${WIKI_PAGE_PATH_ENCODED}&api-version=6.0"
             
             echo "Publishing/Updating wiki page: $WIKI_PAGE_PATH"
@@ -834,26 +873,34 @@ stages:
             WIKI_RESPONSE=$(curl -s -X PUT \
               -u ":$(GIT_PAT)" \
               -H "Content-Type: application/json" \
-              -d "{\"content\": ${CONTENT_ESCAPED}}" \
+              -d "{\"content\": \"${CONTENT_ESCAPED}\"}" \
               "$WIKI_UPDATE_URL")
             
-            if echo "$WIKI_RESPONSE" | grep -q '"eTag"'; then
+            # Check for success - look for "id" in response (NOT "eTag")
+            if echo "$WIKI_RESPONSE" | grep -q '"id"'; then
               echo "✅ Wiki page published/updated successfully!"
               echo "📄 Wiki page URL: http://azure.sadgan.int/WebApp/SadganErp/_wiki/wikis/${WIKI_ID}?pagePath=${WIKI_PAGE_PATH}"
             else
-              echo "❌ Failed to publish wiki page"
-              echo "Response: $WIKI_RESPONSE"
-              
-              # Fallback: Save as artifact
-              mkdir -p "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS"
-              cp "$WIKI_TEMP_FILE" "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/Build-$(Build.BuildId).md"
-              echo "✅ Wiki page saved as artifact: wiki/Released-WITS/Build-$(Build.BuildId).md"
+              # Check if it was a success but without "id" (some Azure DevOps versions)
+              if echo "$WIKI_RESPONSE" | grep -q '"path"'; then
+                echo "✅ Wiki page published/updated successfully! (alternative response format)"
+                echo "📄 Wiki page URL: http://azure.sadgan.int/WebApp/SadganErp/_wiki/wikis/${WIKI_ID}?pagePath=${WIKI_PAGE_PATH}"
+                echo "Response: $WIKI_RESPONSE"
+              else
+                echo "❌ Failed to publish wiki page"
+                echo "Response: $WIKI_RESPONSE"
+                
+                # Fallback: Save as artifact
+                mkdir -p "$(Build.ArtifactStagingDirectory)/wiki"
+                cp "$WIKI_TEMP_FILE" "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS.md"
+                echo "✅ Wiki page saved as artifact: wiki/Released-WITS.md"
+              fi
             fi
           else
             echo "❌ Could not find wiki ID. Saving as artifact instead."
-            mkdir -p "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS"
-            echo -e "$NEW_SECTION" > "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/Build-$(Build.BuildId).md"
-            echo "✅ Wiki page saved as artifact: wiki/Released-WITS/Build-$(Build.BuildId).md"
+            mkdir -p "$(Build.ArtifactStagingDirectory)/wiki"
+            cp "$WIKI_TEMP_FILE" "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS.md"
+            echo "✅ Wiki page saved as artifact: wiki/Released-WITS.md"
           fi
           
           # Clean up
@@ -863,7 +910,7 @@ stages:
           echo "No work items found in commit message"
         fi
         
-      displayName: 'Attach Wiki Work Items'
+      displayName: 'Attach Wiki Work Items (Append)'
       condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
       env:
         GIT_PAT: $(GIT_PAT)
@@ -1137,7 +1184,7 @@ stages:
           # Create a temporary file for the wiki content
           WIKI_TEMP_FILE=$(mktemp)
           
-          # Build the new build section
+          # Build the new build section (this will be appended)
           {
             echo ""
             echo "## Build $(Build.BuildId) - $(date '+%Y-%m-%d %H:%M:%S')"
@@ -1178,8 +1225,8 @@ stages:
           # Read the new section content
           NEW_SECTION=$(cat "$WIKI_TEMP_FILE")
           
-          # Prepare wiki path
-          WIKI_PAGE_PATH="/Released-WITS/Build-$(Build.BuildId)"
+          # IMPORTANT: Use the PARENT page path (Released-WITS), NOT build-specific subpage
+          WIKI_PAGE_PATH="/Released-WITS"
           WIKI_PAGE_PATH_ENCODED=$(echo -n "$WIKI_PAGE_PATH" | sed 's/ /%20/g' | sed 's/\//%2F/g')
           
           # Get wiki ID
@@ -1195,7 +1242,7 @@ stages:
           echo "Wiki ID: $WIKI_ID"
           
           if [ -n "$WIKI_ID" ] && [ "$WIKI_ID" != "null" ]; then
-            # Try to get existing content
+            # Try to get existing content from the parent page
             GET_WIKI_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?path=${WIKI_PAGE_PATH_ENCODED}&api-version=6.0&includeContent=true"
             EXISTING_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$GET_WIKI_URL")
             EXISTING_CONTENT=$(echo "$EXISTING_RESPONSE" | jq -r '.content // ""')
@@ -1203,11 +1250,50 @@ stages:
             # Build the final content
             if [ -n "$EXISTING_CONTENT" ] && [ "$EXISTING_CONTENT" != "null" ] && [ "$EXISTING_CONTENT" != "" ]; then
               echo "📄 Existing wiki page found. Appending new build information..."
-              FINAL_CONTENT="${EXISTING_CONTENT}${NEW_SECTION}"
+              
+              # Check if we need to add the header or if it already exists
+              if echo "$EXISTING_CONTENT" | grep -q "# Released Work Items - Build History"; then
+                # Page already has header, just append the new section
+                FINAL_CONTENT="${EXISTING_CONTENT}${NEW_SECTION}"
+              else
+                # Page exists but doesn't have the header (maybe it's a different format)
+                # Add header and then append
+                HEADER="---"
+                HEADER="${HEADER}\ntitle: Released Work Items"
+                HEADER="${HEADER}\n---"
+                HEADER="${HEADER}\n\n# Released Work Items - Build History"
+                HEADER="${HEADER}\n\n## Summary"
+                HEADER="${HEADER}\n\nThis page tracks all builds and their associated work items."
+                HEADER="${HEADER}\n\n| Build ID | Build Number | Type | Developer | Date | Work Items |"
+                HEADER="${HEADER}\n|----------|--------------|------|-----------|------|------------|"
+                
+                # Extract existing builds and add to summary
+                # For simplicity, we'll just prepend the header
+                FINAL_CONTENT="${HEADER}\n\n## Build History\n${EXISTING_CONTENT}${NEW_SECTION}"
+              fi
+              
+              # Also update the summary table at the top
+              # Find the summary table and add a new row
+              WI_COUNT=$(echo "$WORK_ITEM_IDS" | wc -l)
+              WI_LIST=$(echo "$WORK_ITEM_IDS" | tr '\n' ',' | sed 's/,$//')
+              NEW_SUMMARY_ROW="| $(Build.BuildId) | $(Build.BuildNumber) | ${BUILD_TYPE} | ${DEVELOPER_NAME} | $(date '+%Y-%m-%d') | ${WI_COUNT} items (#${WI_LIST}) |"
+              
+              # Insert the new row into the summary table
+              FINAL_CONTENT=$(echo "$FINAL_CONTENT" | awk -v new_row="$NEW_SUMMARY_ROW" '
+                /^\| [0-9]+ \|/ { 
+                  # Found a row in the summary table, insert new row before the first data row
+                  if (!inserted) {
+                    print new_row
+                    inserted = 1
+                  }
+                }
+                { print }
+              ')
+              
             else
               echo "🆕 Creating new wiki page..."
               
-              # Create header
+              # Create brand new page with header and this build
               HEADER="---"
               HEADER="${HEADER}\ntitle: Released Work Items"
               HEADER="${HEADER}\n---"
@@ -1228,10 +1314,10 @@ stages:
             # Write final content to temp file
             echo -e "$FINAL_CONTENT" > "$WIKI_TEMP_FILE"
             
-            # Escape content for JSON - using a simpler approach
-            CONTENT_ESCAPED=$(cat "$WIKI_TEMP_FILE" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' 2>/dev/null || cat "$WIKI_TEMP_FILE" | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}')
+            # Escape content for JSON
+            CONTENT_ESCAPED=$(cat "$WIKI_TEMP_FILE" | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}')
             
-            # Update the wiki page
+            # Update the wiki page (ALWAYS use the parent path /Released-WITS)
             WIKI_UPDATE_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?path=${WIKI_PAGE_PATH_ENCODED}&api-version=6.0"
             
             echo "Publishing/Updating wiki page: $WIKI_PAGE_PATH"
@@ -1239,26 +1325,34 @@ stages:
             WIKI_RESPONSE=$(curl -s -X PUT \
               -u ":$(GIT_PAT)" \
               -H "Content-Type: application/json" \
-              -d "{\"content\": ${CONTENT_ESCAPED}}" \
+              -d "{\"content\": \"${CONTENT_ESCAPED}\"}" \
               "$WIKI_UPDATE_URL")
             
-            if echo "$WIKI_RESPONSE" | grep -q '"eTag"'; then
+            # Check for success - look for "id" in response (NOT "eTag")
+            if echo "$WIKI_RESPONSE" | grep -q '"id"'; then
               echo "✅ Wiki page published/updated successfully!"
               echo "📄 Wiki page URL: http://azure.sadgan.int/WebApp/SadganErp/_wiki/wikis/${WIKI_ID}?pagePath=${WIKI_PAGE_PATH}"
             else
-              echo "❌ Failed to publish wiki page"
-              echo "Response: $WIKI_RESPONSE"
-              
-              # Fallback: Save as artifact
-              mkdir -p "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS"
-              cp "$WIKI_TEMP_FILE" "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/Build-$(Build.BuildId).md"
-              echo "✅ Wiki page saved as artifact: wiki/Released-WITS/Build-$(Build.BuildId).md"
+              # Check if it was a success but without "id" (some Azure DevOps versions)
+              if echo "$WIKI_RESPONSE" | grep -q '"path"'; then
+                echo "✅ Wiki page published/updated successfully! (alternative response format)"
+                echo "📄 Wiki page URL: http://azure.sadgan.int/WebApp/SadganErp/_wiki/wikis/${WIKI_ID}?pagePath=${WIKI_PAGE_PATH}"
+                echo "Response: $WIKI_RESPONSE"
+              else
+                echo "❌ Failed to publish wiki page"
+                echo "Response: $WIKI_RESPONSE"
+                
+                # Fallback: Save as artifact
+                mkdir -p "$(Build.ArtifactStagingDirectory)/wiki"
+                cp "$WIKI_TEMP_FILE" "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS.md"
+                echo "✅ Wiki page saved as artifact: wiki/Released-WITS.md"
+              fi
             fi
           else
             echo "❌ Could not find wiki ID. Saving as artifact instead."
-            mkdir -p "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS"
-            echo -e "$NEW_SECTION" > "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/Build-$(Build.BuildId).md"
-            echo "✅ Wiki page saved as artifact: wiki/Released-WITS/Build-$(Build.BuildId).md"
+            mkdir -p "$(Build.ArtifactStagingDirectory)/wiki"
+            cp "$WIKI_TEMP_FILE" "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS.md"
+            echo "✅ Wiki page saved as artifact: wiki/Released-WITS.md"
           fi
           
           # Clean up
@@ -1268,7 +1362,7 @@ stages:
           echo "No work items found in commit message"
         fi
         
-      displayName: 'Attach Wiki Work Items'
+      displayName: 'Attach Wiki Work Items (Append)'
       condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
       env:
         GIT_PAT: $(GIT_PAT)
