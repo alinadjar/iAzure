@@ -1005,7 +1005,7 @@ stages:
             "workItems": [${WORK_ITEMS_ARRAY}],
             "workItemCount": $(echo "$WORK_ITEM_IDS" | wc -l)
           }
-          EOF
+        EOF
           )
           
           echo "Sending to n8n..."
