@@ -944,97 +944,97 @@ stages:
     #     GIT_PAT: $(GIT_PAT)
 
 
-    - bash: |
-        # Get the commit message from the API repo
-        cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+    # - bash: |
+    #     # Get the commit message from the API repo
+    #     cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
         
-        # Extract work item IDs from commit message
-        COMMIT_MSG=$(git log -1 --pretty=%B)
-        WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
+    #     # Extract work item IDs from commit message
+    #     COMMIT_MSG=$(git log -1 --pretty=%B)
+    #     WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
         
-        if [ -n "$WORK_ITEM_IDS" ]; then
-          echo "Found work items: $WORK_ITEM_IDS"
+    #     if [ -n "$WORK_ITEM_IDS" ]; then
+    #       echo "Found work items: $WORK_ITEM_IDS"
           
-          # Get developer info
-          DEVELOPER_NAME=$(git log -1 --pretty=%an)
-          DEVELOPER_EMAIL=$(git log -1 --pretty=%ae)
+    #       # Get developer info
+    #       DEVELOPER_NAME=$(git log -1 --pretty=%an)
+    #       DEVELOPER_EMAIL=$(git log -1 --pretty=%ae)
           
-          # Determine build type
-          BUILD_TYPE="Backend"
-          if [[ "$(Build.DefinitionName)" == *"Frontend"* ]]; then
-            BUILD_TYPE="Frontend"
-          fi
+    #       # Determine build type
+    #       BUILD_TYPE="Backend"
+    #       if [[ "$(Build.DefinitionName)" == *"Frontend"* ]]; then
+    #         BUILD_TYPE="Frontend"
+    #       fi
           
-          # Build work items array
-          WORK_ITEMS_ARRAY=""
-          FIRST=true
-          for WI_ID in $WORK_ITEM_IDS; do
-            WI_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wit/workitems/${WI_ID}?api-version=6.0"
-            WI_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$WI_URL")
+    #       # Build work items array
+    #       WORK_ITEMS_ARRAY=""
+    #       FIRST=true
+    #       for WI_ID in $WORK_ITEM_IDS; do
+    #         WI_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wit/workitems/${WI_ID}?api-version=6.0"
+    #         WI_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$WI_URL")
             
-            WI_TITLE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.Title"] // "N/A"')
-            WI_TYPE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.WorkItemType"] // "N/A"')
-            WI_STATUS=$(echo "$WI_RESPONSE" | jq -r '.fields["System.State"] // "N/A"')
+    #         WI_TITLE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.Title"] // "N/A"')
+    #         WI_TYPE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.WorkItemType"] // "N/A"')
+    #         WI_STATUS=$(echo "$WI_RESPONSE" | jq -r '.fields["System.State"] // "N/A"')
             
-            if [ "$FIRST" = true ]; then
-              WORK_ITEMS_ARRAY="{\"id\":${WI_ID},\"title\":\"${WI_TITLE}\",\"type\":\"${WI_TYPE}\",\"status\":\"${WI_STATUS}\"}"
-              FIRST=false
-            else
-              WORK_ITEMS_ARRAY="${WORK_ITEMS_ARRAY},{\"id\":${WI_ID},\"title\":\"${WI_TITLE}\",\"type\":\"${WI_TYPE}\",\"status\":\"${WI_STATUS}\"}"
-            fi
-          done
+    #         if [ "$FIRST" = true ]; then
+    #           WORK_ITEMS_ARRAY="{\"id\":${WI_ID},\"title\":\"${WI_TITLE}\",\"type\":\"${WI_TYPE}\",\"status\":\"${WI_STATUS}\"}"
+    #           FIRST=false
+    #         else
+    #           WORK_ITEMS_ARRAY="${WORK_ITEMS_ARRAY},{\"id\":${WI_ID},\"title\":\"${WI_TITLE}\",\"type\":\"${WI_TYPE}\",\"status\":\"${WI_STATUS}\"}"
+    #         fi
+    #       done
           
-          # Create JSON payload for n8n
-          JSON_PAYLOAD=$(cat <<EOF
-          {
-            "event": "build_completed",
-            "timestamp": "$(date -Iseconds)",
-            "build": {
-              "id": $(Build.BuildId),
-              "number": "$(Build.BuildNumber)",
-              "type": "${BUILD_TYPE}",
-              "branch": "$(Build.SourceBranch)",
-              "commit": "$(Build.SourceVersion)",
-              "commitShort": "$(echo $(Build.SourceVersion) | cut -c1-8)",
-              "url": "http://azure.sadgan.int/WebApp/SadganErp/_build/results?buildId=$(Build.BuildId)"
-            },
-            "developer": {
-              "name": "${DEVELOPER_NAME}",
-              "email": "${DEVELOPER_EMAIL}"
-            },
-            "workItems": [${WORK_ITEMS_ARRAY}],
-            "workItemCount": $(echo "$WORK_ITEM_IDS" | wc -l)
-          }
-        EOF
-          )
+    #       # Create JSON payload for n8n
+    #       JSON_PAYLOAD=$(cat <<EOF
+    #       {
+    #         "event": "build_completed",
+    #         "timestamp": "$(date -Iseconds)",
+    #         "build": {
+    #           "id": $(Build.BuildId),
+    #           "number": "$(Build.BuildNumber)",
+    #           "type": "${BUILD_TYPE}",
+    #           "branch": "$(Build.SourceBranch)",
+    #           "commit": "$(Build.SourceVersion)",
+    #           "commitShort": "$(echo $(Build.SourceVersion) | cut -c1-8)",
+    #           "url": "http://azure.sadgan.int/WebApp/SadganErp/_build/results?buildId=$(Build.BuildId)"
+    #         },
+    #         "developer": {
+    #           "name": "${DEVELOPER_NAME}",
+    #           "email": "${DEVELOPER_EMAIL}"
+    #         },
+    #         "workItems": [${WORK_ITEMS_ARRAY}],
+    #         "workItemCount": $(echo "$WORK_ITEM_IDS" | wc -l)
+    #       }
+    #     EOF
+    #       )
           
-          echo "Sending to n8n..."
-          echo "$JSON_PAYLOAD" | jq '.'
+    #       echo "Sending to n8n..."
+    #       echo "$JSON_PAYLOAD" | jq '.'
           
-          # Send to n8n webhook
-          # N8N_URL="https://your-n8n-url.com/webhook/build-notifications"
+    #       # Send to n8n webhook
+    #       # N8N_URL="https://your-n8n-url.com/webhook/build-notifications"
           
-          # RESPONSE=$(curl -s -X POST \
-          #   -H "Content-Type: application/json" \
-          #   -d "$JSON_PAYLOAD" \
-          #   "$N8N_URL")
+    #       # RESPONSE=$(curl -s -X POST \
+    #       #   -H "Content-Type: application/json" \
+    #       #   -d "$JSON_PAYLOAD" \
+    #       #   "$N8N_URL")
           
-          # echo "Response: $RESPONSE"
+    #       # echo "Response: $RESPONSE"
           
-          # if echo "$RESPONSE" | grep -q '"success"\|"ok"'; then
-          #   echo "✅ Notification sent successfully!"
-          # else
-          #   echo "⚠️ Notification may have failed. Response: $RESPONSE"
-          # fi
+    #       # if echo "$RESPONSE" | grep -q '"success"\|"ok"'; then
+    #       #   echo "✅ Notification sent successfully!"
+    #       # else
+    #       #   echo "⚠️ Notification may have failed. Response: $RESPONSE"
+    #       # fi
           
-        else
-          echo "No work items found in commit message"
-        fi
+    #     else
+    #       echo "No work items found in commit message"
+    #     fi
         
-      displayName: 'Send Work Items to n8n'
-      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-      env:
-        GIT_PAT: $(GIT_PAT)
+    #   displayName: 'Send Work Items to n8n'
+    #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    #   env:
+    #     GIT_PAT: $(GIT_PAT)
 
 
     - template: templates/build-backend-steps.yml
