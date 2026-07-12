@@ -948,121 +948,155 @@ stages:
         
         # Extract work item IDs from commit message
         COMMIT_MSG=$(git log -1 --pretty=%B)
-        echo "Commit message: $COMMIT_MSG"
-        
-        # Extract work item IDs (supports both #123 and AB#123 formats)
         WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
         
         if [ -n "$WORK_ITEM_IDS" ]; then
           echo "Found work items: $WORK_ITEM_IDS"
           
-          # Create wiki page content (plain text, NOT base64 encoded in the variable)
-          WIKI_PAGE="---"
-          WIKI_PAGE="${WIKI_PAGE}\ntitle: Build $(Build.BuildId) - Work Items"
-          WIKI_PAGE="${WIKI_PAGE}\n---"
-          WIKI_PAGE="${WIKI_PAGE}\n\n# Work Items Associated with Build $(Build.BuildId)"
-          WIKI_PAGE="${WIKI_PAGE}\n\n**Build Number:** $(Build.BuildNumber)"
-          WIKI_PAGE="${WIKI_PAGE}\n\n**Build ID:** $(Build.BuildId)"
-          WIKI_PAGE="${WIKI_PAGE}\n\n**Branch:** $(Build.SourceBranch)"
-          WIKI_PAGE="${WIKI_PAGE}\n\n**Commit:** $(Build.SourceVersion)"
-          WIKI_PAGE="${WIKI_PAGE}\n\n## Associated Work Items\n\n"
+          # Get the developer name from the commit
+          DEVELOPER_NAME=$(git log -1 --pretty=%an)
+          DEVELOPER_EMAIL=$(git log -1 --pretty=%ae)
           
-          # Add work items with links
-          WIKI_PAGE="${WIKI_PAGE}| Work Item ID | Title | Type | Status |"
-          WIKI_PAGE="${WIKI_PAGE}\n|--------------|-------|------|--------|"
+          echo "Developer: $DEVELOPER_NAME <$DEVELOPER_EMAIL>"
+          
+          # Get build type (Frontend or Backend)
+          BUILD_TYPE="Backend"
+          if [[ "$(Build.DefinitionName)" == *"Frontend"* ]] || [[ "${{ parameters.BRANCH }}" == *"front"* ]]; then
+            BUILD_TYPE="Frontend"
+          fi
+          
+          # Create wiki page content for this build
+          BUILD_SECTION="\n\n## Build $(Build.BuildId) - $(date '+%Y-%m-%d %H:%M:%S')\n\n"
+          BUILD_SECTION="${BUILD_SECTION}**Build Number:** $(Build.BuildNumber)\n\n"
+          BUILD_SECTION="${BUILD_SECTION}**Build Type:** ${BUILD_TYPE}\n\n"
+          BUILD_SECTION="${BUILD_SECTION}**Developer:** ${DEVELOPER_NAME} (${DEVELOPER_EMAIL})\n\n"
+          BUILD_SECTION="${BUILD_SECTION}**Branch:** $(Build.SourceBranch)\n\n"
+          BUILD_SECTION="${BUILD_SECTION}**Commit:** $(Build.SourceVersion)\n\n"
+          BUILD_SECTION="${BUILD_SECTION}### Work Items\n\n"
+          
+          BUILD_SECTION="${BUILD_SECTION}| Work Item ID | Title | Type | Status | Developer |"
+          BUILD_SECTION="${BUILD_SECTION}\n|--------------|-------|------|--------|-----------|"
           
           for WI_ID in $WORK_ITEM_IDS; do
-            # Get work item details using API
             WI_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wit/workitems/${WI_ID}?api-version=6.0"
             WI_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$WI_URL")
             
-            # Extract work item details
             WI_TITLE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.Title"] // "N/A"')
             WI_TYPE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.WorkItemType"] // "N/A"')
             WI_STATUS=$(echo "$WI_RESPONSE" | jq -r '.fields["System.State"] // "N/A"')
             
-            # Add to wiki page with link
-            WIKI_PAGE="${WIKI_PAGE}\n| [#${WI_ID}](http://azure.sadgan.int/WebApp/SadganErp/_workitems/edit/${WI_ID}) | ${WI_TITLE} | ${WI_TYPE} | ${WI_STATUS} |"
+            BUILD_SECTION="${BUILD_SECTION}\n| [#${WI_ID}](http://azure.sadgan.int/WebApp/SadganErp/_workitems/edit/${WI_ID}) | ${WI_TITLE} | ${WI_TYPE} | ${WI_STATUS} | ${DEVELOPER_NAME} |"
           done
           
-          WIKI_PAGE="${WIKI_PAGE}\n\n## Build Details\n\n"
-          WIKI_PAGE="${WIKI_PAGE}- **Build URL:** http://azure.sadgan.int/WebApp/SadganErp/_build/results?buildId=$(Build.BuildId)"
-          WIKI_PAGE="${WIKI_PAGE}\n- **Artifacts:** http://azure.sadgan.int/WebApp/SadganErp/_build/results?buildId=$(Build.BuildId)&view=artifacts"
-          WIKI_PAGE="${WIKI_PAGE}\n\n## Tags\n\n"
-          WIKI_PAGE="${WIKI_PAGE}\`\`\`"
-          WIKI_PAGE="${WIKI_PAGE}\n$(curl -s -u ":$(GIT_PAT)" "http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/tags?api-version=6.0" | jq -r '.value[]')"
-          WIKI_PAGE="${WIKI_PAGE}\n\`\`\`"
+          BUILD_SECTION="${BUILD_SECTION}\n\n[View Build Details](http://azure.sadgan.int/WebApp/SadganErp/_build/results?buildId=$(Build.BuildId))\n\n---\n"
           
           # Create subpage path under "Released-WITS"
           WIKI_PAGE_PATH="/Released-WITS/Build-$(Build.BuildId)"
-          
-          # URL encode the wiki page path
           WIKI_PAGE_PATH_ENCODED=$(echo -n "$WIKI_PAGE_PATH" | sed 's/ /%20/g' | sed 's/\//%2F/g')
           
-          # Get the wiki ID
-          echo "Getting wiki ID..."
-          WIKI_LIST_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis?api-version=6.0"
-          WIKI_LIST_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$WIKI_LIST_URL")
-          
-          # Get the wiki ID for SadganErp.wiki
-          WIKI_ID=$(echo "$WIKI_LIST_RESPONSE" | jq -r '.value[] | select(.name=="SadganErp.wiki") | .id')
+          # Get wiki ID
+          WIKI_ID=$(curl -s -u ":$(GIT_PAT)" "http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis?api-version=6.0" | jq -r '.value[] | select(.name=="SadganErp.wiki") | .id')
           
           if [ -z "$WIKI_ID" ] || [ "$WIKI_ID" = "null" ]; then
-            echo "⚠️ Wiki 'SadganErp.wiki' not found. Trying to get first available wiki..."
-            WIKI_ID=$(echo "$WIKI_LIST_RESPONSE" | jq -r '.value[0].id')
+            WIKI_ID=$(curl -s -u ":$(GIT_PAT)" "http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis?api-version=6.0" | jq -r '.value[0].id')
           fi
           
           echo "Wiki ID: $WIKI_ID"
           
           if [ -n "$WIKI_ID" ] && [ "$WIKI_ID" != "null" ]; then
-            # Send the content as plain text, NOT base64 encoded
-            # The API expects the raw markdown content
+            # First, try to get existing content
+            GET_WIKI_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?path=${WIKI_PAGE_PATH_ENCODED}&api-version=6.0&includeContent=true"
+            
+            EXISTING_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$GET_WIKI_URL")
+            EXISTING_CONTENT=$(echo "$EXISTING_RESPONSE" | jq -r '.content // ""')
+            
+            # Check if the page exists and has content
+            if [ -n "$EXISTING_CONTENT" ] && [ "$EXISTING_CONTENT" != "null" ] && [ "$EXISTING_CONTENT" != "" ]; then
+              echo "📄 Existing wiki page found. Appending new build information..."
+              
+              # Append the new build section to existing content
+              UPDATED_CONTENT="${EXISTING_CONTENT}\n\n${BUILD_SECTION}"
+              
+              # Also update the index/summary at the top
+              # Add a summary section if it doesn't exist
+              if ! echo "$EXISTING_CONTENT" | grep -q "## Summary"; then
+                SUMMARY_SECTION="---\ntitle: Released Work Items\n---\n\n# Released Work Items - Build History\n\n## Summary\n\nThis page tracks all builds and their associated work items.\n\n| Build ID | Build Number | Type | Developer | Date | Work Items |\n|----------|--------------|------|-----------|------|------------|\n"
+                
+                # Add current build to summary
+                WI_COUNT=$(echo "$WORK_ITEM_IDS" | wc -l)
+                WI_LIST=$(echo "$WORK_ITEM_IDS" | tr '\n' ',' | sed 's/,$//')
+                SUMMARY_SECTION="${SUMMARY_SECTION}| $(Build.BuildId) | $(Build.BuildNumber) | ${BUILD_TYPE} | ${DEVELOPER_NAME} | $(date '+%Y-%m-%d') | ${WI_COUNT} items (#${WI_LIST}) |\n"
+                
+                UPDATED_CONTENT="${SUMMARY_SECTION}\n---\n\n## Build History\n\n${UPDATED_CONTENT}"
+              else
+                # Update the summary table with new build
+                # Extract the summary section and add a new row
+                UPDATED_CONTENT=$(echo "$UPDATED_CONTENT" | awk -v build_id="$(Build.BuildId)" \
+                  -v build_num="$(Build.BuildNumber)" \
+                  -v build_type="${BUILD_TYPE}" \
+                  -v dev="${DEVELOPER_NAME}" \
+                  -v date="$(date '+%Y-%m-%d')" \
+                  -v wi_count="$(echo "$WORK_ITEM_IDS" | wc -l)" \
+                  -v wi_list="$(echo "$WORK_ITEM_IDS" | tr '\n' ',' | sed 's/,$//')" \
+                  '{
+                    if ($0 ~ /^| [0-9]+ |/) {
+                      # Found the summary table, insert new row before it
+                      print "| " build_id " | " build_num " | " build_type " | " dev " | " date " | " wi_count " items (#' wi_list ") |"
+                    }
+                    print
+                  }')
+              fi
+            else
+              echo "🆕 Creating new wiki page..."
+              
+              # Create new page with summary and this build
+              UPDATED_CONTENT="---\ntitle: Released Work Items\n---\n\n# Released Work Items - Build History\n\n## Summary\n\nThis page tracks all builds and their associated work items.\n\n| Build ID | Build Number | Type | Developer | Date | Work Items |\n|----------|--------------|------|-----------|------|------------|\n"
+              
+              WI_COUNT=$(echo "$WORK_ITEM_IDS" | wc -l)
+              WI_LIST=$(echo "$WORK_ITEM_IDS" | tr '\n' ',' | sed 's/,$//')
+              UPDATED_CONTENT="${UPDATED_CONTENT}| $(Build.BuildId) | $(Build.BuildNumber) | ${BUILD_TYPE} | ${DEVELOPER_NAME} | $(date '+%Y-%m-%d') | ${WI_COUNT} items (#${WI_LIST}) |\n\n---\n\n## Build History\n\n"
+              UPDATED_CONTENT="${UPDATED_CONTENT}${BUILD_SECTION}"
+            fi
+            
+            # Escape the content for JSON
+            CONTENT_ESCAPED=$(echo -e "$UPDATED_CONTENT" | awk '{printf "%s\\n", $0}' | sed 's/"/\\"/g')
+            
+            # Update the wiki page
             WIKI_UPDATE_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wiki/wikis/${WIKI_ID}/pages?path=${WIKI_PAGE_PATH_ENCODED}&api-version=6.0"
             
-            echo "Publishing wiki page: $WIKI_PAGE_PATH"
-            echo "Wiki URL: $WIKI_UPDATE_URL"
+            echo "Publishing/Updating wiki page: $WIKI_PAGE_PATH"
             
-            # Send the content as raw markdown (NOT base64)
             WIKI_RESPONSE=$(curl -s -X PUT \
               -u ":$(GIT_PAT)" \
               -H "Content-Type: application/json" \
-              -d "{\"content\": \"$(echo -e "$WIKI_PAGE" | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}')\"}" \
-              "$WIKI_UPDATE_URL" 2>&1)
+              -d "{\"content\": \"${CONTENT_ESCAPED}\"}" \
+              "$WIKI_UPDATE_URL")
             
-            echo "Wiki API Response: $WIKI_RESPONSE"
-            
-            # Check if successful
             if echo "$WIKI_RESPONSE" | grep -q '"eTag"'; then
-              echo "✅ Wiki page published successfully!"
-              WIKI_PAGE_URL="http://azure.sadgan.int/WebApp/SadganErp/_wiki/wikis/${WIKI_ID}?pagePath=${WIKI_PAGE_PATH}"
-              echo "📄 Wiki page URL: $WIKI_PAGE_URL"
+              echo "✅ Wiki page published/updated successfully!"
+              echo "📄 Wiki page URL: http://azure.sadgan.int/WebApp/SadganErp/_wiki/wikis/${WIKI_ID}?pagePath=${WIKI_PAGE_PATH}"
             else
               echo "❌ Failed to publish wiki page"
+              echo "Response: $WIKI_RESPONSE"
               
               # Fallback: Save as artifact
-              mkdir -p "$(Build.ArtifactStagingDirectory)/wiki"
-              echo -e "$WIKI_PAGE" > "$(Build.ArtifactStagingDirectory)/wiki/Build-$(Build.BuildId).md"
-              echo "✅ Wiki page saved as build artifact: wiki/Build-$(Build.BuildId).md"
-              
-              # Also save as artifact with the correct path structure
               mkdir -p "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS"
-              cp "$(Build.ArtifactStagingDirectory)/wiki/Build-$(Build.BuildId).md" "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/"
-              echo "✅ Also saved in Released-WITS subfolder"
+              echo -e "$UPDATED_CONTENT" > "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/Build-$(Build.BuildId).md"
+              echo "✅ Wiki page saved as artifact: wiki/Released-WITS/Build-$(Build.BuildId).md"
             fi
           else
             echo "❌ Could not find wiki ID. Saving as artifact instead."
             
-            # Fallback: Save as artifact
             mkdir -p "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS"
-            echo -e "$WIKI_PAGE" > "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/Build-$(Build.BuildId).md"
-            echo "✅ Wiki page saved as build artifact: wiki/Released-WITS/Build-$(Build.BuildId).md"
+            echo -e "$BUILD_SECTION" > "$(Build.ArtifactStagingDirectory)/wiki/Released-WITS/Build-$(Build.BuildId).md"
+            echo "✅ Wiki page saved as artifact: wiki/Released-WITS/Build-$(Build.BuildId).md"
           fi
           
         else
           echo "No work items found in commit message"
         fi
         
-      displayName: 'Create Wiki Page with Work Items (Backend)'
+      displayName: 'Create/Update Wiki Page with Work Items'
       condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
       env:
         GIT_PAT: $(GIT_PAT)
