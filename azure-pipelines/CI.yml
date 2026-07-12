@@ -803,22 +803,65 @@ stages:
           echo "Found work items: $WORK_ITEM_IDS"
           
           # Convert to JSON array
-          WORK_ITEM_ARRAY=$(echo "$WORK_ITEM_IDS" | jq -R -s -c 'split("\n") | map(select(length>0)) | map(tonumber)')
+          # Convert newlines to commas and wrap in array
+          # WORK_ITEM_ARRAY=$(echo "$WORK_ITEM_IDS" | jq -R -s -c 'split("\n") | map(select(length>0)) | map(tonumber)')
+          WORK_ITEM_IDS_CLEAN=$(echo "$WORK_ITEM_IDS" | tr '\n' ',' | sed 's/,$//')
+          WORK_ITEM_JSON="[${WORK_ITEM_IDS_CLEAN}]"
+          echo "Work item JSON: $WORK_ITEM_JSON"
 
-          echo "BUILD_URL= http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
-          
           # Associate work items with the build
           BUILD_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+          echo "BUILD_URL= $BUILD_URL"
+          
+          
           
           echo "Associating work items with build $(Build.BuildId)..."
+          # Use PAT with Basic Auth - encode properly
+          PAT_BASE64=$(echo -n ":$(GIT_PAT)" | base64)
+
+
           
-          RESPONSE=$(curl -s -u ":$GIT_PAT" -X POST \
+          # Make the API call with verbose output for debugging
+          RESPONSE=$(curl -v -X POST \
+            -H "Authorization: Basic $PAT_BASE64" \
             -H "Content-Type: application/json" \
-            -d "{\"workItemIds\": $WORK_ITEM_ARRAY}" \
-            "$BUILD_URL" 2>/dev/null || echo '{"error":"connection failed"}')
+            -d "{\"workItemIds\": $WORK_ITEM_JSON}" \
+            "$BUILD_URL" 2>&1)
           
+          echo "=== Full Response ==="
+          echo "$RESPONSE"
+          echo "=== End Response ==="
           
-          echo "Response: $RESPONSE"
+          # Check if the request was successful
+          if echo "$RESPONSE" | grep -q '"count"'; then
+            echo "✅ Successfully associated work items: $WORK_ITEM_IDS"
+            
+            # Verify the association
+            VERIFY_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+            VERIFY_RESPONSE=$(curl -s -H "Authorization: Basic $PAT_BASE64" "$VERIFY_URL")
+            
+            echo "=== Verification Result ==="
+            echo "$VERIFY_RESPONSE" | jq '.'
+          else
+            echo "❌ Failed to associate work items"
+            
+            # Try alternative method with -u flag
+            echo "Trying alternative authentication method..."
+            RESPONSE2=$(curl -s -X POST \
+              -u ":$(GIT_PAT)" \
+              -H "Content-Type: application/json" \
+              -d "{\"workItemIds\": $WORK_ITEM_JSON}" \
+              "$BUILD_URL")
+            
+            echo "Response from alternative method: $RESPONSE2"
+            
+            if echo "$RESPONSE2" | grep -q '"count"'; then
+              echo "✅ Successfully associated work items using alternative method"
+            else
+              echo "❌ Both authentication methods failed"
+              exit 1
+            fi
+          fi
           
           # Verify association
           # echo "Verifying work items..."
@@ -830,7 +873,8 @@ stages:
         
       displayName: 'Associate Work Items to Build (Backend)'
       condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-      # env:
+      env:
+        GIT_PAT: $(GIT_PAT)
       #   SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
     - template: templates/build-backend-steps.yml
