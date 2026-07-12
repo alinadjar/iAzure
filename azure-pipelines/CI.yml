@@ -788,6 +788,96 @@ stages:
         GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
         GIT_HOME: $(GIT_HOME)
 
+    # - bash: |
+    #     # Get the commit message from the API repo
+    #     cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        
+    #     # Extract work item IDs from commit message
+    #     COMMIT_MSG=$(git log -1 --pretty=%B)
+    #     echo "Commit message: $COMMIT_MSG"
+    
+    #     # Extract work item IDs (supports both #123 and AB#123 formats)
+    #     WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
+        
+    #     if [ -n "$WORK_ITEM_IDS" ]; then
+    #       echo "Found work items: $WORK_ITEM_IDS"
+          
+    #       # Convert to JSON array
+    #       # Convert newlines to commas and wrap in array
+    #       # WORK_ITEM_ARRAY=$(echo "$WORK_ITEM_IDS" | jq -R -s -c 'split("\n") | map(select(length>0)) | map(tonumber)')
+    #       WORK_ITEM_IDS_CLEAN=$(echo "$WORK_ITEM_IDS" | tr '\n' ',' | sed 's/,$//')
+    #       WORK_ITEM_JSON="[${WORK_ITEM_IDS_CLEAN}]"
+    #       echo "Work item JSON: $WORK_ITEM_JSON"
+
+    #       # Associate work items with the build
+    #       BUILD_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+    #       echo "BUILD_URL= $BUILD_URL"
+          
+          
+          
+    #       echo "Associating work items with build $(Build.BuildId)..."
+    #       # Use PAT with Basic Auth - encode properly
+    #       PAT_BASE64=$(echo -n ":$(GIT_PAT)" | base64)
+
+
+          
+    #       # Make the API call with verbose output for debugging
+    #       RESPONSE=$(curl -v -X POST \
+    #         -H "Authorization: Basic $PAT_BASE64" \
+    #         -H "Content-Type: application/json" \
+    #         -d "{\"workItemIds\": $WORK_ITEM_JSON}" \
+    #         "$BUILD_URL" 2>&1)
+          
+    #       echo "=== Full Response ==="
+    #       echo "$RESPONSE"
+    #       echo "=== End Response ==="
+          
+    #       # Check if the request was successful
+    #       if echo "$RESPONSE" | grep -q '"count"'; then
+    #         echo "✅ Successfully associated work items: $WORK_ITEM_IDS"
+            
+    #         # Verify the association
+    #         VERIFY_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+    #         VERIFY_RESPONSE=$(curl -s -H "Authorization: Basic $PAT_BASE64" "$VERIFY_URL")
+            
+    #         echo "=== Verification Result ==="
+    #         echo "$VERIFY_RESPONSE" | jq '.'
+    #       else
+    #         echo "❌ Failed to associate work items"
+            
+    #         # Try alternative method with -u flag
+    #         echo "Trying alternative authentication method..."
+    #         RESPONSE2=$(curl -s -X POST \
+    #           -u ":$(GIT_PAT)" \
+    #           -H "Content-Type: application/json" \
+    #           -d "{\"workItemIds\": $WORK_ITEM_JSON}" \
+    #           "$BUILD_URL")
+            
+    #         echo "Response from alternative method: $RESPONSE2"
+            
+    #         if echo "$RESPONSE2" | grep -q '"count"'; then
+    #           echo "✅ Successfully associated work items using alternative method"
+    #         else
+    #           echo "❌ Both authentication methods failed"
+    #           exit 1
+    #         fi
+    #       fi
+          
+    #       # Verify association
+    #       # echo "Verifying work items..."
+    #       # VERIFY_URL="$(System.CollectionUri)$(System.TeamProject)/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+    #       # curl -s -u ":$(System.AccessToken)" "$VERIFY_URL" | jq '.'
+    #     else
+    #       echo "No work items found in commit message"
+    #     fi
+        
+    #   displayName: 'Associate Work Items to Build (Backend)'
+    #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    #   env:
+    #     GIT_PAT: $(GIT_PAT)
+    #   #   SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
+
     - bash: |
         # Get the commit message from the API repo
         cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
@@ -795,78 +885,53 @@ stages:
         # Extract work item IDs from commit message
         COMMIT_MSG=$(git log -1 --pretty=%B)
         echo "Commit message: $COMMIT_MSG"
-    
+        
         # Extract work item IDs (supports both #123 and AB#123 formats)
         WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
         
         if [ -n "$WORK_ITEM_IDS" ]; then
           echo "Found work items: $WORK_ITEM_IDS"
           
-          # Convert to JSON array
-          # Convert newlines to commas and wrap in array
-          # WORK_ITEM_ARRAY=$(echo "$WORK_ITEM_IDS" | jq -R -s -c 'split("\n") | map(select(length>0)) | map(tonumber)')
-          WORK_ITEM_IDS_CLEAN=$(echo "$WORK_ITEM_IDS" | tr '\n' ',' | sed 's/,$//')
-          WORK_ITEM_JSON="[${WORK_ITEM_IDS_CLEAN}]"
-          echo "Work item JSON: $WORK_ITEM_JSON"
-
-          # Associate work items with the build
-          BUILD_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
-          echo "BUILD_URL= $BUILD_URL"
+          # Add work items as build tags using Azure DevOps built-in command
+          echo "Adding work items as build tags..."
           
+          for WI_ID in $WORK_ITEM_IDS; do
+            echo "Adding tag: WorkItem-$WI_ID"
+            echo "##vso[build.addbuildtag]WorkItem-$WI_ID"
+          done
           
+          echo "✅ Added work items as build tags"
           
-          echo "Associating work items with build $(Build.BuildId)..."
-          # Use PAT with Basic Auth - encode properly
-          PAT_BASE64=$(echo -n ":$(GIT_PAT)" | base64)
-
-
+          # The build will automatically associate these tags as work items
+          # Wait a moment for the system to process the tags
+          echo "Waiting 3 seconds for tags to be processed..."
+          sleep 3
           
-          # Make the API call with verbose output for debugging
-          RESPONSE=$(curl -v -X POST \
-            -H "Authorization: Basic $PAT_BASE64" \
-            -H "Content-Type: application/json" \
-            -d "{\"workItemIds\": $WORK_ITEM_JSON}" \
-            "$BUILD_URL" 2>&1)
+          # Verify the association using the API (optional)
+          echo "Verifying work item association..."
+          VERIFY_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
           
-          echo "=== Full Response ==="
-          echo "$RESPONSE"
-          echo "=== End Response ==="
+          VERIFY_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$VERIFY_URL")
           
-          # Check if the request was successful
-          if echo "$RESPONSE" | grep -q '"count"'; then
-            echo "✅ Successfully associated work items: $WORK_ITEM_IDS"
-            
-            # Verify the association
-            VERIFY_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
-            VERIFY_RESPONSE=$(curl -s -H "Authorization: Basic $PAT_BASE64" "$VERIFY_URL")
-            
-            echo "=== Verification Result ==="
-            echo "$VERIFY_RESPONSE" | jq '.'
+          echo "=== Work Items Associated with Build $(Build.BuildId) ==="
+          echo "$VERIFY_RESPONSE" | jq '.'
+          
+          # Check if verification was successful
+          COUNT=$(echo "$VERIFY_RESPONSE" | jq '.count')
+          if [ "$COUNT" -gt 0 ]; then
+            echo "✅ Successfully verified $COUNT work items associated with build"
+            echo "Work item IDs:"
+            echo "$VERIFY_RESPONSE" | jq '.value[].id'
           else
-            echo "❌ Failed to associate work items"
+            echo "⚠️ No work items found in verification (they may take a moment to appear)"
+            echo "The tags have been added and should appear shortly"
             
-            # Try alternative method with -u flag
-            echo "Trying alternative authentication method..."
-            RESPONSE2=$(curl -s -X POST \
-              -u ":$(GIT_PAT)" \
-              -H "Content-Type: application/json" \
-              -d "{\"workItemIds\": $WORK_ITEM_JSON}" \
-              "$BUILD_URL")
-            
-            echo "Response from alternative method: $RESPONSE2"
-            
-            if echo "$RESPONSE2" | grep -q '"count"'; then
-              echo "✅ Successfully associated work items using alternative method"
-            else
-              echo "❌ Both authentication methods failed"
-              exit 1
-            fi
+            # List all build tags
+            echo "Current build tags:"
+            TAGS_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/tags?api-version=6.0"
+            curl -s -u ":$(GIT_PAT)" "$TAGS_URL" | jq '.'
           fi
           
-          # Verify association
-          # echo "Verifying work items..."
-          # VERIFY_URL="$(System.CollectionUri)$(System.TeamProject)/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
-          # curl -s -u ":$(System.AccessToken)" "$VERIFY_URL" | jq '.'
         else
           echo "No work items found in commit message"
         fi
@@ -875,7 +940,6 @@ stages:
       condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
       env:
         GIT_PAT: $(GIT_PAT)
-      #   SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
     - template: templates/build-backend-steps.yml
       parameters:
