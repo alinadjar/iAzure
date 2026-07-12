@@ -805,10 +805,10 @@ stages:
           # Convert to JSON array
           WORK_ITEM_ARRAY=$(echo "$WORK_ITEM_IDS" | jq -R -s -c 'split("\n") | map(select(length>0)) | map(tonumber)')
 
-          echo "BUILD_URL= $(System.CollectionUri)$(System.TeamProject)/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+          echo "BUILD_URL= http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
           
           # Associate work items with the build
-          BUILD_URL="$(System.CollectionUri)$(System.TeamProject)/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+          BUILD_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
           
           echo "Associating work items with build $(Build.BuildId)..."
           
