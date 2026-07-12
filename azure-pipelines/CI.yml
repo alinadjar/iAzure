@@ -788,6 +788,51 @@ stages:
         GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
         GIT_HOME: $(GIT_HOME)
 
+    - bash: |
+        # Get the commit message from the API repo
+        cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        
+        # Extract work item IDs from commit message
+        COMMIT_MSG=$(git log -1 --pretty=%B)
+        echo "Commit message: $COMMIT_MSG"
+    
+        # Extract work item IDs (supports both #123 and AB#123 formats)
+        WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
+        
+        if [ -n "$WORK_ITEM_IDS" ]; then
+          echo "Found work items: $WORK_ITEM_IDS"
+          
+          # Convert to JSON array
+          WORK_ITEM_ARRAY=$(echo "$WORK_ITEM_IDS" | jq -R -s -c 'split("\n") | map(select(length>0)) | map(tonumber)')
+
+          echo "BUILD_URL= $(System.CollectionUri)$(System.TeamProject)/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+          
+          # Associate work items with the build
+          BUILD_URL="$(System.CollectionUri)$(System.TeamProject)/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+          
+          echo "Associating work items with build $(Build.BuildId)..."
+          
+          RESPONSE=$(curl -s -u ":$GIT_PAT" -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"workItemIds\": $WORK_ITEM_ARRAY}" \
+            "$BUILD_URL" 2>/dev/null || echo '{"error":"connection failed"}')
+          
+          
+          echo "Response: $RESPONSE"
+          
+          # Verify association
+          # echo "Verifying work items..."
+          # VERIFY_URL="$(System.CollectionUri)$(System.TeamProject)/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
+          # curl -s -u ":$(System.AccessToken)" "$VERIFY_URL" | jq '.'
+        else
+          echo "No work items found in commit message"
+        fi
+        
+      displayName: 'Associate Work Items to Build (Backend)'
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+      # env:
+      #   SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+
     - template: templates/build-backend-steps.yml
       parameters:
         SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
