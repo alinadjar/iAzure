@@ -184,7 +184,6 @@ stages:
         targetType: 'inline'
         script: |
           ls -alh
-          CUR_BRANCH="${{ parameters.BRANCH }}"
           echo "User name: $(Build.RequestedFor)"
           echo "User ID: $(Build.RequestedForId)"
           
