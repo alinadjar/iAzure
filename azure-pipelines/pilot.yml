@@ -50,20 +50,6 @@ variables:
     value: false
   - name: wikiId
     value: 'SadganErp.wiki'
-  - name: BRANCH__1_Configs
-    value: ${{ parameters.BRANCH__1_Configs }}
-  - name: BRANCH__2_SharedLibrary
-    value: ${{ parameters.BRANCH__2_SharedLibrary }}
-  - name: BRANCH__3_ClientLibrary
-    value: ${{ parameters.BRANCH__3_ClientLibrary }}
-  - name: BRANCH__4_ServerLibrary
-    value: ${{ parameters.BRANCH__4_ServerLibrary }}
-  - name: BRANCH__Panel
-    value: ${{ parameters.BRANCH__Panel }}
-  - name: BRANCH__Client_Core
-    value: ${{ parameters.BRANCH__Client_Core }}
-  - name: BRANCH__Api
-    value: ${{ parameters.BRANCH__Api }}            
 
 
 stages:
@@ -77,6 +63,14 @@ stages:
     - task: Bash@3
       name: init
       displayName: "init"
+      env:
+        BRANCH__1_Configs: ${{ parameters.BRANCH__1_Configs }}
+        BRANCH__2_SharedLibrary: ${{ parameters.BRANCH__2_SharedLibrary }}
+        BRANCH__3_ClientLibrary: ${{ parameters.BRANCH__3_ClientLibrary }}
+        BRANCH__4_ServerLibrary: ${{ parameters.BRANCH__4_ServerLibrary }}
+        BRANCH__Panel: ${{ parameters.BRANCH__Panel }}
+        BRANCH__Client_Core: ${{ parameters.BRANCH__Client_Core }}
+        BRANCH__Api: ${{ parameters.BRANCH__Api }}
       inputs:
         targetType: 'inline'
         script: |    
@@ -104,6 +98,13 @@ stages:
       # Isolate Git configuration for this job
       GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_frontend
       GIT_HOME: $(Agent.TempDirectory)/home_$(Build.BuildId)_frontend
+      BRANCH__1_Configs: ${{ parameters.BRANCH__1_Configs }}
+      BRANCH__2_SharedLibrary: ${{ parameters.BRANCH__2_SharedLibrary }}
+      BRANCH__3_ClientLibrary: ${{ parameters.BRANCH__3_ClientLibrary }}
+      BRANCH__4_ServerLibrary: ${{ parameters.BRANCH__4_ServerLibrary }}
+      BRANCH__Panel: ${{ parameters.BRANCH__Panel }}
+      BRANCH__Client_Core: ${{ parameters.BRANCH__Client_Core }}
+      BRANCH__Api: ${{ parameters.BRANCH__Api }}
     steps:
     - checkout: none
     - bash: |
@@ -409,6 +410,13 @@ stages:
       # Isolate Git configuration for this job
       GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_backend
       GIT_HOME: $(Agent.TempDirectory)/home_$(Build.BuildId)_backend
+      BRANCH__1_Configs: ${{ parameters.BRANCH__1_Configs }}
+      BRANCH__2_SharedLibrary: ${{ parameters.BRANCH__2_SharedLibrary }}
+      BRANCH__3_ClientLibrary: ${{ parameters.BRANCH__3_ClientLibrary }}
+      BRANCH__4_ServerLibrary: ${{ parameters.BRANCH__4_ServerLibrary }}
+      BRANCH__Panel: ${{ parameters.BRANCH__Panel }}
+      BRANCH__Client_Core: ${{ parameters.BRANCH__Client_Core }}
+      BRANCH__Api: ${{ parameters.BRANCH__Api }}
     steps:
     - checkout: none
     - bash: |
