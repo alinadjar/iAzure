@@ -11,24 +11,31 @@ parameters:
     - 'false'
 - name: BRANCH__1_Configs
   type: string
+  default: alpha
   displayName: "Which Branch of 1_Configs?"
 - name: BRANCH__2_SharedLibrary
   type: string
+  default: alpha
   displayName: "Which Branch of 2_SharedLibrary?"
 - name: BRANCH__3_ClientLibrary
   type: string
+  default: alpha
   displayName: "Which Branch of 3_ClientLibrary?"
 - name: BRANCH__4_ServerLibrary
   type: string
+  default: alpha
   displayName: "Which Branch of 4_ServerLibrary?"
 - name: BRANCH__Panel
   type: string
+  default: alpha
   displayName: "Which Branch of Panel?"
 - name: BRANCH__Client_Core
   type: string
+  default: alpha
   displayName: "Which Branch of Client_Core?"    
 - name: BRANCH__Api
   type: string
+  default: alpha
   displayName: "Which Branch of Api?"     
 
 
