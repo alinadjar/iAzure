@@ -76,7 +76,7 @@ stages:
     - checkout: none 
     - task: Bash@3
       name: init
-      displayName: "init"      
+      displayName: "init"
       inputs:
         targetType: 'inline'
         script: |    
@@ -100,7 +100,6 @@ stages:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
       DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
       baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel'
-      versionConfigPath: 'CICD/branch-versions/frontend'
       # commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.FRONTEND_COMMIT'] ]
       # Isolate Git configuration for this job
       GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_frontend
@@ -296,7 +295,6 @@ stages:
     #     dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration) # this command will need node v20.22 or higher
     #     # rm -rf node_modules/
     #   displayName: 'Build TailWind'
-    #   condition: and(succeeded(), eq(variables['isBranchDevelop'], 'True'))
     
     
     - bash: |
@@ -373,7 +371,6 @@ stages:
     
     #     cat $(Build.ArtifactStagingDirectory)/publish/wwwroot/assets/js/service-worker.js
     #   displayName: 'Cache Busting'
-    #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'), eq(variables['isBranchDevelop'], 'True'))
     
     - bash: |
         mkdir -p $(Build.ArtifactStagingDirectory)/docker
@@ -395,7 +392,6 @@ stages:
             .
         docker push $(tagSetting.FQIN)        
       displayName: 'Build & Push Image (Frontend)'
-      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
       env:
         NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
         NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
@@ -410,7 +406,6 @@ stages:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
       DOCKER_IMG: $(DOCKER_REGISTRY)/fx/backend
       baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi'
-      versionConfigPath: 'CICD/branch-versions/backend'
       # commit_hash: $[ dependencies.Git_Checkout.outputs['gitPull.BACKEND_COMMIT'] ]
       # Isolate Git configuration for this job
       GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_backend
@@ -490,7 +485,6 @@ stages:
         targetType: 'inline'
         script: |
           ls -alh
-          CUR_BRANCH="${{ parameters.BRANCH }}"
           echo "User name: $(Build.RequestedFor)"
           echo "User ID: $(Build.RequestedForId)"
           
@@ -593,7 +587,6 @@ stages:
     #     export PATH="/opt/net_sdk_10:$PATH"
     #     dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration)
     #   displayName: 'Build Solution (Backend)'
-    #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
         
     
     - bash: |
