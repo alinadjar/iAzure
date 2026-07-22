@@ -620,24 +620,7 @@ stages:
       displayName: 'Dotnet Restore (Backend)'
 
 
-    - bash: |
-        export PATH="/opt/net_sdk_10:$PATH"
-         # export PATH="/home/azurebot/.dotnet:$PATH"
-        dotnet --info
-        node -v
-        cd $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp
-        rm global.json 2>/dev/null || true
-        ls -alh
-         # npm i
-        cp -r /opt/node_modules .
-        chmod -R +x node_modules/.bin
-        ls -l node_modules/.bin/tailwindcss
-        # npm run build:css
-        rm $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/global.json 2>/dev/null || true
-        # dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration) # this command will need node v20.22 or higher
-        # rm -rf node_modules/
-      displayName: 'Build TailWind'
-      condition: succeeded()
+
 
 
     - bash: |
@@ -645,23 +628,9 @@ stages:
         dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) -p:Optimize=false --output $(Build.ArtifactStagingDirectory)/publish
         cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json $(Build.ArtifactStagingDirectory)/publish/
       displayName: 'Publish Solution (Backend)'
-      condition: succeeded()
+      condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
 
-    - bash: |
-        # echo "Applying cache busting to all static assets..."
-        COMMIT_HASH="$(gitPull.COMMIT_HASH)"
-        NEW_VALUE="fx-pwa-cache-v$COMMIT_HASH"
-          
-        cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
-        JS_FILE=assets/js/service-worker.js
-
-        sed -i "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = '$NEW_VALUE'/" "$JS_FILE"
-        echo "Updated CACHE_NAME to $NEW_VALUE in $JS_FILE"
-
-          cat $(Build.ArtifactStagingDirectory)/publish/wwwroot/assets/js/service-worker.js
-      displayName: 'Cache Busting'
-      condition: succeeded()
 
 
     - bash: |
