@@ -163,7 +163,7 @@ stages:
           echo "User name: $(Build.RequestedFor)"
           echo "User ID: $(Build.RequestedForId)"
           
-          NEW_TAG="sandbox_$(date '+%Y%m%d_%H%M%S')"
+          NEW_TAG="sandbox_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
           echo "Using tag: $NEW_TAG"
           echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
           echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
@@ -403,7 +403,7 @@ stages:
           echo "User name: $(Build.RequestedFor)"
           echo "User ID: $(Build.RequestedForId)"
           
-          NEW_TAG="sandbox_$(date '+%Y%m%d_%H%M%S')"
+          NEW_TAG="sandbox_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
           echo "Using tag: $NEW_TAG"
           echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
           echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
