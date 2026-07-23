@@ -1,0 +1,519 @@
+trigger: none
+pool:
+  name: 'WEB-1'
+
+parameters:
+- name: SHOULD_RELEASE
+  type: string
+  default: 'true'
+  values:
+    - 'true'
+    - 'false'
+- name: BRANCH
+  type: string
+  default: 'sandbox'
+  displayName: "Select Branch"
+  values:
+    - 'sandbox'
+- name: BUILD_COMPONENTS
+  type: string
+  default: 'both'
+  displayName: "Select Components to Build"
+  values:
+    - 'front'
+    - 'back'
+    - 'both'
+
+variables:
+  # Common variables
+  - name: buildPlatform
+    value: 'Any CPU'
+  - name: buildConfiguration
+    value: 'Release'
+  - name: orgUrl
+    value: 'http://azure.sadgan.int/WebApp'
+  - name: project
+    value: 'SadganErp'
+  - name: CURRENT_BRANCH
+    value: ${{ parameters.BRANCH }}    
+  - name: System.Diagnostics.DefaultLogDirectory
+    value: '$(Agent.TempDirectory)/diag'    
+  - name: SYSTEM_DEBUG
+    value: false
+  - name: VSTS_DEBUG
+    value: false
+  - name: wikiId
+    value: 'SadganErp.wiki'
+
+stages:
+# Stage 0: INIT
+- stage: INIT
+  displayName: "Init"
+  jobs: 
+  - job: InitJob
+    steps:
+    - checkout: none 
+    - task: Bash@3
+      name: init
+      displayName: "init ${{ parameters.BRANCH }}"
+      env:
+        CURRENT_BRANCH: ${{ parameters.BRANCH }}
+      inputs:
+        targetType: 'inline'
+        script: |    
+          echo "CURRENT_BRANCH: $CURRENT_BRANCH"
+          echo "BUILD_COMPONENTS: ${{ parameters.BUILD_COMPONENTS }}"
+
+# Stage 1: Build
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:           
+  - job: Build_Frontend
+    displayName: 'Build Frontend'
+    condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'front'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
+    pool: 'WEB-1'
+    variables:
+      solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
+      DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
+      baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel'
+      GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_frontend
+      GIT_HOME: $(Agent.TempDirectory)/home_$(Build.BuildId)_frontend
+      CURRENT_BRANCH: ${{ parameters.BRANCH }}
+    steps:
+    - checkout: none
+    
+    - bash: |
+        set -e
+        # Configure Git
+        mkdir -p "$GIT_HOME"
+        export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
+
+        git config --file "$GIT_CONFIG_GLOBAL" user.email "S_Bot_Azure@sadgan.int"
+        git config --file "$GIT_CONFIG_GLOBAL" user.name "S_Bot_Azure"
+        git config --file "$GIT_CONFIG_GLOBAL" http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+        git config --file "$GIT_CONFIG_GLOBAL" http.sslVerify false
+        git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory '*'
+        
+        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+        echo "CURRENT_BRANCH: $CURRENT_BRANCH"
+        
+        
+        function clone_or_pull {
+            branch_name=$1
+            repo_url=$2
+            target_dir=$3
+            
+            echo "Cleaning up previous checkout ($target_dir)..."
+            if [ -d "$target_dir" ]; then
+                echo "Removing directory..."
+                rm -rf "$target_dir"
+            fi
+            
+            echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
+            git clone --branch "$branch_name" "$repo_url" "$target_dir"
+            
+            if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
+                cd "$target_dir"
+                echo "Current directory: $(pwd)"
+                echo "✅ Repository cloned to: $target_dir"
+                echo "📁 Directory contents:"
+                ls -la
+            else
+                echo "❌ Clone failed"
+                exit 1
+            fi
+        }
+        
+        # Clone shared repos (common to both)
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/1_Configs"           "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/2_SharedLibrary"     "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/4_ServerLibrary"     "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/3_ClientLibrary"     "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary"
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"       "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core" "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"
+        clone_or_pull cicd              "$BASE_URL/SadganErp/_git/CICD"                   "$(System.DefaultWorkingDirectory)/CICD"
+
+        # Get frontend commit hash and export as output variable
+        cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+        FRONTEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+        echo "##vso[task.setvariable variable=FRONTEND_COMMIT;isOutput=true]$FRONTEND_COMMIT"
+        echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$FRONTEND_COMMIT"
+        echo "Frontend commit: $FRONTEND_COMMIT"
+        
+      displayName: "Git Checkout"
+      name: gitPull
+      env:
+        GIT_PAT: $(GIT_PAT)
+        GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
+        GIT_HOME: $(GIT_HOME)
+        CURRENT_BRANCH: ${{ parameters.BRANCH }}
+
+    - task: Bash@3
+      name: tagSetting
+      displayName: 'Version Assign (Frontend)'
+      env:
+        SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        CURRENT_BRANCH: ${{ parameters.BRANCH }}
+      inputs:
+        targetType: 'inline'
+        script: |
+          ls -alh
+          echo "User name: $(Build.RequestedFor)"
+          echo "User ID: $(Build.RequestedForId)"
+          
+          NEW_TAG="pilot_$(date '+%Y%m%d_%H%M%S')"
+          echo "Using tag: $NEW_TAG"
+          echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+          echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+                            
+          cat <<EOF > $(Build.ArtifactStagingDirectory)/vars.json
+            {
+              "FQIN": "$(DOCKER_IMG):$NEW_TAG",
+              "DOCKER_TAG": "$NEW_TAG",
+              "CREATE_RELEASE": ${{ parameters.SHOULD_RELEASE }},
+              "BRANCH": "$CURRENT_BRANCH"
+            }
+          EOF
+    
+          # Export the tag as a job output variable for the final tagging job
+          echo "##vso[task.setvariable variable=FRONTEND_TAG;isOutput=true]$(DOCKER_TAG)"
+          echo "##vso[task.setvariable variable=FRONTEND_FQIN;isOutput=true]$(FQIN)"
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'front-build-vars'
+        publishLocation: 'Container'
+
+    - bash: |
+        ls -alh 
+        configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"        
+        new_assembly_version="0.0.0.0"        
+        echo "current assembly version $assembly_version is changing to $new_assembly_version"
+        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$new_assembly_version</AssemblyVersion>|" $configPropsFile
+      displayName: 'Assembly Version Set'
+
+    # Override appsettings.json for frontend
+    - bash: |
+        sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.pipe.json"
+        destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json"
+    
+        if [ -f "$sourceFile" ]; then
+            cp -f "$sourceFile" "$destinationFile"
+            echo "Successfully copied appsettings.pipe.json to appsettings.json"
+        else
+            echo "❌ appsettings.pipe.json not found!"
+            exit 1
+        fi
+      displayName: "Override appsettings.json (Frontend)"
+
+    # Create global NuGet.Config
+    - bash: |
+        # Nuget SSL
+        echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"    
+    
+        sudo mkdir -p /usr/share
+        echo '<?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <packageSources>
+            <clear />
+            <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
+          </packageSources>
+          <packageSourceCredentials>
+            <NupkgWeb2>
+              <add key="Username" value="S_Bot_Azure" />
+              <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
+            </NupkgWeb2>
+          </packageSourceCredentials>
+        </configuration>' | sudo tee /usr/share/NuGet.Config > /dev/null
+    
+        # Remove project-specific NuGet.Config files
+        find $(Build.SourcesDirectory) -name "NuGet.Config" -type f -delete
+    
+        ls -l /usr/share/NuGet.Config
+        cat /usr/share/NuGet.Config
+      displayName: 'Create global NuGet.Config (Frontend)'
+      env:
+        BOT_TOKEN: $(BOT_TOKEN)
+
+    # .Net Restore
+    - bash: |
+        export PATH="/opt/net_sdk_10:$PATH"        
+        dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config
+      displayName: 'Dotnet Restore (Frontend)'
+
+    - bash: |
+        export PATH="/opt/net_sdk_10:$PATH"
+         # export PATH="/home/azurebot/.dotnet:$PATH"
+        dotnet --info
+         # export PATH="/opt/net_sdk_10:$PATH"
+        node -v
+        cd $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp
+        rm global.json 2>/dev/null || true
+        ls -alh
+         # npm i
+        cp -r /opt/node_modules .
+        chmod -R +x node_modules/.bin
+        ls -l node_modules/.bin/tailwindcss
+        # npm run build:css
+        rm $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/global.json 2>/dev/null || true
+        # dotnet build "$(solution)" --no-restore --configuration $(buildConfiguration) # this command will need node v20.22 or higher
+        # rm -rf node_modules/
+      displayName: 'Build TailWind'
+      condition: succeeded()
+
+    - bash: |
+        export PATH="/opt/net_sdk_10:$PATH"
+        dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish --disable-parallel -p:BuildInParallel=false -p:NodeReuse=false    
+        cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+      displayName: 'Publish Solution (Frontend)'
+
+    # Cache Busting (Frontend only)
+    # ... (rest of frontend steps remain the same)
+
+    - bash: |
+        # echo "Applying cache busting to all static assets..."
+        COMMIT_HASH="$(gitPull.COMMIT_HASH)"
+        NEW_VALUE="fx-pwa-cache-v$COMMIT_HASH"
+        
+        cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+        JS_FILE=assets/js/service-worker.js
+    
+        sed -i "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = '$NEW_VALUE'/" "$JS_FILE"
+        echo "Updated CACHE_NAME to $NEW_VALUE in $JS_FILE"
+    
+        cat $(Build.ArtifactStagingDirectory)/publish/wwwroot/assets/js/service-worker.js
+      displayName: 'Cache Busting'
+      condition: succeeded()
+
+
+    - bash: |
+        mkdir -p $(Build.ArtifactStagingDirectory)/docker
+        cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Dockerfile.pipe $(Build.ArtifactStagingDirectory)/docker/
+        cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/nginx.conf $(Build.ArtifactStagingDirectory)/docker/
+    
+        echo "$(NEXUS_DOCKER_PASSWORD)" | docker login $(DOCKER_REGISTRY) \
+          -u $(NEXUS_DOCKER_USERNAME) \
+          --password-stdin
+    
+        cd $(Build.ArtifactStagingDirectory)
+        APPSETTINGS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/appsettings.json
+        sed -i 's/"IsDeveloperMode": false/"IsDeveloperMode": true/' $APPSETTINGS_FILE
+            
+        sed -i 's|"BaseUrl": "[^"]*"|"BaseUrl": "https://pilot.api.fx.sadgan.int"|' $APPSETTINGS_FILE
+        docker build \
+            -t $(tagSetting.FQIN) \
+            -f docker/Dockerfile.pipe \
+            .
+        docker push $(tagSetting.FQIN)        
+      displayName: 'Build & Push Image (Frontend)'
+      env:
+        NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+        NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
+
+  - job: Build_Backend
+    displayName: 'Build Backend'
+    condition: and(succeeded(), or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both')))
+    pool: 'WEB-1'
+    variables:
+      solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
+      DOCKER_IMG: $(DOCKER_REGISTRY)/fx/backend
+      baseProjPath: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi'
+      GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_backend
+      GIT_HOME: $(Agent.TempDirectory)/home_$(Build.BuildId)_backend
+      CURRENT_BRANCH: ${{ parameters.BRANCH }}
+    steps:
+    - checkout: none
+    
+    - bash: |
+        set -e
+        # Configure Git
+        mkdir -p "$GIT_HOME"
+        export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
+
+        git config --file "$GIT_CONFIG_GLOBAL" user.email "S_Bot_Azure@sadgan.int"
+        git config --file "$GIT_CONFIG_GLOBAL" user.name "S_Bot_Azure"
+        git config --file "$GIT_CONFIG_GLOBAL" http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+        git config --file "$GIT_CONFIG_GLOBAL" http.sslVerify false
+        git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory '*'
+        
+        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+        echo "CURRENT_BRANCH: $CURRENT_BRANCH"
+
+        
+        function clone_or_pull {
+            branch_name=$1
+            repo_url=$2
+            target_dir=$3
+            
+            echo "Cleaning up previous checkout ($target_dir)..."
+            if [ -d "$target_dir" ]; then
+                echo "Removing directory..."
+                rm -rf "$target_dir"
+            fi
+            
+            echo "Cloning $repo_url (branch: $branch_name) into $target_dir..."
+            git clone --branch "$branch_name" "$repo_url" "$target_dir"
+            
+            if [ $? -eq 0 ] && [ -d "$target_dir/.git" ]; then
+                cd "$target_dir"
+                echo "Current directory: $(pwd)"
+                echo "✅ Repository cloned to: $target_dir"
+                echo "📁 Directory contents:"
+                ls -la
+            else
+                echo "❌ Clone failed"
+                exit 1
+            fi
+        }
+        
+        # Clone shared repos (common to both)
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/1_Configs"       "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/2_SharedLibrary" "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/4_ServerLibrary" "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
+        clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganErp/_git/SadganErpApi"       "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        clone_or_pull cicd              "$BASE_URL/SadganErp/_git/CICD"               "$(System.DefaultWorkingDirectory)/CICD"
+
+        # Get backend commit hash and export as output variable
+        cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        BACKEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+        echo "##vso[task.setvariable variable=BACKEND_COMMIT;isOutput=true]$BACKEND_COMMIT"
+        echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$BACKEND_COMMIT"
+        echo "Backend commit: $BACKEND_COMMIT"
+        
+      displayName: "Git Checkout"
+      name: gitPull
+      env:
+        GIT_PAT: $(GIT_PAT)
+        GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
+        GIT_HOME: $(GIT_HOME)
+        CURRENT_BRANCH: ${{ parameters.BRANCH }}
+
+    - task: Bash@3
+      name: tagSetting
+      displayName: 'Version Assign (Backend)'
+      env:
+        SHOULD_RELEASE: ${{ parameters.SHOULD_RELEASE }}
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+        CURRENT_BRANCH: ${{ parameters.BRANCH }}
+      inputs:
+        targetType: 'inline'
+        script: |
+          ls -alh
+          echo "User name: $(Build.RequestedFor)"
+          echo "User ID: $(Build.RequestedForId)"
+          
+          NEW_TAG="pilot_$(date '+%Y%m%d_%H%M%S')"
+          echo "Using tag: $NEW_TAG"
+          echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+          echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+                            
+          cat <<EOF > $(Build.ArtifactStagingDirectory)/vars.json
+            {
+              "FQIN": "$(DOCKER_IMG):$NEW_TAG",
+              "DOCKER_TAG": "$NEW_TAG",
+              "CREATE_RELEASE": ${{ parameters.SHOULD_RELEASE }},
+              "BRANCH": "$CURRENT_BRANCH"
+            }
+          EOF
+          
+          # Export the tag as a job output variable for the final tagging job
+          echo "##vso[task.setvariable variable=BACKEND_TAG;isOutput=true]$(DOCKER_TAG)"
+          echo "##vso[task.setvariable variable=BACKEND_FQIN;isOutput=true]$(FQIN)"
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'backend-build-vars'
+        publishLocation: 'Container'
+
+    - bash: |
+        ls -alh 
+        configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
+        new_assembly_version="0.0.0.0"
+        echo "current assembly version $assembly_version is changing to $new_assembly_version"
+        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$new_assembly_version</AssemblyVersion>|" $configPropsFile
+      displayName: 'Assembly Version Set'
+
+    # Override appsettings.json for backend
+    - bash: |
+        sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.pipe.json"
+        destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json"
+    
+        if [ -f "$sourceFile" ]; then
+            cp -f "$sourceFile" "$destinationFile"
+            echo "Successfully copied appsettings.pipe.json to appsettings.json"
+        else
+            echo "❌ appsettings.pipe.json not found!"
+            exit 1
+        fi
+      displayName: "Override appsettings.json (Backend)"
+
+    # Create global NuGet.Config
+    - bash: |
+        # Nuget SSL
+        echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"    
+    
+        sudo mkdir -p /usr/share
+        echo '<?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <packageSources>
+            <clear />
+            <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+            <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
+          </packageSources>
+          <packageSourceCredentials>
+            <NupkgWeb2>
+              <add key="Username" value="S_Bot_Azure" />
+              <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
+            </NupkgWeb2>
+          </packageSourceCredentials>
+        </configuration>' | sudo tee /usr/share/NuGet.Config > /dev/null
+    
+        # Remove project-specific NuGet.Config files
+        find $(Build.SourcesDirectory) -name "NuGet.Config" -type f -delete
+    
+        ls -l /usr/share/NuGet.Config
+        cat /usr/share/NuGet.Config
+      displayName: 'Create global NuGet.Config (Backend)'
+      env:
+        BOT_TOKEN: $(BOT_TOKEN)
+
+    # .Net Restore
+    - bash: |
+        export PATH="/opt/net_sdk_10:$PATH"
+        dotnet --info
+        dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config
+      displayName: 'Dotnet Restore (Backend)'
+
+
+    - bash: |
+        export PATH="/opt/net_sdk_10:$PATH"
+        dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) -p:Optimize=false --output $(Build.ArtifactStagingDirectory)/publish
+        cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json $(Build.ArtifactStagingDirectory)/publish/
+      displayName: 'Publish Solution (Backend)'
+      condition: succeeded()
+
+
+    - bash: |
+        mkdir -p $(Build.ArtifactStagingDirectory)/docker
+        cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/Dockerfile.pipe $(Build.ArtifactStagingDirectory)/docker/
+    
+        echo "$(NEXUS_DOCKER_PASSWORD)" | docker login $(DOCKER_REGISTRY) \
+          -u $(NEXUS_DOCKER_USERNAME) \
+          --password-stdin
+    
+        cd $(Build.ArtifactStagingDirectory)
+        
+        docker build \
+            -t "$(tagSetting.FQIN)" \
+            -f docker/Dockerfile.pipe \
+            .
+  
+        docker push "$(tagSetting.FQIN)"      
+      displayName: 'Build & Push Image (Backend)'
+      condition: succeeded()
+      env:
+        NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+        NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
