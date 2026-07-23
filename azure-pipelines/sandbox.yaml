@@ -5,10 +5,11 @@ pool:
 parameters:
 - name: SHOULD_RELEASE
   type: string
+  displayName: "Create release ?"
   default: 'true'
   values:
     - 'true'
-    - 'false'
+    # - 'false'
 - name: BRANCH
   type: string
   default: 'sandbox'
@@ -18,7 +19,7 @@ parameters:
 - name: BUILD_COMPONENTS
   type: string
   default: 'both'
-  displayName: "Select Components to Build"
+  displayName: "Select Components to Build:"
   values:
     - 'front'
     - 'back'
@@ -162,7 +163,7 @@ stages:
           echo "User name: $(Build.RequestedFor)"
           echo "User ID: $(Build.RequestedForId)"
           
-          NEW_TAG="pilot_$(date '+%Y%m%d_%H%M%S')"
+          NEW_TAG="sandbox_$(date '+%Y%m%d_%H%M%S')"
           echo "Using tag: $NEW_TAG"
           echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
           echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
@@ -269,8 +270,6 @@ stages:
         cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json $(Build.ArtifactStagingDirectory)/publish/wwwroot/
       displayName: 'Publish Solution (Frontend)'
 
-    # Cache Busting (Frontend only)
-    # ... (rest of frontend steps remain the same)
 
     - bash: |
         # echo "Applying cache busting to all static assets..."
@@ -301,7 +300,7 @@ stages:
         APPSETTINGS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/appsettings.json
         sed -i 's/"IsDeveloperMode": false/"IsDeveloperMode": true/' $APPSETTINGS_FILE
             
-        sed -i 's|"BaseUrl": "[^"]*"|"BaseUrl": "https://pilot.api.fx.sadgan.int"|' $APPSETTINGS_FILE
+        sed -i 's|"BaseUrl": "[^"]*"|"BaseUrl": "https://sandbox.api.fx.sadgan.int"|' $APPSETTINGS_FILE
         docker build \
             -t $(tagSetting.FQIN) \
             -f docker/Dockerfile.pipe \
@@ -314,7 +313,7 @@ stages:
 
   - job: Build_Backend
     displayName: 'Build Backend'
-    condition: and(succeeded(), or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both')))
+    condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
     pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
@@ -404,7 +403,7 @@ stages:
           echo "User name: $(Build.RequestedFor)"
           echo "User ID: $(Build.RequestedForId)"
           
-          NEW_TAG="pilot_$(date '+%Y%m%d_%H%M%S')"
+          NEW_TAG="sandbox_$(date '+%Y%m%d_%H%M%S')"
           echo "Using tag: $NEW_TAG"
           echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
           echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
