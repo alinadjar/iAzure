@@ -1,0 +1,54 @@
+trigger:
+  branches:
+    include:
+      - pipe
+
+pool:
+  name: 'Playwright_FX'
+
+
+parameters:
+  - name: base_url
+    displayName: Select Base Url:
+    type: string
+    default: "https://alpha.api.fx.sadgan.int"
+    values:
+      - "https://alpha.api.fx.sadgan.int"
+      - "https://stage.api.fx.sadgan.int"
+      
+
+steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.11'
+    displayName: 'Use Python 3.11'
+
+  - script: |
+      cd pytest/api
+      pip install -r requirements.txt
+      python -m integrations.azure_test_sync
+      pytest --junitxml=test-results.xml
+    displayName: 'Sync test cases and run pytest'
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      AZURE_TEST_SYNC_ENABLED: 'true'
+      AZURE_TEST_REPORT_ENABLED: 'true'
+      AZURE_DEVOPS_URL: $(AZURE_DEVOPS_URL)
+      AZURE_TEST_PLAN_ID: $(AZURE_TEST_PLAN_ID)
+      AZURE_TEST_PLAN_NAME: $(AZURE_TEST_PLAN_NAME)
+      AZURE_VERIFY_SSL: $(AZURE_VERIFY_SSL)
+      AZURE_TEST_CONFIGURATION_ID: $(AZURE_TEST_CONFIGURATION_ID)
+      API_BASE_URL: $(API_BASE_URL)
+      API_USERNAME: $(API_USERNAME)
+      API_PASSWORD: $(API_PASSWORD)
+      API_ADMIN_USERNAME: $(API_ADMIN_USERNAME)
+      API_ADMIN_PASSWORD: $(API_ADMIN_PASSWORD)
+
+  - task: PublishTestResults@2
+    condition: always()
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: 'pytest/api/test-results.xml'
+      testRunTitle: 'API Tests'
+      failTaskOnFailedTests: true
+    displayName: 'Publish JUnit results'
