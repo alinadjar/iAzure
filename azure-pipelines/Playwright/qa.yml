@@ -217,7 +217,7 @@ steps:
       python --version
       pip show pytest allure-pytest azure-devops | sed -n '1,20p' || true
 
-      echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(projectDir)/venv/bin/activate"
+      echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(apiDir)/venv/bin/activate"
     displayName: 'Setup Python 3.12'
 
   # ── 3. Build pytest argv + run ───────────────────────────────
