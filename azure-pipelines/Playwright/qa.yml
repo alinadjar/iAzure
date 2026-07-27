@@ -369,8 +369,8 @@ steps:
     condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     env:
       REDIS_URL: $(REDIS_URL)
-      EVAL_REDIS_PREFIX: $(EVAL_REDIS_PREFIX)
-      EVAL_REDIS_TTL_SECONDS: $(EVAL_REDIS_TTL_SECONDS)
+      EVAL_REDIS_PREFIX: 'qa:api:eval'
+      EVAL_REDIS_TTL_SECONDS: '86400'
       EVAL_RUN_MODE: ${{ parameters.runMode }}
       EVAL_FEATURE_MARKER: ${{ parameters.featureMarker }}
       EVAL_TAG_MARKER: ${{ parameters.tagMarker }}
