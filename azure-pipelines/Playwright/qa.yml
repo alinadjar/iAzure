@@ -124,6 +124,11 @@ parameters:
     type: boolean
     default: true
 
+  - name: publishEvaluation
+    displayName: 'Publish evaluation-result artifact (+ Redis if REDIS_URL set)'
+    type: boolean
+    default: true
+
   # ── Azure Test Plan selection ────────────────────────────────
   # Priority: testPlanId > testPlanName > auto (testPlanTarget)
   - name: testPlanId
@@ -328,7 +333,49 @@ steps:
       API_ADMIN_USERNAME: $(API_ADMIN_USERNAME)
       API_ADMIN_PASSWORD: $(API_ADMIN_PASSWORD)
 
-  # ── 4. Publish JUnit (Tests tab) ─────────────────────────────
+  # ── 4. Evaluation summary from JUnit (artifact + optional Redis) ──
+  # Later job: DownloadBuildArtifacts artifactName=evaluation-result
+  # Redis: GET qa:api:eval:latest → buildId ; GET qa:api:eval:{buildId}
+  - script: |
+      set -euo pipefail
+      # shellcheck disable=SC1091
+      source "$(VENV_ACTIVATE)"
+      cd "$(apiDir)"
+
+      mkdir -p evaluation-result
+      python -m integrations.evaluation_summary \
+        --junit test-results.xml \
+        --out evaluation-result/evaluation-result.json
+
+      cp -f test-results.xml evaluation-result/test-results.xml
+      echo "evaluation-result contents:"
+      ls -la evaluation-result
+      cat evaluation-result/evaluation-result.json
+    displayName: 'Write evaluation-result (JSON + Redis)'
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    env:
+      REDIS_URL: $(REDIS_URL)
+      EVAL_REDIS_PREFIX: $(EVAL_REDIS_PREFIX)
+      EVAL_REDIS_TTL_SECONDS: $(EVAL_REDIS_TTL_SECONDS)
+      EVAL_RUN_MODE: ${{ parameters.runMode }}
+      EVAL_FEATURE_MARKER: ${{ parameters.featureMarker }}
+      EVAL_TAG_MARKER: ${{ parameters.tagMarker }}
+      EVAL_MARKER_EXPRESSION: ${{ parameters.markerExpression }}
+      EVAL_TEST_PATH: ${{ parameters.testPath }}
+      EVAL_KEYWORD: ${{ parameters.keyword }}
+      API_BASE_URL: ${{ parameters.baseUrl }}
+      AZURE_TEST_PLAN_ID: ${{ parameters.testPlanId }}
+      AZURE_TEST_PLAN_TARGET: ${{ parameters.testPlanTarget }}
+
+  - task: PublishBuildArtifacts@1
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    inputs:
+      PathtoPublish: '$(apiDir)/evaluation-result'
+      ArtifactName: 'evaluation-result'
+      publishLocation: 'Container'
+    displayName: 'Publish evaluation-result artifact'
+
+  # ── 5. Publish JUnit (Tests tab) ─────────────────────────────
   - task: PublishTestResults@2
     condition: and(always(), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     inputs:
@@ -340,4 +387,11 @@ steps:
       mergeTestResults: false
     displayName: 'Publish JUnit results'
 
-
+  # ── 6. Publish Allure raw results (on-prem: Build Artifact) ───
+  - task: PublishBuildArtifacts@1
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishAllure }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    inputs:
+      PathtoPublish: '$(apiDir)/allure-results'
+      ArtifactName: 'allure-results'
+      publishLocation: 'Container'
+    displayName: 'Publish Allure results artifact'
