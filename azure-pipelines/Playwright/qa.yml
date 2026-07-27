@@ -15,21 +15,123 @@ parameters:
     values:
       - "https://alpha.api.fx.sadgan.int"
       - "https://stage.api.fx.sadgan.int"
+
+
+variables:
+  PIP_CACHE_DIR: $(Pipeline.Workspace)/.pip
+  python.version: '3.12'
+  node.version: '18.x'
+  projectName: 'Sadgan.ERP.Playwright'
+  projectDir: $(System.DefaultWorkingDirectory)/$(projectName)      
       
 
 steps:
-  - task: UsePythonVersion@0
-    inputs:
-      versionSpec: '3.11'
-    displayName: 'Use Python 3.11'
-
+  - checkout: none
   - script: |
-      cd pytest/api
-      pip install -r requirements.txt
+      echo "Cleaning up previous checkout..."
+      if [ -d "$(projectDir)" ]; then
+          echo "Removing directory..."
+          rm -rf $(projectDir)
+      fi
+
+      # Configure Git to use the provided access token
+      # git config --global credential.helper store
+      git config --global user.email "S_Bot_Azure@sadgan.int"
+      git config --global user.name "S_Bot_Azure"
+      git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+      git config --global http.sslVerify false
+      git config --global --add safe.directory '*'
+      git config --global core.compression 0
+      git config --global http.postBuffer 1048576000
+      git config --global pack.threads 1
+      git config --global pull.rebase false
+              
+              
+      echo "Cloning repository..."             
+      git clone --depth 1 --branch "pipe" "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/$(projectName)"  $(projectDir)
+
+
+      if [ $? -eq 0 ] && [ -d "$(projectDir)/.git" ]; then
+          cd $(projectDir)
+          echo "Current directory: $(pwd)"
+          echo "✅ Repository cloned to: $(projectDir)"
+          cd $(projectDir)
+          echo "📁 Directory contents:"
+          ls -la
+      else
+          echo "❌ Clone failed"
+          exit 1
+      fi
+    displayName: 'Git Checkout'
+    env:
+      GIT_PAT: $(GIT_PAT)
+
+  # Verify Python is available
+  - script: |
+      cd $(projectDir)
+      python3 --version
+      echo "Python path: $(which python3)"
+
+      export BASE_URL="${{ parameters.base_url }}"
+      echo "BASE_URL = $BASE_URL"
+
+      # Check if Python 3.12 is available
+      if python3 -c "import sys; assert sys.version_info[:2] == (3, 12)" 2>/dev/null; then
+        echo "✅ Python 3.12 detected"
+        PYTHON_CMD="python3"
+      else
+        echo "❌ Python 3.12 not found. Available versions:"
+        python3 --version
+        exit 1
+      fi
+
+
+      # Create virtual environment
+      # Create symlink to pre-built venv
+      if [ -d "/opt/qavenv" ]; then
+        echo "✅ Using existing venv from /opt/qavenv"
+        # ln -sf /opt/qavenv ./venv
+        mkdir -p venv/
+        cp -r /opt/qavenv/* ./venv
+        source ./qavenv/bin/activate
+        
+        echo "Python: $(which python)"
+        echo "Version: $(python --version)"
+        
+        # List installed packages
+        pip list
+        
+        echo "##vso[task.setvariable variable=VENV_PATH]$(pwd)/venv"
+      else
+        echo "Creating virtual environment..."
+        python3 -m venv venv
+        pip install -v -r pytest/api/requirements.txt        
+      fi
+    displayName: 'Setup Python'
+
+
+    
+
+
+  # RUN TEST
+  - script: |
+      cd $(projectDir)/api
+      source venv/bin/activate        
+      
+      export BASE_URL="${{ parameters.base_url }}"
+      echo "=================================================="
+      echo " 🔧 TEST CONFIGURATION"
+      echo "=================================================="
+      echo "🧪 Test:           $MODULE_PATH"
+      echo "👥 Workers:        $WORKERS"
+      echo "🌐 Base URL:       $(echo $BASE_URL | cut -c1-50)..."
+      echo "=================================================="
+
       python -m integrations.azure_test_sync
       pytest --junitxml=test-results.xml
-    displayName: 'Sync test cases and run pytest'
+    displayName: 'Run Test'
     env:
+      CI: 'true'
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
       AZURE_TEST_SYNC_ENABLED: 'true'
       AZURE_TEST_REPORT_ENABLED: 'true'
@@ -43,7 +145,13 @@ steps:
       API_PASSWORD: $(API_PASSWORD)
       API_ADMIN_USERNAME: $(API_ADMIN_USERNAME)
       API_ADMIN_PASSWORD: $(API_ADMIN_PASSWORD)
+       
 
+#   - task: UsePythonVersion@0
+#     inputs:
+#       versionSpec: '3.11'
+#     displayName: 'Use Python 3.11'
+      
   - task: PublishTestResults@2
     condition: always()
     inputs:
