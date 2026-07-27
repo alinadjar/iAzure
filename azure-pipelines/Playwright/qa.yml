@@ -1,5 +1,3 @@
-# Self-hosted Azure DevOps Server — API pytest pipeline
-# Working dir: pytest/api
 # Agent pool must have Python 3.12 (+ optional /opt/qavenv prebuilt venv)
 
 trigger:
