@@ -190,9 +190,11 @@ steps:
       GIT_PAT: $(GIT_PAT)
 
   # ── 2. Python / venv ─────────────────────────────────────────
-  # Always install requirements into the JOB venv (writable).
-  # Do not rely on packages preinstalled in /opt/qavenv — agent user may
-  # not see root installs the same way, and copied venvs have broken shebangs.
+  # Priority:
+  #   1) /opt/qavenv  → copy into job-local ./venv (fast baseline)
+  #   2) else         → python3 -m venv
+  # Then always sync requirements with `python -m pip` into THAT copy
+  # (writable; picks up new deps like redis without depending on root installs).
   - script: |
       set -euo pipefail
       cd "$(projectDir)"
@@ -201,24 +203,35 @@ steps:
       python3 -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version"
 
       rm -rf venv
-      echo "Creating fresh venv (job-local, writable)..."
-      python3 -m venv venv
+      if [ -d "/opt/qavenv" ]; then
+        echo "✅ Preferring prebuilt venv from /opt/qavenv (copy → ./venv)"
+        mkdir -p venv
+        cp -a /opt/qavenv/. ./venv/
+      else
+        echo "⚠️ /opt/qavenv not found — creating fresh venv"
+        python3 -m venv venv
+      fi
+
+      # Prefer explicit interpreter from the job copy (avoids broken shebangs)
+      VENV_PY="$(pwd)/venv/bin/python"
+      test -x "$VENV_PY"
       # shellcheck disable=SC1091
       source ./venv/bin/activate
+      hash -r
 
       echo "Python: $(command -v python)"
-      echo "pip:    $(command -v pip)"
-      python -c "import sys; print('prefix:', sys.prefix)"
+      echo "VENV_PY: $VENV_PY"
+      "$VENV_PY" -c "import sys; print('prefix:', sys.prefix); print('version:', sys.version)"
 
-      python -m pip install --upgrade pip
-      python -m pip install -r pytest/api/requirements.txt
-      # Explicit pin path — requirements already has redis; force verify
-      python -m pip install 'redis>=5.0.0'
-      python -c "import redis; print('redis OK', redis.__version__)"
+      # Sync deps into the job-local venv (no-op for packages already present)
+      "$VENV_PY" -m pip install --upgrade pip
+      "$VENV_PY" -m pip install -r pytest/api/requirements.txt
+      "$VENV_PY" -c "import redis; print('redis OK', redis.__version__)"
 
-      python -m pip show redis pytest azure-devops allure-pytest
+      "$VENV_PY" -m pip show redis pytest azure-devops allure-pytest
 
       echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(projectDir)/venv/bin/activate"
+      echo "##vso[task.setvariable variable=VENV_PYTHON]$(projectDir)/venv/bin/python"
     displayName: 'Setup Python 3.12'
 
   # ── 3. Build pytest argv + run ───────────────────────────────
