@@ -340,11 +340,4 @@ steps:
       mergeTestResults: false
     displayName: 'Publish JUnit results'
 
-  # ── 5. Publish Allure raw results (use allure serve locally) ──
-  - task: PublishPipelineArtifact@1
-    condition: and(always(), eq('${{ parameters.publishAllure }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
-    inputs:
-      targetPath: '$(apiDir)/allure-results'
-      artifact: 'allure-results'
-      publishLocation: 'pipeline'
-    displayName: 'Publish Allure results artifact'
+
