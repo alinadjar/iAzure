@@ -1,3 +1,5 @@
+# Self-hosted Azure DevOps Server — API pytest pipeline
+# Working dir: pytest/api
 # Agent pool must have Python 3.12 (+ optional /opt/qavenv prebuilt venv)
 
 trigger:
@@ -71,11 +73,12 @@ parameters:
       - login
 
   # ── Custom marker expression (overrides feature + tag) ───────
+  # Use '(none)' — empty default '' is treated as required by Azure DevOps UI
   - name: markerExpression
-    displayName: 'Custom -m expression (overrides feature/tag)'
+    displayName: 'Custom -m expression (overrides feature/tag)  |  (none) = skip'
     type: string
-    default: ''
-    # Examples:
+    default: '(none)'
+    # Examples (replace (none)):
     #   receipt_payment_forms and happy-path
     #   auth and validation
     #   bank and create
@@ -99,11 +102,12 @@ parameters:
       - tests/purchase_invoices/
 
   # ── Scenario name filter (-k) ────────────────────────────────
+  # Use '(none)' — empty default '' is treated as required by Azure DevOps UI
   - name: keyword
-    displayName: 'Scenario name filter (-k)  |  leave empty for all'
+    displayName: 'Scenario name filter (-k)  |  (none) = all'
     type: string
-    default: ''
-    # Examples: Add full payment | Get payment entry | Delete | Login successfully
+    default: '(none)'
+    # Examples (replace (none)): Add full payment | Get payment entry | Delete | Login successfully
 
   - name: verbose
     displayName: 'Verbose (-v)'
@@ -119,6 +123,28 @@ parameters:
     displayName: 'Publish Allure results as pipeline artifact'
     type: boolean
     default: true
+
+  # ── Azure Test Plan selection ────────────────────────────────
+  # Priority: testPlanId > testPlanName > auto (testPlanTarget)
+  - name: testPlanId
+    displayName: 'Azure Test Plan ID  |  (none) = auto'
+    type: string
+    default: '(none)'
+    # Find it in Test Plans URL: .../_testPlans/define?planId=39639
+
+  - name: testPlanName
+    displayName: 'Azure Test Plan name  |  (none) = skip'
+    type: string
+    default: '(none)'
+    # Exact name, e.g. TP_Sprint16_FX_API — used only if testPlanId is (none)
+
+  - name: testPlanTarget
+    displayName: 'Auto-select plan suffix (when ID/name empty)'
+    type: string
+    default: 'API'
+    values:
+      - API
+      - UI
 
 variables:
   python.version: '3.12'
@@ -208,12 +234,18 @@ steps:
       KEYWORD="${{ parameters.keyword }}"
       VERBOSE="${{ parameters.verbose }}"
 
-      # Normalize sentinels
+      # Normalize sentinels (Azure UI treats default '' as required)
       [ "$FEATURE" = "(all)" ] && FEATURE=""
       [ "$TAG" = "(all)" ] && TAG=""
       [ "$TEST_PATH" = "(all)" ] && TEST_PATH=""
+      [ "$CUSTOM_MARKER" = "(none)" ] && CUSTOM_MARKER=""
+      [ "$KEYWORD" = "(none)" ] && KEYWORD=""
       CUSTOM_MARKER="$(echo "$CUSTOM_MARKER" | xargs)"   # trim
       KEYWORD="$(echo "$KEYWORD" | xargs)"
+
+      # Plan selection: '(none)' → empty → auto-select by target
+      if [ "${AZURE_TEST_PLAN_ID:-}" = "(none)" ]; then export AZURE_TEST_PLAN_ID=""; fi
+      if [ "${AZURE_TEST_PLAN_NAME:-}" = "(none)" ]; then export AZURE_TEST_PLAN_NAME=""; fi
 
       # Resolve -m expression
       MARKER=""
@@ -285,9 +317,9 @@ steps:
       AZURE_TEST_REPORT_ENABLED: ${{ parameters.azureReport }}
       AZURE_DEVOPS_URL: $(AZURE_DEVOPS_URL)
       AZURE_DEVOPS_PROJECT: $(AZURE_DEVOPS_PROJECT)
-      AZURE_TEST_PLAN_ID: $(AZURE_TEST_PLAN_ID)
-      AZURE_TEST_PLAN_NAME: $(AZURE_TEST_PLAN_NAME)
-      AZURE_TEST_PLAN_TARGET: $(AZURE_TEST_PLAN_TARGET)
+      AZURE_TEST_PLAN_ID: ${{ parameters.testPlanId }}
+      AZURE_TEST_PLAN_NAME: ${{ parameters.testPlanName }}
+      AZURE_TEST_PLAN_TARGET: ${{ parameters.testPlanTarget }}
       AZURE_TEST_PLAN_NAME_PREFIX: $(AZURE_TEST_PLAN_NAME_PREFIX)
       AZURE_VERIFY_SSL: $(AZURE_VERIFY_SSL)
       AZURE_TEST_CONFIGURATION_ID: $(AZURE_TEST_CONFIGURATION_ID)
