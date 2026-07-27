@@ -190,6 +190,9 @@ steps:
       GIT_PAT: $(GIT_PAT)
 
   # ── 2. Python / venv ─────────────────────────────────────────
+  # Always install requirements into the JOB venv (writable).
+  # Do not rely on packages preinstalled in /opt/qavenv — agent user may
+  # not see root installs the same way, and copied venvs have broken shebangs.
   - script: |
       set -euo pipefail
       cd "$(projectDir)"
@@ -197,26 +200,23 @@ steps:
       python3 --version
       python3 -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version"
 
-      if [ -d "/opt/qavenv" ]; then
-        echo "✅ Using prebuilt venv from /opt/qavenv"
-        rm -rf venv
-        mkdir -p venv
-        cp -a /opt/qavenv/. ./venv/
-        # shellcheck disable=SC1091
-        source ./venv/bin/activate
-        pip list
-      else
-        echo "Creating venv..."
-        python3 -m venv venv
-        # shellcheck disable=SC1091
-        source ./venv/bin/activate
-        python -m pip install --upgrade pip
-        pip install -r pytest/api/requirements.txt
-      fi
+      rm -rf venv
+      echo "Creating fresh venv (job-local, writable)..."
+      python3 -m venv venv
+      # shellcheck disable=SC1091
+      source ./venv/bin/activate
 
       echo "Python: $(command -v python)"
-      python --version
-      pip show pytest allure-pytest azure-devops | sed -n '1,20p' || true
+      echo "pip:    $(command -v pip)"
+      python -c "import sys; print('prefix:', sys.prefix)"
+
+      python -m pip install --upgrade pip
+      python -m pip install -r pytest/api/requirements.txt
+      # Explicit pin path — requirements already has redis; force verify
+      python -m pip install 'redis>=5.0.0'
+      python -c "import redis; print('redis OK', redis.__version__)"
+
+      python -m pip show redis pytest azure-devops allure-pytest
 
       echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(projectDir)/venv/bin/activate"
     displayName: 'Setup Python 3.12'
