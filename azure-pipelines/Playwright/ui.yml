@@ -145,10 +145,6 @@ parameters:
       - 'on'
       - 'off'
 
-  # - name: installBrowsers
-  #   displayName: 'Run playwright install chromium'
-  #   type: boolean
-  #   default: false
 
   # ── Azure Test Plan (UI) ─────────────────────────────────────
   - name: azureReport
@@ -258,13 +254,6 @@ steps:
 
       "$VENV_PY" -c "import playwright; print('playwright OK')"
 
-      # if [ "${{ parameters.installBrowsers }}" = "True" ] || [ "${{ parameters.installBrowsers }}" = "true" ]; then
-      #   echo "Installing Chromium for Playwright..."
-      #   "$VENV_PY" -m playwright install chromium
-      #   "$VENV_PY" -m playwright install-deps chromium || true
-      # else
-      #   echo "Skipping playwright install chromium (installBrowsers=false)"
-      # fi
 
       echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(projectDir)/venv/bin/activate"
       echo "##vso[task.setvariable variable=VENV_PYTHON]$(projectDir)/venv/bin/python"
