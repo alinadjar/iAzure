@@ -170,6 +170,7 @@ steps:
 
       git config --global user.email "S_Bot_Azure@sadgan.int"
       git config --global user.name "S_Bot_Azure"
+      git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
       git config --global http.sslVerify false
       git config --global --add safe.directory '*'
       git config --global core.compression 0
@@ -178,9 +179,7 @@ steps:
       git config --global pull.rebase false
 
       echo "Cloning $(projectName) @ ${{ parameters.branch }}..."
-      git clone --depth 1 --branch "${{ parameters.branch }}" \
-        "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/$(projectName)" \
-        "$(projectDir)"
+      git clone --depth 1 --branch "${{ parameters.branch }}" "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/$(projectName)" "$(projectDir)"
 
       test -d "$(projectDir)/.git"
       echo "✅ Cloned → $(projectDir)"
