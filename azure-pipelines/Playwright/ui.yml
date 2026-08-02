@@ -184,6 +184,7 @@ variables:
   projectName: 'Sadgan.ERP.Playwright'
   projectDir: '$(System.DefaultWorkingDirectory)/$(projectName)'
   PIP_CACHE_DIR: '$(Pipeline.Workspace)/.pip'
+  PLAYWRIGHT_BROWSERS_PATH: $(System.DefaultWorkingDirectory)/pw-browsers
 
 steps:
   # ── 1. Checkout ──────────────────────────────────────────────
@@ -297,7 +298,7 @@ steps:
       python3 -m playwright --version
       echo "Chromium installed at: $CHROMIUM_DIR"
       ls -la "$CHROMIUM_DIR"
-  displayName: 'Load Playwright browser from cache'
+    displayName: 'Load Playwright browser from cache'
 
 
   # ── 3. Write ConfigrationFiles/.env.FX ───────────────────────
@@ -367,6 +368,7 @@ steps:
       set -euo pipefail
       # shellcheck disable=SC1091
       source "$(VENV_ACTIVATE)"
+      export PLAYWRIGHT_BROWSERS_PATH=$(System.DefaultWorkingDirectory)/pw-browsers
       cd "$(projectDir)"
 
       RUN_MODE="${{ parameters.runMode }}"
