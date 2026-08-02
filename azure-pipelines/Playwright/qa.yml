@@ -409,3 +409,12 @@ steps:
       ArtifactName: 'allure-results'
       publishLocation: 'Container'
     displayName: 'Publish Allure results artifact'
+
+
+  # ── 7. Allure Report tab (requires Allure Report extension on server) ──
+  - task: PublishAllureReport@2
+    displayName: 'publish allure report'
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishAllure }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    inputs:
+      testResultsDir: '$(apiDir)/allure-results'
+      reportName: 'API Allure Report'    
