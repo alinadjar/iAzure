@@ -145,10 +145,10 @@ parameters:
       - 'on'
       - 'off'
 
-  - name: installBrowsers
-    displayName: 'Run playwright install chromium'
-    type: boolean
-    default: false
+  # - name: installBrowsers
+  #   displayName: 'Run playwright install chromium'
+  #   type: boolean
+  #   default: false
 
   # ── Azure Test Plan (UI) ─────────────────────────────────────
   - name: azureReport
@@ -257,17 +257,48 @@ steps:
 
       "$VENV_PY" -c "import playwright; print('playwright OK')"
 
-      if [ "${{ parameters.installBrowsers }}" = "True" ] || [ "${{ parameters.installBrowsers }}" = "true" ]; then
-        echo "Installing Chromium for Playwright..."
-        "$VENV_PY" -m playwright install chromium
-        "$VENV_PY" -m playwright install-deps chromium || true
-      else
-        echo "Skipping playwright install chromium (installBrowsers=false)"
-      fi
+      # if [ "${{ parameters.installBrowsers }}" = "True" ] || [ "${{ parameters.installBrowsers }}" = "true" ]; then
+      #   echo "Installing Chromium for Playwright..."
+      #   "$VENV_PY" -m playwright install chromium
+      #   "$VENV_PY" -m playwright install-deps chromium || true
+      # else
+      #   echo "Skipping playwright install chromium (installBrowsers=false)"
+      # fi
 
       echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(projectDir)/venv/bin/activate"
       echo "##vso[task.setvariable variable=VENV_PYTHON]$(projectDir)/venv/bin/python"
     displayName: 'Setup Python 3.12 + Playwright'
+
+  - script: |
+      cd $(projectDir)
+      source venv/bin/activate
+    
+      export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+      export PLAYWRIGHT_BROWSERS_PATH=$(PLAYWRIGHT_BROWSERS_PATH)
+      
+      # Set your local zip path and target revision (from your error, it's 1194)
+      LOCAL_CHROMIUM_ZIP="/opt/chromium-linux.zip"
+      CHROMIUM_REVISION="1194"
+      
+      # Determine cache directory
+      BROWSER_CACHE_DIR="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+      CHROMIUM_DIR="$BROWSER_CACHE_DIR/chromium-$CHROMIUM_REVISION"
+      
+      # Create directory and extract
+      mkdir -p "$CHROMIUM_DIR"
+      echo "Extracting Chromium from $LOCAL_CHROMIUM_ZIP to $CHROMIUM_DIR"
+      unzip -o "$LOCAL_CHROMIUM_ZIP" -d "$CHROMIUM_DIR"
+      
+      # Create marker file so Playwright knows it's installed
+      mkdir -p "$CHROMIUM_DIR/installed"
+      
+      # Verify
+      echo "Playwright version:"
+      python3 -m playwright --version
+      echo "Chromium installed at: $CHROMIUM_DIR"
+      ls -la "$CHROMIUM_DIR"
+  displayName: 'Load Playwright browser from cache'
+
 
   # ── 3. Write ConfigrationFiles/.env.FX ───────────────────────
   # CONFIGURATUIONS.py requires this file (load_dotenv override=True).
