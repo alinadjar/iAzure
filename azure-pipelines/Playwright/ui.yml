@@ -283,44 +283,60 @@ steps:
   #     ls -la "$CHROMIUM_DIR"
   #   displayName: 'Load Playwright browser from cache'
 
-  - task: Cache@2
-    displayName: 'Cache Playwright browsers'
-    inputs:
-      key: 'playwright | "$(Agent.OS)" | playwright_version.txt'
-      path: '$(PLAYWRIGHT_BROWSERS_PATH)'
-      cacheHitVar: 'PLAYWRIGHT_CACHE_RESTORED'
-
+  # ── 2.5 Extract Playwright browser (version-aware) ─────────────
   - script: |
       cd $(projectDir)
       source venv/bin/activate
       
-      # Get the exact revision Playwright expects
+      # Get the revision Playwright expects
       EXPECTED_REVISION=$(python -c "
       from playwright._impl._driver import Driver
       d = Driver()
       print(d._browser_revision('chromium'))
       ")
-      echo "EXPECTED_REVISION=$EXPECTED_REVISION" >> $(Build.ArtifactStagingDirectory)/playwright_version.txt
+      PLAYWRIGHT_VERSION=$(python -c "import playwright; print(playwright.__version__)")
       
-      if [ "$PLAYWRIGHT_CACHE_RESTORED" = "true" ]; then
-        echo "✅ Playwright browser cache restored!"
-        # Verify we have the right revision
-        if [ -d "$(PLAYWRIGHT_BROWSERS_PATH)/chromium-$EXPECTED_REVISION" ]; then
-          echo "✅ Correct revision $EXPECTED_REVISION found"
-        else
-          echo "⚠️ Cache has wrong revision - redownloading"
-          python -m playwright install chromium-headless-shell
-        fi
+      echo "Playwright version: $PLAYWRIGHT_VERSION"
+      echo "Expected revision: $EXPECTED_REVISION"
+      
+      BROWSER_CACHE_DIR="$(PLAYWRIGHT_BROWSERS_PATH)"
+      CHROMIUM_DIR="$BROWSER_CACHE_DIR/chromium-$EXPECTED_REVISION"
+      
+      # Try different archive locations
+      ARCHIVE_PATH=""
+      if [ -f "/opt/playwright-browsers-rev-${EXPECTED_REVISION}.tar.gz" ]; then
+        ARCHIVE_PATH="/opt/playwright-browsers-rev-${EXPECTED_REVISION}.tar.gz"
+      elif [ -f "/opt/playwright-browsers-${PLAYWRIGHT_VERSION}.tar.gz" ]; then
+        ARCHIVE_PATH="/opt/playwright-browsers-${PLAYWRIGHT_VERSION}.tar.gz"
+      elif [ -f "/opt/playwright-browsers.tar.gz" ]; then
+        ARCHIVE_PATH="/opt/playwright-browsers.tar.gz"
       else
-        echo "⬇️ Cache miss - downloading browsers..."
-        python -m playwright install chromium-headless-shell
+        echo "❌ No browser archive found!"
+        echo "Checked:"
+        echo "  - /opt/playwright-browsers-rev-${EXPECTED_REVISION}.tar.gz"
+        echo "  - /opt/playwright-browsers-${PLAYWRIGHT_VERSION}.tar.gz"
+        echo "  - /opt/playwright-browsers.tar.gz"
+        exit 1
       fi
       
-      echo "Browser installed at:"
-      ls -la $(PLAYWRIGHT_BROWSERS_PATH)/
-    displayName: 'Install/Restore Playwright browsers'
+      echo "📦 Using archive: $ARCHIVE_PATH"
+      
+      # Extract
+      rm -rf "$BROWSER_CACHE_DIR"
+      mkdir -p "$BROWSER_CACHE_DIR"
+      
+      tar -xzf "$ARCHIVE_PATH" -C "$(dirname $BROWSER_CACHE_DIR)"
+      
+      if [ -d "$CHROMIUM_DIR" ]; then
+        mkdir -p "$CHROMIUM_DIR/installed"
+        echo "✅ Browser ready at revision $EXPECTED_REVISION"
+      else
+        echo "❌ Extraction failed"
+        exit 1
+      fi
+    displayName: 'Extract Playwright browser from shared cache'
     env:
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1  # Skip during install
+      PLAYWRIGHT_BROWSERS_PATH: $(PLAYWRIGHT_BROWSERS_PATH)
 
 
   # ── 3. Write ConfigrationFiles/.env.FX ───────────────────────
