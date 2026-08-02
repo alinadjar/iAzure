@@ -259,35 +259,68 @@ steps:
       echo "##vso[task.setvariable variable=VENV_PYTHON]$(projectDir)/venv/bin/python"
     displayName: 'Setup Python 3.12 + Playwright'
 
+  # - script: |
+  #     cd $(projectDir)
+  #     source venv/bin/activate
+  #     export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+  #     export PLAYWRIGHT_BROWSERS_PATH=$(PLAYWRIGHT_BROWSERS_PATH)
+  #     # Set your local zip path and target revision (from your error, it's 1194)
+  #     LOCAL_CHROMIUM_ZIP="/opt/chromium-linux.zip"
+  #     CHROMIUM_REVISION="1194"
+  #     # Determine cache directory
+  #     BROWSER_CACHE_DIR="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
+  #     CHROMIUM_DIR="$BROWSER_CACHE_DIR/chromium-$CHROMIUM_REVISION"
+  #     # Create directory and extract
+  #     mkdir -p "$CHROMIUM_DIR"
+  #     echo "Extracting Chromium from $LOCAL_CHROMIUM_ZIP to $CHROMIUM_DIR"
+  #     unzip -o "$LOCAL_CHROMIUM_ZIP" -d "$CHROMIUM_DIR"
+  #     # Create marker file so Playwright knows it's installed
+  #     mkdir -p "$CHROMIUM_DIR/installed"
+  #     # Verify
+  #     echo "Playwright version:"
+  #     python3 -m playwright --version
+  #     echo "Chromium installed at: $CHROMIUM_DIR"
+  #     ls -la "$CHROMIUM_DIR"
+  #   displayName: 'Load Playwright browser from cache'
+
+  - task: Cache@2
+    displayName: 'Cache Playwright browsers'
+    inputs:
+      key: 'playwright | "$(Agent.OS)" | playwright_version.txt'
+      path: '$(PLAYWRIGHT_BROWSERS_PATH)'
+      cacheHitVar: 'PLAYWRIGHT_CACHE_RESTORED'
+
   - script: |
       cd $(projectDir)
       source venv/bin/activate
-    
-      export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-      export PLAYWRIGHT_BROWSERS_PATH=$(PLAYWRIGHT_BROWSERS_PATH)
       
-      # Set your local zip path and target revision (from your error, it's 1194)
-      LOCAL_CHROMIUM_ZIP="/opt/chromium-linux.zip"
-      CHROMIUM_REVISION="1194"
+      # Get the exact revision Playwright expects
+      EXPECTED_REVISION=$(python -c "
+      from playwright._impl._driver import Driver
+      d = Driver()
+      print(d._browser_revision('chromium'))
+      ")
+      echo "EXPECTED_REVISION=$EXPECTED_REVISION" >> $(Build.ArtifactStagingDirectory)/playwright_version.txt
       
-      # Determine cache directory
-      BROWSER_CACHE_DIR="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
-      CHROMIUM_DIR="$BROWSER_CACHE_DIR/chromium-$CHROMIUM_REVISION"
+      if [ "$PLAYWRIGHT_CACHE_RESTORED" = "true" ]; then
+        echo "✅ Playwright browser cache restored!"
+        # Verify we have the right revision
+        if [ -d "$(PLAYWRIGHT_BROWSERS_PATH)/chromium-$EXPECTED_REVISION" ]; then
+          echo "✅ Correct revision $EXPECTED_REVISION found"
+        else
+          echo "⚠️ Cache has wrong revision - redownloading"
+          python -m playwright install chromium-headless-shell
+        fi
+      else
+        echo "⬇️ Cache miss - downloading browsers..."
+        python -m playwright install chromium-headless-shell
+      fi
       
-      # Create directory and extract
-      mkdir -p "$CHROMIUM_DIR"
-      echo "Extracting Chromium from $LOCAL_CHROMIUM_ZIP to $CHROMIUM_DIR"
-      unzip -o "$LOCAL_CHROMIUM_ZIP" -d "$CHROMIUM_DIR"
-      
-      # Create marker file so Playwright knows it's installed
-      mkdir -p "$CHROMIUM_DIR/installed"
-      
-      # Verify
-      echo "Playwright version:"
-      python3 -m playwright --version
-      echo "Chromium installed at: $CHROMIUM_DIR"
-      ls -la "$CHROMIUM_DIR"
-    displayName: 'Load Playwright browser from cache'
+      echo "Browser installed at:"
+      ls -la $(PLAYWRIGHT_BROWSERS_PATH)/
+    displayName: 'Install/Restore Playwright browsers'
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1  # Skip during install
 
 
   # ── 3. Write ConfigrationFiles/.env.FX ───────────────────────
