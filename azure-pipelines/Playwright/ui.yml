@@ -1,0 +1,440 @@
+# Playwright UI pipeline (FX_Modules)
+# Runs modules via:  python -m FX_Modules.<path>.Module_X
+# Requires ConfigrationFiles/.env.FX (generated in this pipeline from params + secrets)
+
+
+trigger: none
+
+pr: none
+
+pool:
+  name: 'Playwright_FX'
+
+parameters:
+  # ── Environment ──────────────────────────────────────────────
+  - name: baseUrl
+    displayName: 'ERP UI Base URL (BASE_URL_ERP)'
+    type: string
+    default: 'https://alpha.fx.sadgan.int'
+    values:
+      - 'https://alpha.fx.sadgan.int'
+      - 'https://stage.fx.sadgan.int'
+      - 'https://dev.fx.sadgan.int'
+
+  - name: branch
+    displayName: 'Git branch to clone'
+    type: string
+    default: 'pipe'
+
+  # ── Run mode ─────────────────────────────────────────────────
+  - name: runMode
+    displayName: 'Run mode'
+    type: string
+    default: 'singleModule'
+    values:
+      - singleModule   # python -m FX_Modules....Module_X
+      - masterSuite    # python -m FX_Modules.Master_Tests (Order.json)
+      - listModules    # discover Module_*.py paths (no browser)
+
+  # ── Module selection  ───────────────────────────
+  # Comments in older files say Modules.* / FX.Modules.* — runtime import is FX_Modules.*
+  - name: modulePreset
+    displayName: 'Module preset (python -m path)'
+    type: string
+    default: 'FX_Modules.Setting.Fiscal_Year.Module_FiscalYear'
+    values:
+      - '(custom)'
+      - FX_Modules.Master_Tests
+      - FX_Modules.Login.Module_Login_Valid
+      - FX_Modules.Setting.Users.Module_Users
+      - FX_Modules.Setting.Roles.Module_Roles
+      - FX_Modules.Setting.Fiscal_Year.Module_FiscalYear
+      - FX_Modules.Financial_Management.Setting.FinancialDimensionGroup.Module_FinancialDimensionGroup
+      - FX_Modules.Financial_Management.Basic_Information.UserFinancialDimension.Module_UserFinancialDimension
+      - FX_Modules.Financial_Management.Setting.ProfitLossSettings.Module_ProfitLossSettings
+      - FX_Modules.Financial_Management.Setting.BalanceSheetSettings.Module_BalanceSheetSettings
+      - FX_Modules.Financial_Management.Setting.ChartOfAccounts.Module_ChartOfAccounts
+      - FX_Modules.Financial_Management.Setting.Citizenship.Module_Citizenship
+      - FX_Modules.Financial_Management.Setting.Locations.Module_RegionsLocations
+      - FX_Modules.Financial_Management.Basic_Information.Persons.Module_Persons
+      - FX_Modules.Financial_Management.Basic_Information.Organisations.Module_Organisations
+      - FX_Modules.Financial_Management.Setting.BankAccountTypes.Module_BankAccountTypes
+      - FX_Modules.Financial_Management.Setting.Banks.Module_Banks
+      - FX_Modules.Financial_Management.Basic_Information.Bank_Accounts.test_Module_BankAccounts
+      - FX_Modules.Financial_Management.Setting.ProjectModel.Module_ProjectModel
+      - FX_Modules.Financial_Management.Basic_Information.Projects.Module_Projects
+      - FX_Modules.Financial_Management.Basic_Information.CashBoxs.Module_CashBoxs
+      - FX_Modules.Financial_Management.Basic_Information.Petty_Cash_Custodian.Module_PettyCashCustodian
+      - FX_Modules.Financial_Management.Operation.Checkbook.Module_Checkbook
+      - FX_Modules.Financial_Management.Setting.Currency.Module_Currency
+      - FX_Modules.Financial_Management.Setting.CurrencyRateTypes.Module_CurrencyRateTypes
+      - FX_Modules.Financial_Management.Operation.CurrencyExchangeRate.Module_CurrencyExchangeRate
+      - FX_Modules.Financial_Management.Setting.CashSource_Use.Module_CashSource_Use
+      - FX_Modules.Financial_Management.Setting.FinancialSettingPurposeTree.Module_FinancialSettingPurposeTree
+      - FX_Modules.Financial_Management.Setting.DefaultLedgerAccounts.Module_DefaultLedgerAccounts
+      - FX_Modules.Financial_Management.Basic_Information.Employees.Module_Employees
+      - FX_Modules.Financial_Management.Basic_Information.CostCenters.Module_CostCenters
+      - FX_Modules.Financial_Management.Setting.SettingupJournalEntryDescription.Module_SettingupJournalEntryDescription
+      - FX_Modules.Financial_Management.Operation.Journal_Entry.Module_JournalEntry
+      - FX_Modules.Financial_Management.Setting.TypeExpenses_BulkPayment.Module_TypeExpenses_BulkPayment
+      - FX_Modules.Financial_Management.Operation.ExpensesBulkPayment.Module_ExpensesBulkPayment
+      - FX_Modules.Financial_Management.Operation.Receipt_Entry.Module_ReceiptEntry
+      - FX_Modules.Financial_Management.Operation.Payment_Entry.Module_PaymentEntry
+      - FX_Modules.Financial_Management.Operation.CheckAction.Module_CheckAction
+      - FX_Modules.Financial_Management.Operation.OpeningReceiptPayment.Module_OpeningReceiptPayment
+      - FX_Modules.Financial_Management.Operation.Currency_Exchange_Settlement.Module_CurrencyExchangeSettlement
+      - FX_Modules.Financial_Management.Operation.ForeignExchangeRevaluation.Module_ForeignExchangeRevaluation
+      - FX_Modules.Financial_Management.Operation.LockPeriods.Module_LockPeriods
+      - FX_Modules.Financial_Management.Operation.ElectronicLedger.Module_ElectronicLedger
+      - FX_Modules.PurchaseInventory_Management.Setting.Measurment_Unit.Module_MeasurmentUnit
+      - FX_Modules.PurchaseInventory_Management.Basic_Information.Suppliers.Module_Suppliers
+      - FX_Modules.PurchaseInventory_Management.Basic_Information.QualityInspectionTemplate.Module_QualityInspectionTemplate
+      - FX_Modules.PurchaseInventory_Management.Setting.ScrapReason.Module_ScrapReason
+      - FX_Modules.PurchaseInventory_Management.Setting.ItemCategory.Module_ItemCategory
+      - FX_Modules.PurchaseInventory_Management.Basic_Information.Goods.Module_Goods
+      - FX_Modules.PurchaseInventory_Management.Basic_Information.Goods.Module_Service
+      - FX_Modules.PurchaseInventory_Management.Setting.ReorderSetting.Module_ReorderSetting
+      - FX_Modules.PurchaseInventory_Management.Operation.PurchaseInvoices.Module_PurchaseInvoices
+      - FX_Modules.PurchaseInventory_Management.Operation.PurchaseReturnInvoices.Module_PurchaseReturnInvoices
+      - FX_Modules.PurchaseInventory_Management.Setting.InventoryIncreaseAndDecreaseGroup.Module_InventoryIncreaseAndDecreaseGroup
+      - FX_Modules.Sale_Management.Basic_Information.SaleModel.Module_SaleModel
+      - FX_Modules.Sale_Management.Operation.SaleOffer.Module_SaleOffer
+      - FX_Modules.PurchaseInventory_Management.Setting.ProductLifeCycleManagement.Module_ProductLifeCycleManagement
+      - FX_Modules.PurchaseInventory_Management.Setting.ProductLifeCycleTemplate.Module_ProductLifeCycleTemplate
+      - FX_Modules.PurchaseInventory_Management.Setting.ProductLifeCycleStage.Module_ProductLifeCycleStage
+      - FX_Modules.PurchaseInventory_Management.Basic_Information.Warehouse.Module_Warehouse
+      - FX_Modules.PurchaseInventory_Management.Operation.StockEntry.Module_StockEntry
+      - FX_Modules.Sale_Management.Basic_Information.Agent.Module_Agent
+      - FX_Modules.Sale_Management.Basic_Information.Customer.Module_Customer
+      - FX_Modules.Sale_Management.Operation.SalesInvoice.Module_SalesInvoice
+      - FX_Modules.Sale_Management.Setting.AgentGroup.Module_AgentGroup
+      - FX_Modules.Sale_Management.Setting.CustomerGroup.Module_CustomerGroup
+
+  - name: customModule
+    displayName: 'Custom python -m path  |  used when preset=(custom)'
+    type: string
+    default: '(none)'
+    # Example: FX_Modules.Financial_Management.Operation.Receipt_Entry.Module_ReceiptEntry
+
+  # ── Browser / capture ────────────────────────────────────────
+  - name: headless
+    displayName: 'HEADLESS (CI)'
+    type: boolean
+    default: true
+
+  - name: slowMo
+    displayName: 'SLOW_MO (ms)'
+    type: string
+    default: '0'
+
+  - name: screenshot
+    displayName: 'SCREENSHOT mode'
+    type: string
+    default: 'only-on-failure'
+    values:
+      - 'only-on-failure'
+      - 'on'
+      - 'off'
+
+  - name: videoCapture
+    displayName: 'VIDEOCAPTURE mode'
+    type: string
+    default: 'only-on-failure'
+    values:
+      - 'only-on-failure'
+      - 'on'
+      - 'off'
+
+  - name: installBrowsers
+    displayName: 'Run playwright install chromium'
+    type: boolean
+    default: false
+
+  # ── Azure Test Plan (UI) ─────────────────────────────────────
+  - name: azureReport
+    displayName: 'Report results to Azure Test Plan (AZURE_REPORT_ENABLED)'
+    type: boolean
+    default: true
+
+  - name: testPlanId
+    displayName: 'Azure Test Plan ID  |  (none) = auto'
+    type: string
+    default: '(none)'
+
+  - name: testPlanName
+    displayName: 'Azure Test Plan name  |  (none) = skip'
+    type: string
+    default: '(none)'
+
+
+
+  # ── Artifacts ────────────────────────────────────────────────
+  - name: publishLogs
+    displayName: 'Publish Log_Reports artifact'
+    type: boolean
+    default: true
+
+  - name: publishMedia
+    displayName: 'Publish Video_and_ScreenShot_Reports artifact'
+    type: boolean
+    default: true
+
+variables:
+  python.version: '3.12'
+  projectName: 'Sadgan.ERP.Playwright'
+  projectDir: '$(System.DefaultWorkingDirectory)/$(projectName)'
+  PIP_CACHE_DIR: '$(Pipeline.Workspace)/.pip'
+
+steps:
+  # ── 1. Checkout ──────────────────────────────────────────────
+  - checkout: none
+
+  - script: |
+      set -euo pipefail
+
+      echo "Cleaning previous checkout..."
+      rm -rf "$(projectDir)"
+
+      git config --global user.email "S_Bot_Azure@sadgan.int"
+      git config --global user.name "S_Bot_Azure"
+      git config --global http.sslVerify false
+      git config --global --add safe.directory '*'
+      git config --global core.compression 0
+      git config --global http.postBuffer 1048576000
+      git config --global pack.threads 1
+      git config --global pull.rebase false
+
+      echo "Cloning $(projectName) @ ${{ parameters.branch }}..."
+      git clone --depth 1 --branch "${{ parameters.branch }}" \
+        "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/$(projectName)" \
+        "$(projectDir)"
+
+      test -d "$(projectDir)/.git"
+      echo "✅ Cloned → $(projectDir)"
+      ls -la "$(projectDir)"
+    displayName: 'Git Checkout'
+    env:
+      GIT_PAT: $(GIT_PAT)
+
+  # ── 2. Python / venv (/opt/uivenv preferred) ──────────────────
+  - script: |
+      set -euo pipefail
+      cd "$(projectDir)"
+
+      python3 --version
+      python3 -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version"
+
+      rm -rf venv
+      if [ -d "/opt/uivenv" ]; then
+        echo "✅ Preferring prebuilt venv from /opt/uivenv (copy → ./venv)"
+        mkdir -p venv
+        cp -a /opt/uivenv/. ./venv/
+      else
+        echo "⚠️ /opt/uivenv not found — creating fresh venv"
+        python3 -m venv venv
+      fi
+
+      VENV_PY="$(pwd)/venv/bin/python"
+      test -x "$VENV_PY"
+      # shellcheck disable=SC1091
+      source ./venv/bin/activate
+      hash -r
+
+      echo "Python: $(command -v python)"
+      echo "VENV_PY: $VENV_PY"
+      "$VENV_PY" -c "import sys; print('prefix:', sys.prefix); print('version:', sys.version)"
+
+      "$VENV_PY" -m pip install --upgrade pip
+      # UI stack (no dedicated root requirements.txt — install essentials)
+      "$VENV_PY" -m pip install \
+        'playwright>=1.40' \
+        'python-dotenv>=1.0.0' \
+        'pytest>=7.4' \
+        'requests>=2.31' \
+        'azure-devops>=7.1.0b4' \
+        'jdatetime' \
+        'redis>=5.0.0'
+
+      "$VENV_PY" -c "import playwright; print('playwright OK')"
+
+      if [ "${{ parameters.installBrowsers }}" = "True" ] || [ "${{ parameters.installBrowsers }}" = "true" ]; then
+        echo "Installing Chromium for Playwright..."
+        "$VENV_PY" -m playwright install chromium
+        "$VENV_PY" -m playwright install-deps chromium || true
+      else
+        echo "Skipping playwright install chromium (installBrowsers=false)"
+      fi
+
+      echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(projectDir)/venv/bin/activate"
+      echo "##vso[task.setvariable variable=VENV_PYTHON]$(projectDir)/venv/bin/python"
+    displayName: 'Setup Python 3.12 + Playwright'
+
+  # ── 3. Write ConfigrationFiles/.env.FX ───────────────────────
+  # CONFIGURATUIONS.py requires this file (load_dotenv override=True).
+  - script: |
+      set -euo pipefail
+      cd "$(projectDir)"
+
+      ENV_FILE="ConfigrationFiles/.env.FX"
+      PLAN_ID="${{ parameters.testPlanId }}"
+      PLAN_NAME="${{ parameters.testPlanName }}"
+      [ "$PLAN_ID" = "(none)" ] && PLAN_ID=""
+      [ "$PLAN_NAME" = "(none)" ] && PLAN_NAME=""
+
+      AZURE_REPORT="false"
+      if [ "${{ parameters.azureReport }}" = "True" ] || [ "${{ parameters.azureReport }}" = "true" ]; then
+        AZURE_REPORT="true"
+      fi
+
+      HEADLESS_VAL="false"
+      if [ "${{ parameters.headless }}" = "True" ] || [ "${{ parameters.headless }}" = "true" ]; then
+        HEADLESS_VAL="true"
+      fi
+
+      # Do not echo secrets
+      cat > "$ENV_FILE" <<EOF
+      BASE_URL_ERP=${{ parameters.baseUrl }}
+      HEADLESS=${HEADLESS_VAL}
+      SLOW_MO=${{ parameters.slowMo }}
+      ACTION_TIMEOUT=10000
+      NAVIGATION_TIMEOUT=30000
+      USERNAME_ERP=${USERNAME_ERP}
+      PASSWORD=${PASSWORD}
+      SUPERVISOR_USERNAME_ERP=${SUPERVISOR_USERNAME_ERP}
+      SUPERVISOR_PASSWORD_ERP=${SUPERVISOR_PASSWORD_ERP}
+      SCREENSHOT=${{ parameters.screenshot }}
+      VIDEOCAPTURE=${{ parameters.videoCapture }}
+      DEVTOOLS=false
+      USER_COUNT=1
+      AZURE_REPORT_ENABLED=${AZURE_REPORT}
+      AZURE_DEVOPS_PROJECT=${AZURE_DEVOPS_PROJECT}
+      AZURE_DEVOPS_PAT=${SYSTEM_ACCESSTOKEN}
+      AZURE_TEST_PLAN_ID=${PLAN_ID}
+      AZURE_TEST_PLAN_NAME=${PLAN_NAME}
+      AZURE_TEST_PLAN_TARGET=UI
+      AZURE_VERIFY_SSL=false
+      EOF
+
+      # Strip leading spaces introduced by indented heredoc
+      sed -i 's/^[[:space:]]*//' "$ENV_FILE"
+
+      echo "✅ Wrote $ENV_FILE (secrets redacted below)"
+      grep -E '^(BASE_URL_ERP|HEADLESS|SLOW_MO|SCREENSHOT|VIDEOCAPTURE|AZURE_|USER_COUNT|DEVTOOLS)=' "$ENV_FILE" || true
+      test -f "$ENV_FILE"
+    displayName: 'Write ConfigrationFiles/.env.FX'
+    env:
+      USERNAME_ERP: $(USERNAME_ERP)
+      PASSWORD: $(PASSWORD)
+      SUPERVISOR_USERNAME_ERP: $(SUPERVISOR_USERNAME_ERP)
+      SUPERVISOR_PASSWORD_ERP: $(SUPERVISOR_PASSWORD_ERP)
+      AZURE_DEVOPS_PROJECT: $(AZURE_DEVOPS_PROJECT)
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      AZURE_VERIFY_SSL: false
+
+  # ── 4. Resolve module + run ──────────────────────────────────
+  - script: |
+      set -euo pipefail
+      # shellcheck disable=SC1091
+      source "$(VENV_ACTIVATE)"
+      cd "$(projectDir)"
+
+      RUN_MODE="${{ parameters.runMode }}"
+      PRESET="${{ parameters.modulePreset }}"
+      CUSTOM="${{ parameters.customModule }}"
+      [ "$CUSTOM" = "(none)" ] && CUSTOM=""
+
+      MODULE=""
+      case "$RUN_MODE" in
+        masterSuite)
+          MODULE="FX_Modules.Master_Tests"
+          ;;
+        listModules)
+          MODULE=""
+          ;;
+        singleModule)
+          if [ "$PRESET" = "(custom)" ]; then
+            MODULE="$CUSTOM"
+          else
+            MODULE="$PRESET"
+          fi
+          # Allow custom override even when preset is set
+          if [ -n "$CUSTOM" ] && [ "$PRESET" = "(custom)" ]; then
+            MODULE="$CUSTOM"
+          fi
+          ;;
+        *)
+          echo "Unknown runMode: $RUN_MODE"
+          exit 1
+          ;;
+      esac
+
+      # Normalize legacy comment prefixes → FX_Modules
+      if [ -n "$MODULE" ]; then
+        MODULE="${MODULE#python -m }"
+        MODULE="${MODULE#Modules.}"
+        MODULE="${MODULE#FX.Modules.}"
+        case "$MODULE" in
+          FX_Modules.*) ;;
+          *) MODULE="FX_Modules.${MODULE}" ;;
+        esac
+      fi
+
+      echo "=================================================="
+      echo " 🎭 PLAYWRIGHT UI CONFIGURATION"
+      echo "=================================================="
+      echo "Mode:       $RUN_MODE"
+      echo "Base URL:   ${{ parameters.baseUrl }}"
+      echo "Module:     ${MODULE:-(list only)}"
+      echo "Headless:   ${{ parameters.headless }}"
+      echo "Screenshot: ${{ parameters.screenshot }}"
+      echo "Video:      ${{ parameters.videoCapture }}"
+      echo "Azure UI:   ${{ parameters.azureReport }} / target=UI"
+      echo "=================================================="
+
+      case "$RUN_MODE" in
+        listModules)
+          echo "Discovering Module_*.py under FX_Modules/ ..."
+          find FX_Modules -type f -name 'Module_*.py' | sort | while read -r f; do
+            p="${f%.py}"
+            p="${p//\//.}"
+            echo "  python -m $p"
+          done
+          ;;
+        masterSuite|singleModule)
+          if [ -z "$MODULE" ]; then
+            echo "❌ No module resolved. Set modulePreset or customModule."
+            exit 1
+          fi
+          echo "→ python -m $MODULE"
+          python -m "$MODULE"
+          ;;
+      esac
+    displayName: 'Run Playwright module'
+    env:
+      CI: 'true'
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      AZURE_DEVOPS_PROJECT: $(AZURE_DEVOPS_PROJECT)
+      AZURE_TEST_PLAN_ID: ${{ parameters.testPlanId }}
+      AZURE_TEST_PLAN_NAME: ${{ parameters.testPlanName }}
+      AZURE_TEST_PLAN_TARGET: 'UI'
+      AZURE_VERIFY_SSL: false
+
+  # ── 5. Publish logs ──────────────────────────────────────────
+  - task: PublishBuildArtifacts@1
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishLogs }}', true), ne('${{ parameters.runMode }}', 'listModules'))
+    inputs:
+      PathtoPublish: '$(projectDir)/Log_Reports'
+      ArtifactName: 'Log_Reports'
+      publishLocation: 'Container'
+    displayName: 'Publish Log_Reports artifact'
+    continueOnError: true
+
+  # ── 6. Publish videos / screenshots ──────────────────────────
+  - task: PublishBuildArtifacts@1
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishMedia }}', true), ne('${{ parameters.runMode }}', 'listModules'))
+    inputs:
+      PathtoPublish: '$(projectDir)/Video_and_ScreenShot_Reports'
+      ArtifactName: 'Video_and_ScreenShot_Reports'
+      publishLocation: 'Container'
+    displayName: 'Publish media artifact'
+    continueOnError: true
