@@ -432,14 +432,24 @@ steps:
       AZURE_VERIFY_SSL: false
 
   # ── 5. Publish logs ──────────────────────────────────────────
-  - task: PublishBuildArtifacts@1
-    condition: and(succeededOrFailed(), eq('${{ parameters.publishLogs }}', true), ne('${{ parameters.runMode }}', 'listModules'))
+  # - task: PublishBuildArtifacts@1
+  #   condition: and(succeededOrFailed(), eq('${{ parameters.publishLogs }}', true), ne('${{ parameters.runMode }}', 'listModules'))
+  #   inputs:
+  #     PathtoPublish: '$(projectDir)/Log_Reports'
+  #     ArtifactName: 'Log_Reports'
+  #     publishLocation: 'Container'
+  #   displayName: 'Publish Log_Reports artifact'
+  #   continueOnError: true
+  - task: PublishTestResults@2
+    condition: always()
     inputs:
-      PathtoPublish: '$(projectDir)/Log_Reports'
-      ArtifactName: 'Log_Reports'
-      publishLocation: 'Container'
-    displayName: 'Publish Log_Reports artifact'
-    continueOnError: true
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '**/test-results.xml'
+      searchFolder: '$(projectDir)/Log_Reports'
+      mergeTestResults: true
+      failTaskOnFailedTests: false
+      testRunTitle: 'Playwright Tests - ${{ parameters.modulePreset }}'
+    displayName: '📤 Publish test results to Azure DevOps'
 
   # ── 6. Publish videos / screenshots ──────────────────────────
   - task: PublishBuildArtifacts@1
