@@ -292,7 +292,7 @@ steps:
       if [ -f "/opt/playwright-browsers-v1234.tar.gz" ]; then
         echo "📦 Extracting from cache..."
         mkdir -p $(PLAYWRIGHT_BROWSERS_PATH)
-        tar -xzf /opt/playwright-browsers-v1234.tar.gz -C $(PLAYWRIGHT_BROWSERS_PATH)
+        tar -xzf /opt/playwright-browsers-v1234.tar.gz -C $(PLAYWRIGHT_BROWSERS_PATH) --strip-components=1
         echo "✅ Done"
       else
         echo "⬇️ No cache found, downloading..."
