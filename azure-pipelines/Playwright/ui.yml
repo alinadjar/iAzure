@@ -304,12 +304,12 @@ steps:
       
       # Try different archive locations
       ARCHIVE_PATH=""
-      if [ -f "/opt/playwright-browsers-rev-${EXPECTED_REVISION}.tar.gz" ]; then
-        ARCHIVE_PATH="/opt/playwright-browsers-rev-${EXPECTED_REVISION}.tar.gz"
+      if [ -f "/opt/playwright-browsers-v${EXPECTED_REVISION}.tar.gz" ]; then
+        ARCHIVE_PATH="/opt/playwright-browsers-v${EXPECTED_REVISION}.tar.gz"
       elif [ -f "/opt/playwright-browsers-${PLAYWRIGHT_VERSION}.tar.gz" ]; then
         ARCHIVE_PATH="/opt/playwright-browsers-${PLAYWRIGHT_VERSION}.tar.gz"
-      elif [ -f "/opt/playwright-browsers.tar.gz" ]; then
-        ARCHIVE_PATH="/opt/playwright-browsers.tar.gz"
+      elif [ -f "/opt/playwright-browsers-v1234.tar.gz" ]; then
+        ARCHIVE_PATH="/opt/playwright-browsers-v1234.tar.gz"
       else
         echo "❌ No browser archive found!"
         echo "Checked:"
