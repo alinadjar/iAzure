@@ -217,47 +217,81 @@ steps:
   - script: |
       set -euo pipefail
       cd "$(projectDir)"
-
-      python3 --version
-      python3 -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version"
-
-      rm -rf venv
+      
+      # ── Use prebuilt venv if available ──────────────────────────
       if [ -d "/opt/uivenv" ]; then
-        echo "✅ Preferring prebuilt venv from /opt/uivenv (copy → ./venv)"
-        mkdir -p venv
+        echo "✅ Using prebuilt venv from /opt/uivenv"
+        rm -rf venv
         cp -a /opt/uivenv/. ./venv/
       else
-        echo "⚠️ /opt/uivenv not found — creating fresh venv"
+        echo "⚠️ Creating fresh venv"
         python3 -m venv venv
       fi
-
-      VENV_PY="$(pwd)/venv/bin/python"
-      test -x "$VENV_PY"
-      # shellcheck disable=SC1091
+      
+      # ── Activate ─────────────────────────────────────────────────
       source ./venv/bin/activate
       hash -r
+      pip list
+      
+      # ── Install missing packages (if any) ──────────────────────
+      # echo "📦 Ensuring required packages..."
+      # pip install --upgrade pip --quiet
+      # pip install \
+      #   'playwright>=1.40' \
+      #   'python-dotenv>=1.0.0' \
+      #   'pytest>=7.4' \
+      #   'requests>=2.31' \
+      #   'azure-devops>=7.1.0b4' \
+      #   'jdatetime' \
+      #   'redis>=5.0.0' \
+      #   --quiet
+      
+      # ── Verify ──────────────────────────────────────────────────
+      python -c "import playwright; print('✅ Playwright OK')"
+      
+      # ── Set variables ────────────────────────────────────────────
+      echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(pwd)/venv/bin/activate"
+      echo "##vso[task.setvariable variable=VENV_PYTHON]$(pwd)/venv/bin/python"
+      
+      echo "✅ Python environment ready"
+    displayName: 'Setup Python'
 
-      echo "Python: $(command -v python)"
-      echo "VENV_PY: $VENV_PY"
-      "$VENV_PY" -c "import sys; print('prefix:', sys.prefix); print('version:', sys.version)"
-
-      "$VENV_PY" -m pip install --upgrade pip
-      # UI stack (no dedicated root requirements.txt — install essentials)
-      "$VENV_PY" -m pip install \
-        'playwright>=1.40' \
-        'python-dotenv>=1.0.0' \
-        'pytest>=7.4' \
-        'requests>=2.31' \
-        'azure-devops>=7.1.0b4' \
-        'jdatetime' \
-        'redis>=5.0.0'
-
-      "$VENV_PY" -c "import playwright; print('playwright OK')"
-
-
-      echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(projectDir)/venv/bin/activate"
-      echo "##vso[task.setvariable variable=VENV_PYTHON]$(projectDir)/venv/bin/python"
-    displayName: 'Setup Python 3.12 + Playwright'
+  # - script: |
+  #     set -euo pipefail
+  #     cd "$(projectDir)"
+  #     python3 --version
+  #     python3 -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version
+  #     rm -rf venv
+  #     if [ -d "/opt/uivenv" ]; then
+  #       echo "✅ Preferring prebuilt venv from /opt/uivenv (copy → ./venv)"
+  #       mkdir -p venv
+  #       cp -a /opt/uivenv/. ./venv/
+  #     else
+  #       echo "⚠️ /opt/uivenv not found — creating fresh venv"
+  #       python3 -m venv venv
+  #     fi
+  #     VENV_PY="$(pwd)/venv/bin/python"
+  #     test -x "$VENV_PY"
+  #     # shellcheck disable=SC1091
+  #     source ./venv/bin/activate
+  #     hash -r
+  #     echo "Python: $(command -v python)"
+  #     echo "VENV_PY: $VENV_PY"
+  #     "$VENV_PY" -c "import sys; print('prefix:', sys.prefix); print('version:', sys.version)"
+  #     "$VENV_PY" -m pip install --upgrade pip
+  #     # UI stack (no dedicated root requirements.txt — install essentials)
+  #     "$VENV_PY" -m pip install \
+  #       'playwright>=1.40' \
+  #       'python-dotenv>=1.0.0' \
+  #       'pytest>=7.4' \
+  #       'requests>=2.31' \
+  #       'azure-devops>=7.1.0b4' \
+  #       'jdatetime' \
+  #       'redis>=5.0.0'
+  #     "$VENV_PY" -c "import playwright; print('playwright OK')"
+  #     echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(projectDir)/venv/bin/activate"
+  #     echo "##vso[task.setvariable variable=VENV_PYTHON]$(projectDir)/venv/bin/python"
+  #   displayName: 'Setup Python 3.12 + Playwright'
 
 
   # ── 2.5 Extract Playwright browser (version-aware) ─────────────
