@@ -288,53 +288,17 @@ steps:
       cd $(projectDir)
       source venv/bin/activate
       
-      # Get the revision Playwright expects
-      EXPECTED_REVISION=$(python -c "
-      from playwright._impl._driver import Driver
-      d = Driver()
-      print(d._browser_revision('chromium'))
-      ")
-      PLAYWRIGHT_VERSION=$(python -c "import playwright; print(playwright.__version__)")
-      
-      echo "Playwright version: $PLAYWRIGHT_VERSION"
-      echo "Expected revision: $EXPECTED_REVISION"
-      
-      BROWSER_CACHE_DIR="$(PLAYWRIGHT_BROWSERS_PATH)"
-      CHROMIUM_DIR="$BROWSER_CACHE_DIR/chromium-$EXPECTED_REVISION"
-      
-      # Try different archive locations
-      ARCHIVE_PATH=""
-      if [ -f "/opt/playwright-browsers-v${EXPECTED_REVISION}.tar.gz" ]; then
-        ARCHIVE_PATH="/opt/playwright-browsers-v${EXPECTED_REVISION}.tar.gz"
-      elif [ -f "/opt/playwright-browsers-${PLAYWRIGHT_VERSION}.tar.gz" ]; then
-        ARCHIVE_PATH="/opt/playwright-browsers-${PLAYWRIGHT_VERSION}.tar.gz"
-      elif [ -f "/opt/playwright-browsers-v1234.tar.gz" ]; then
-        ARCHIVE_PATH="/opt/playwright-browsers-v1234.tar.gz"
+      # Extract from archive or download
+      if [ -f "/opt/playwright-browsers-v1234.tar.gz" ]; then
+        echo "📦 Extracting from cache..."
+        mkdir -p $(PLAYWRIGHT_BROWSERS_PATH)
+        tar -xzf /opt/playwright-browsers-v1234.tar.gz -C $(PLAYWRIGHT_BROWSERS_PATH)
+        echo "✅ Done"
       else
-        echo "❌ No browser archive found!"
-        echo "Checked:"
-        echo "  - /opt/playwright-browsers-rev-${EXPECTED_REVISION}.tar.gz"
-        echo "  - /opt/playwright-browsers-${PLAYWRIGHT_VERSION}.tar.gz"
-        echo "  - /opt/playwright-browsers.tar.gz"
-        exit 1
+        echo "⬇️ No cache found, downloading..."
+        python -m playwright install chromium-headless-shell
       fi
-      
-      echo "📦 Using archive: $ARCHIVE_PATH"
-      
-      # Extract
-      rm -rf "$BROWSER_CACHE_DIR"
-      mkdir -p "$BROWSER_CACHE_DIR"
-      
-      tar -xzf "$ARCHIVE_PATH" -C "$(dirname $BROWSER_CACHE_DIR)"
-      
-      if [ -d "$CHROMIUM_DIR" ]; then
-        mkdir -p "$CHROMIUM_DIR/installed"
-        echo "✅ Browser ready at revision $EXPECTED_REVISION"
-      else
-        echo "❌ Extraction failed"
-        exit 1
-      fi
-    displayName: 'Extract Playwright browser from shared cache'
+    displayName: 'Playwright browser setup'
     env:
       PLAYWRIGHT_BROWSERS_PATH: $(PLAYWRIGHT_BROWSERS_PATH)
 
