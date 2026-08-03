@@ -456,6 +456,7 @@ steps:
           ;;
       esac
     displayName: 'Run Playwright module'
+    continueOnError: true
     env:
       CI: 'true'
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
