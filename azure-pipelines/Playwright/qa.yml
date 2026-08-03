@@ -151,6 +151,16 @@ parameters:
       - API
       - UI
 
+  - name: API_REF_COMPANY_BRANCH_NAME
+    displayName: 'شرکت پیش فرض'
+    type: string
+    default: 'پالود پارسیان خیام'
+    values:
+      - 'پالود پارسیان خیام'
+      - 'صنایع غذایی پالودپارسیان خیام'
+
+
+
 variables:
   python.version: '3.12'
   projectName: 'Sadgan.ERP.Playwright'
@@ -345,6 +355,7 @@ steps:
       API_PASSWORD: $(API_PASSWORD)
       API_ADMIN_USERNAME: $(API_ADMIN_USERNAME)
       API_ADMIN_PASSWORD: $(API_ADMIN_PASSWORD)
+      API_REF_COMPANY_BRANCH_NAME: ${{ parameters.API_REF_COMPANY_BRANCH_NAME }}
 
   # ── 4. Evaluation summary from JUnit (artifact + optional Redis) ──
   # Later job: DownloadBuildArtifacts artifactName=evaluation-result
