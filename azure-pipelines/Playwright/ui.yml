@@ -259,29 +259,6 @@ steps:
       echo "##vso[task.setvariable variable=VENV_PYTHON]$(projectDir)/venv/bin/python"
     displayName: 'Setup Python 3.12 + Playwright'
 
-  # - script: |
-  #     cd $(projectDir)
-  #     source venv/bin/activate
-  #     export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-  #     export PLAYWRIGHT_BROWSERS_PATH=$(PLAYWRIGHT_BROWSERS_PATH)
-  #     # Set your local zip path and target revision (from your error, it's 1194)
-  #     LOCAL_CHROMIUM_ZIP="/opt/chromium-linux.zip"
-  #     CHROMIUM_REVISION="1194"
-  #     # Determine cache directory
-  #     BROWSER_CACHE_DIR="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
-  #     CHROMIUM_DIR="$BROWSER_CACHE_DIR/chromium-$CHROMIUM_REVISION"
-  #     # Create directory and extract
-  #     mkdir -p "$CHROMIUM_DIR"
-  #     echo "Extracting Chromium from $LOCAL_CHROMIUM_ZIP to $CHROMIUM_DIR"
-  #     unzip -o "$LOCAL_CHROMIUM_ZIP" -d "$CHROMIUM_DIR"
-  #     # Create marker file so Playwright knows it's installed
-  #     mkdir -p "$CHROMIUM_DIR/installed"
-  #     # Verify
-  #     echo "Playwright version:"
-  #     python3 -m playwright --version
-  #     echo "Chromium installed at: $CHROMIUM_DIR"
-  #     ls -la "$CHROMIUM_DIR"
-  #   displayName: 'Load Playwright browser from cache'
 
   # ── 2.5 Extract Playwright browser (version-aware) ─────────────
   - script: |
@@ -355,7 +332,7 @@ steps:
       echo "✅ Wrote $ENV_FILE (secrets redacted below)"
       grep -E '^(BASE_URL_ERP|HEADLESS|SLOW_MO|SCREENSHOT|VIDEOCAPTURE|AZURE_|USER_COUNT|DEVTOOLS)=' "$ENV_FILE" || true
       test -f "$ENV_FILE"
-    displayName: 'Write ConfigrationFiles/.env.FX'
+    displayName: 'Env Setup'
     env:
       USERNAME_ERP: $(USERNAME_ERP)
       PASSWORD: $(PASSWORD)
