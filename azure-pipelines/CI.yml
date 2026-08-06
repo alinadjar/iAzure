@@ -23,8 +23,8 @@ parameters:
   values:
     - 'dev'
     - 'alpha'
-    - 'beta'
-    - 'master'
+    # - 'beta'
+    # - 'master'
 
 
 variables:
