@@ -26,7 +26,7 @@ parameters:
   - name: branch
     displayName: 'Git branch to clone'
     type: string
-    default: 'pipe'
+    default: 'pipe_api'
 
   # ── Run mode ─────────────────────────────────────────────────
   - name: runMode
