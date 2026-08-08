@@ -254,7 +254,7 @@ steps:
       export API_BASE_URL="${{ parameters.baseUrl }}"
       export VERIFY_SSL="${VERIFY_SSL:-false}"
 
-      RUN_MODE="${{ parameters.runMode }}"
+      RUN_MODE="$(echo "${{ parameters.runMode }}" | xargs)"
       FEATURE="${{ parameters.featureMarker }}"
       TAG="${{ parameters.tagMarker }}"
       CUSTOM_MARKER="${{ parameters.markerExpression }}"
@@ -270,6 +270,12 @@ steps:
       [ "$KEYWORD" = "(none)" ] && KEYWORD=""
       CUSTOM_MARKER="$(echo "$CUSTOM_MARKER" | xargs)"   # trim
       KEYWORD="$(echo "$KEYWORD" | xargs)"
+
+      # Plugin auto-syncs when AZURE_TEST_SYNC_ENABLED=true. Keep it false here:
+      # - run:        no sync
+      # - syncAndRun: explicit `python -m integrations.azure_test_sync` below (once)
+      # - azureSyncOnly: uses pytest --azure-sync-only (ignores this flag)
+      export AZURE_TEST_SYNC_ENABLED=false
 
       # Plan selection: '(none)' → empty → auto-select by target
       if [ "${AZURE_TEST_PLAN_ID:-}" = "(none)" ]; then export AZURE_TEST_PLAN_ID=""; fi
@@ -310,7 +316,8 @@ steps:
       echo "Path:      ${TEST_PATH:-(all)}"
       echo "Keyword:   ${KEYWORD:-(none)}"
       echo "Verbose:   $VERBOSE"
-      echo "Azure sync/report via env flags"
+      echo "Sync:      $AZURE_TEST_SYNC_ENABLED"
+      echo "Report:    ${AZURE_TEST_REPORT_ENABLED:-}"
       echo "=================================================="
 
       case "$RUN_MODE" in
@@ -329,11 +336,11 @@ steps:
           pytest "${PYTEST_ARGS[@]}" --junitxml=test-results.xml
           ;;
         run)
-          echo "→ pytest ${PYTEST_ARGS[*]:-} --junitxml=test-results.xml"
+          echo "→ pytest ${PYTEST_ARGS[*]:-} --junitxml=test-results.xml  (no Azure sync)"
           pytest "${PYTEST_ARGS[@]}" --junitxml=test-results.xml
           ;;
         *)
-          echo "Unknown runMode: $RUN_MODE"
+          echo "Unknown runMode: '$RUN_MODE'"
           exit 1
           ;;
       esac
@@ -341,7 +348,9 @@ steps:
     env:
       CI: 'true'
       SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-      AZURE_TEST_SYNC_ENABLED: 'true'
+      # Default false; script overrides to true only for syncAndRun / azureSyncOnly.
+      # Hardcoding 'true' made 'run' behave like syncAndRun (plugin auto-sync).
+      AZURE_TEST_SYNC_ENABLED: 'false'
       AZURE_TEST_REPORT_ENABLED: ${{ parameters.azureReport }}
       AZURE_DEVOPS_URL: $(AZURE_DEVOPS_URL)
       AZURE_DEVOPS_PROJECT: $(AZURE_DEVOPS_PROJECT)
