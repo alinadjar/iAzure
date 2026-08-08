@@ -34,7 +34,7 @@ parameters:
     values:
       - singleModule   # python -m FX_Modules....Module_X
       - masterSuite    # python -m FX_Modules.Master_Tests (Order.json)
-      - listModules    # discover Module_*.py paths (no browser)
+      # - listModules    # discover Module_*.py paths (no browser)
 
   # ── Module selection  ───────────────────────────
   # Comments in older files say Modules.* / FX.Modules.* — runtime import is FX_Modules.*
