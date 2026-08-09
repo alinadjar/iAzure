@@ -59,15 +59,17 @@ steps:
       ASSEMBLY="$VERSION"
       IFS='.-' read -r _MAJOR _MINOR _PATCH _PRE _BN <<< "${ASSEMBLY#v}"
       ASSEMBLY_4Segment="$_MAJOR.$_MINOR.$_PATCH.$_BN"
-      redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
-      # redis-cli -h  "$(REDIS_HOST)" -p 6379   GET v_one:version | jq .
+
+      # TTL 30 days
+      redis-cli -h  "$(REDIS_HOST)"" -p 6379   SET  fx:"$ASSEMBLY_4Segment":qa "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"publish_dt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"vote\":\"pending\"}" EX 2592000
+
+      # redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+      # # redis-cli -h  "$(REDIS_HOST)" -p 6379   GET v_one:version | jq .
+      # echo "curling https://get.sadgan.com/releases/fx:"
+      # curl -fsSL https://get.sadgan.com/releases/fx | jq .
 
 
-      echo "curling https://get.sadgan.com/releases/fx:"
-      curl -fsSL https://get.sadgan.com/releases/fx | jq .
-
-
-       # Store curl response and exit code
+       # Mattermost Notif
       dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
       response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/8bba3a01-1710-4268-b54b-10cdab8f8437' \
         --header 'Content-Type: application/json' \
