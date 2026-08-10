@@ -1,5 +1,5 @@
 pool:
-  name: "CI176"
+  name: "QA_FX"
 
 parameters:
   - name: assembly
@@ -51,7 +51,7 @@ steps:
         fi
         
         REDIS_KEY="fx:${ASSEMBLY}:qa"
-        REDIS_PORT="6376"
+        REDIS_PORT="6379"
         VOTE="${{ parameters.vote }}"
         PASS_RATE="${{ parameters.pass_rate }}"
         COMMENTS="${{ parameters.comments }}"
