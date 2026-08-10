@@ -405,21 +405,9 @@ steps:
         PASS_RATE=$(jq -r '.results.passRate * 100 | floor' evaluation-result/evaluation-result.json)
 
         # Build Redis key (using fx:xxxx:qa format)
-        REDIS_KEY="fx:$ASSEMBLY:qa"
+        REDIS_KEY="fx:${ASSEMBLY:-latest}:qa"
 
-        echo "🔑 Redis Key: $REDIS_KEY"
-        echo "📊 Data to store:"
-        echo "  baseUrl: $BASE_URL"
-        echo "  tests: $TESTS"
-        echo "  passed: $PASSED"
-        echo "  failures: $FAILURES"
-        echo "  errors: $ERRORS"
-        echo "  skipped: $SKIPPED"
-        echo "  timeSeconds: $TIME_SECONDS"
-        echo "  passRate: $PASS_RATE%"
-
-        # Store using redis-cli with HMSET (for hash) or SET for JSON string
-        # Option 1: Store as JSON string
+        # Create JSON string with only the fields we want
         JSON_DATA=$(jq -n \
           --arg baseUrl "$BASE_URL" \
           --arg tests "$TESTS" \
@@ -440,42 +428,27 @@ steps:
             passRate: $passRate
           }')
 
-        # Check if key exists
-        KEY_EXISTS=$(redis-cli -u "$REDIS_URL" EXISTS "$REDIS_KEY" | tr -d '\r\n')
+        echo "🔑 Redis Key: $REDIS_KEY"
+        echo "📊 Data to store:"
+        echo "$JSON_DATA" | jq '.'
 
-        if [ "$KEY_EXISTS" = "1" ]; then
-          echo "⚠️  Key '$REDIS_KEY' exists, appending..."
-          # For existing key, we'll use JSON to update
-          redis-cli -u "$REDIS_URL" JSON.SET "$REDIS_KEY" "$JSON_DATA"
-          echo "✅ Updated existing key: $REDIS_KEY"
-        else
-          echo "✨ Key '$REDIS_KEY' doesn't exist, creating..."
-          redis-cli -u "$REDIS_URL" JSON.SET "$REDIS_KEY" "$JSON_DATA"
-          echo "✅ Created new key: $REDIS_KEY"
-        fi
+        # Store as string using SET (simple and works everywhere)
+        redis-cli -u "$REDIS_URL" SET "$REDIS_KEY" "$JSON_DATA"
+        echo "✅ Stored data in Redis key: $REDIS_KEY"
 
-        # Option 2: Store as hash fields (alternative)
-        # redis-cli -u "$REDIS_URL" HMSET "$REDIS_KEY" \
-        #   baseUrl "$BASE_URL" \
-        #   tests "$TESTS" \
-        #   passed "$PASSED" \
-        #   failures "$FAILURES" \
-        #   errors "$ERRORS" \
-        #   skipped "$SKIPPED" \
-        #   timeSeconds "$TIME_SECONDS" \
-        #   passRate "$PASS_RATE"
-
-        # Verify stored data
-        echo "🔍 Verifying stored data:"
-        redis-cli -u "$REDIS_URL" JSON.GET "$REDIS_KEY"
-
-        # Also store latest reference
+        # Also store latest reference (just the key name)
         LATEST_KEY="fx:latest:qa"
         redis-cli -u "$REDIS_URL" SET "$LATEST_KEY" "$REDIS_KEY"
         echo "✅ Updated latest reference: $LATEST_KEY → $REDIS_KEY"
 
-        # Set TTL if needed (optional)
+        # Verify stored data
+        echo "🔍 Verifying stored data:"
+        redis-cli -u "$REDIS_URL" GET "$REDIS_KEY" | jq '.'
+
+        # Set TTL if needed (optional - 86400 seconds = 24 hours)
         # redis-cli -u "$REDIS_URL" EXPIRE "$REDIS_KEY" 86400
+        
+        echo "✅ Redis update completed successfully"
       else
         echo "⚠️  Skipping Redis update (REDIS_URL not set or JSON file missing)"
       fi
