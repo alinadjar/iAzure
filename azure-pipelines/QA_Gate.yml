@@ -52,6 +52,7 @@ steps:
         
         REDIS_KEY="fx:${ASSEMBLY}:qa"
         REDIS_PORT="6379"
+        export REDISCLI_AUTH="$(REDIS_PASSWORD)"
         VOTE="${{ parameters.vote }}"
         PASS_RATE="${{ parameters.pass_rate }}"
         COMMENTS="${{ parameters.comments }}"
