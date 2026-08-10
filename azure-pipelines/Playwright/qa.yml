@@ -23,6 +23,11 @@ parameters:
       - 'https://stage.api.fx.sadgan.int'
       - 'http://dev.api.fx.sadgan.int'
 
+  - name: assembly
+    displayName: 'Enter Assembly Version'
+    default: '0.0.0.0'
+    type: string
+
   - name: branch
     displayName: 'Git branch to clone'
     type: string
@@ -378,12 +383,102 @@ steps:
       mkdir -p evaluation-result
       python -m integrations.evaluation_summary \
         --junit test-results.xml \
-        --out evaluation-result/evaluation-result.json
+        --out evaluation-result/evaluation-result.json --skip-redis
 
       cp -f test-results.xml evaluation-result/test-results.xml
       echo "evaluation-result contents:"
       ls -la evaluation-result
-      cat evaluation-result/evaluation-result.json
+      # cat evaluation-result/evaluation-result.json
+
+      # ── Redis: Read JSON and store selected fields ──
+      if [ -n "${REDIS_URL:-}" ] && [ -f "evaluation-result/evaluation-result.json" ]; then
+        echo "📦 Processing evaluation-result.json for Redis..."
+
+        # Extract required fields using jq
+        BASE_URL=$(jq -r '.run.baseUrl' evaluation-result/evaluation-result.json)
+        TESTS=$(jq -r '.results.tests' evaluation-result/evaluation-result.json)
+        PASSED=$(jq -r '.results.passed' evaluation-result/evaluation-result.json)
+        FAILURES=$(jq -r '.results.failures' evaluation-result/evaluation-result.json)
+        ERRORS=$(jq -r '.results.errors' evaluation-result/evaluation-result.json)
+        SKIPPED=$(jq -r '.results.skipped' evaluation-result/evaluation-result.json)
+        TIME_SECONDS=$(jq -r '.results.timeSeconds' evaluation-result/evaluation-result.json)
+        PASS_RATE=$(jq -r '.results.passRate * 100 | floor' evaluation-result/evaluation-result.json)
+
+        # Build Redis key (using fx:xxxx:qa format)
+        REDIS_KEY="fx:$ASSEMBLY:qa"
+
+        echo "🔑 Redis Key: $REDIS_KEY"
+        echo "📊 Data to store:"
+        echo "  baseUrl: $BASE_URL"
+        echo "  tests: $TESTS"
+        echo "  passed: $PASSED"
+        echo "  failures: $FAILURES"
+        echo "  errors: $ERRORS"
+        echo "  skipped: $SKIPPED"
+        echo "  timeSeconds: $TIME_SECONDS"
+        echo "  passRate: $PASS_RATE%"
+
+        # Store using redis-cli with HMSET (for hash) or SET for JSON string
+        # Option 1: Store as JSON string
+        JSON_DATA=$(jq -n \
+          --arg baseUrl "$BASE_URL" \
+          --arg tests "$TESTS" \
+          --arg passed "$PASSED" \
+          --arg failures "$FAILURES" \
+          --arg errors "$ERRORS" \
+          --arg skipped "$SKIPPED" \
+          --arg timeSeconds "$TIME_SECONDS" \
+          --arg passRate "$PASS_RATE" \
+          '{
+            baseUrl: $baseUrl,
+            tests: $tests,
+            passed: $passed,
+            failures: $failures,
+            errors: $errors,
+            skipped: $skipped,
+            timeSeconds: $timeSeconds,
+            passRate: $passRate
+          }')
+
+        # Check if key exists
+        KEY_EXISTS=$(redis-cli -u "$REDIS_URL" EXISTS "$REDIS_KEY" | tr -d '\r\n')
+
+        if [ "$KEY_EXISTS" = "1" ]; then
+          echo "⚠️  Key '$REDIS_KEY' exists, appending..."
+          # For existing key, we'll use JSON to update
+          redis-cli -u "$REDIS_URL" JSON.SET "$REDIS_KEY" "$JSON_DATA"
+          echo "✅ Updated existing key: $REDIS_KEY"
+        else
+          echo "✨ Key '$REDIS_KEY' doesn't exist, creating..."
+          redis-cli -u "$REDIS_URL" JSON.SET "$REDIS_KEY" "$JSON_DATA"
+          echo "✅ Created new key: $REDIS_KEY"
+        fi
+
+        # Option 2: Store as hash fields (alternative)
+        # redis-cli -u "$REDIS_URL" HMSET "$REDIS_KEY" \
+        #   baseUrl "$BASE_URL" \
+        #   tests "$TESTS" \
+        #   passed "$PASSED" \
+        #   failures "$FAILURES" \
+        #   errors "$ERRORS" \
+        #   skipped "$SKIPPED" \
+        #   timeSeconds "$TIME_SECONDS" \
+        #   passRate "$PASS_RATE"
+
+        # Verify stored data
+        echo "🔍 Verifying stored data:"
+        redis-cli -u "$REDIS_URL" JSON.GET "$REDIS_KEY"
+
+        # Also store latest reference
+        LATEST_KEY="fx:latest:qa"
+        redis-cli -u "$REDIS_URL" SET "$LATEST_KEY" "$REDIS_KEY"
+        echo "✅ Updated latest reference: $LATEST_KEY → $REDIS_KEY"
+
+        # Set TTL if needed (optional)
+        # redis-cli -u "$REDIS_URL" EXPIRE "$REDIS_KEY" 86400
+      else
+        echo "⚠️  Skipping Redis update (REDIS_URL not set or JSON file missing)"
+      fi
     displayName: 'Write evaluation-result (JSON + Redis)'
     condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     env:
@@ -399,6 +494,7 @@ steps:
       API_BASE_URL: ${{ parameters.baseUrl }}
       AZURE_TEST_PLAN_ID: ${{ parameters.testPlanId }}
       AZURE_TEST_PLAN_TARGET: ${{ parameters.testPlanTarget }}
+      ASSEMBLY: ${{ parameters.assembly }}
 
   - task: PublishBuildArtifacts@1
     condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
