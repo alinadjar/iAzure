@@ -1,0 +1,278 @@
+pool:
+  name: "CI176"
+
+parameters:
+  - name: assembly
+    displayName: 'select version assembly:'
+    type: string
+    default: '0.0.0.0'
+    
+  - name: vote
+    displayName: 'Vote Decision'
+    type: string
+    default: 'APPROVED'
+    values:
+      - APPROVED
+      - REJECTED
+  
+  - name: pass_rate
+    displayName: 'Pass Rate (%)'
+    type: number
+    default: 0
+  
+  - name: comments
+    displayName: 'Additional Comments'
+    type: string
+    default: '-'
+
+steps:
+  - checkout: none
+
+  - task: Bash@3
+    displayName: 'QA Decision'
+    env:
+      ASSEMBLY: ${{ parameters.assembly }}
+    inputs:
+      targetType: 'inline'
+      script: |
+        #!/bin/bash
+        
+        set -e
+        
+        echo "===================================="
+        echo "    QA PIPELINE - REDIS PROCESSING   "
+        echo "===================================="
+        
+        # Validate inputs
+        if [ -z "$ASSEMBLY" ]; then
+            echo "❌ Error: ASSEMBLY environment variable is required"
+            echo "   Set this in your pipeline or pass as parameter"
+            exit 1
+        fi
+        
+        REDIS_KEY="fx:${ASSEMBLY}:qa"
+        REDIS_PORT="6376"
+        VOTE="${{ parameters.vote }}"
+        PASS_RATE="${{ parameters.pass_rate }}"
+        COMMENTS="${{ parameters.comments }}"
+        
+        echo "📋 Configuration:"
+        echo "   Assembly: ${ASSEMBLY}"
+        echo "   Redis Key: ${REDIS_KEY}"
+        echo "   Vote: ${VOTE}"
+        echo "   Pass Rate: ${PASS_RATE}%"
+        echo "   Comments: ${COMMENTS:-None}"
+        echo ""
+        
+        # Read from Redis
+        echo "🔍 Fetching current record from Redis..."
+        CURRENT_VALUE=$(redis-cli -h "$(REDIS_HOST)" -p "$REDIS_PORT" GET "$REDIS_KEY" 2>/dev/null)
+        
+        if [ -z "$CURRENT_VALUE" ] || [ "$CURRENT_VALUE" = "(nil)" ] || [ "$CURRENT_VALUE" = "null" ]; then
+            echo "❌ No record found for ${REDIS_KEY}"
+            echo "   The record may have expired or not been created yet."
+            echo ""
+            echo "📋 Available keys in Redis:"
+            redis-cli -h "$(REDIS_HOST)" -p "$REDIS_PORT" KEYS "fx:*" | head -10
+            exit 1
+        fi
+        
+        echo "✅ Current record found:"
+        echo "$CURRENT_VALUE" | jq '.' 2>/dev/null || echo "$CURRENT_VALUE"
+        echo ""
+        
+        # Get user information
+        USER="${BUILD_REQUESTEDFOR}"
+        if [ -z "$USER" ]; then
+            USER="${BUILD_QUEUEDBY}"
+        fi
+        if [ -z "$USER" ]; then
+            USER="${AGENT_NAME:-unknown-user}"
+        fi
+        # Clean up username
+        USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//' | sed 's/ .*//')
+        
+        
+        # Timestamps
+        CONFIRM_DT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        
+        echo "👤 User: $USER"
+        echo "📅 Confirm Date: $CONFIRM_DT"
+        echo ""
+        
+        # Extract publish_dt from current JSON
+        PUBLISH_DT=$(echo "$CURRENT_VALUE" | jq -r '.publish_dt' 2>/dev/null)
+        DOCKER_TAG=$(echo "$CURRENT_VALUE" | jq -r '.tag' 2>/dev/null)
+        
+        if [ -z "$PUBLISH_DT" ] || [ "$PUBLISH_DT" = "null" ]; then
+            echo "⚠️ Warning: publish_dt not found in current record"
+            TIME_DIFF_SECONDS="unknown"
+            TIME_DIFF_HUMAN="unknown"
+        else
+            echo "📅 Publish Date: $PUBLISH_DT"
+            
+            # Calculate time difference in seconds (macOS/Linux compatible)
+            # GNU date (Linux)
+            PUBLISH_EPOCH=$(date -d "$PUBLISH_DT" +%s 2>/dev/null)
+            CONFIRM_EPOCH=$(date -d "$CONFIRM_DT" +%s 2>/dev/null)
+
+            
+            if [ -n "$PUBLISH_EPOCH" ] && [ -n "$CONFIRM_EPOCH" ]; then
+                TIME_DIFF_SECONDS=$((CONFIRM_EPOCH - PUBLISH_EPOCH))
+                
+                # Format the time difference in human-readable format
+                if [ $TIME_DIFF_SECONDS -lt 0 ]; then
+                    TIME_DIFF_SECONDS=$((TIME_DIFF_SECONDS * -1))
+                    TIME_DIFF_HUMAN="negative (confirm before publish)"
+                else
+                    DAYS=$((TIME_DIFF_SECONDS / 86400))
+                    HOURS=$(((TIME_DIFF_SECONDS % 86400) / 3600))
+                    MINUTES=$(((TIME_DIFF_SECONDS % 3600) / 60))
+                    SECONDS=$((TIME_DIFF_SECONDS % 60))
+                    
+                    if [ $DAYS -gt 0 ]; then
+                        TIME_DIFF_HUMAN="${DAYS}d ${HOURS}h ${MINUTES}m ${SECONDS}s"
+                    elif [ $HOURS -gt 0 ]; then
+                        TIME_DIFF_HUMAN="${HOURS}h ${MINUTES}m ${SECONDS}s"
+                    elif [ $MINUTES -gt 0 ]; then
+                        TIME_DIFF_HUMAN="${MINUTES}m ${SECONDS}s"
+                    else
+                        TIME_DIFF_HUMAN="${SECONDS}s"
+                    fi
+                fi
+                
+                echo "⏱️  Time difference: $TIME_DIFF_HUMAN ($TIME_DIFF_SECONDS seconds)"
+            else
+                echo "⚠️ Warning: Could not calculate time difference"
+                TIME_DIFF_SECONDS="unknown"
+                TIME_DIFF_HUMAN="unknown"
+            fi
+        fi
+        echo ""
+        
+        # Validate vote
+        if [[ "$VOTE" != "APPROVED" && "$VOTE" != "REJECTED" ]]; then
+            echo "❌ Invalid vote: $VOTE. Must be APPROVED or REJECTED"
+            exit 1
+        fi
+        
+        # Check if pass_rate is numeric
+        if ! [[ "$PASS_RATE" =~ ^[0-9]+$ ]]; then
+            echo "❌ Pass rate must be a number: $PASS_RATE"
+            exit 1
+        fi
+        
+        # Update JSON with time difference
+        echo "📝 Updating JSON with QA decision and time difference..."
+        UPDATED_JSON=$(echo "$CURRENT_VALUE" | jq \
+          --arg user "$USER" \
+          --arg vote "$VOTE" \
+          --arg confirm_dt "$CONFIRM_DT" \
+          --arg pass_rate "$PASS_RATE" \
+          --arg comments "$COMMENTS" \
+          --arg time_diff_seconds "${TIME_DIFF_SECONDS}" \
+          --arg time_diff_human "${TIME_DIFF_HUMAN}" \
+          '. + {
+            "voted_by": $user,
+            "vote": $vote,
+            "confirm_dt": $confirm_dt,
+            "pass_rate": ($pass_rate | tonumber),
+            "qa_comments": $comments,
+            "qa_processed_at": $confirm_dt,
+            "time_diff_seconds": ($time_diff_seconds | tonumber? // null),
+            "time_diff_human": $time_diff_human
+          }')
+        
+        if [ $? -ne 0 ] || [ -z "$UPDATED_JSON" ]; then
+            echo "❌ Failed to update JSON"
+            exit 1
+        fi
+        
+        echo "✅ Updated JSON:"
+        echo "$UPDATED_JSON" | jq '.'
+        echo ""
+        
+        # Save to Redis (preserve TTL)
+        echo "💾 Saving to Redis..."
+        redis-cli -h "$(REDIS_HOST)" -p "$REDIS_PORT" SET "$REDIS_KEY" "$UPDATED_JSON"
+        
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ Successfully saved to Redis"
+            
+            # Verify TTL
+            TTL=$(redis-cli -h "$(REDIS_HOST)" -p "$REDIS_PORT" TTL "$REDIS_KEY" 2>/dev/null)
+            if [ "$TTL" -gt 0 ]; then
+                echo "⏰ TTL: $TTL seconds ($((TTL / 86400)) days remaining)"
+            fi
+            
+            # Display final record
+            echo ""
+            echo "📊 FINAL QA RECORD:"
+            redis-cli -h "$(REDIS_HOST)" -p "$REDIS_PORT" GET "$REDIS_KEY" | jq '.'
+            echo ""
+            
+            # # Export variables for pipeline
+            # echo "##vso[task.setvariable variable=QA_USER]$USER"
+            # echo "##vso[task.setvariable variable=QA_VOTE]$VOTE"
+            # echo "##vso[task.setvariable variable=QA_CONFIRM_DT]$CONFIRM_DT"
+            # echo "##vso[task.setvariable variable=QA_PASS_RATE]$PASS_RATE"
+
+            if [ "$VOTE" = "APPROVED" ]; then
+                redis-cli -h  "$(REDIS_HOST)" -p "$REDIS_PORT"   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+                # redis-cli -h  "$(REDIS_HOST)" -p "$REDIS_PORT"   GET fx:version | jq .
+                echo "curling https://get.sadgan.com/releases/fx:"
+                curl -fsSL https://get.sadgan.com/releases/fx | jq .
+
+                 # Mattermost Notif
+                dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
+                response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
+                  --header 'Content-Type: application/json' \
+                  --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
+                  --data '{
+                      "ERP": "FX",
+                      "tag": "'"$DOCKER_TAG"'",
+                      "assembly": "'"$ASSEMBLY"'",
+                      "vote": "'"$VOTE"'",
+                      "voted_by": "'"$USER"'",
+                      "pass_rate": "'"$PASS_RATE"'",
+                      "confirm_dt": "'"$CONFIRM_DT"'",
+                      "publish_dt": "'"$PUBLISH_DT"'",
+                      "qa_comments": "'"$COMMENTS"'",
+                      "time_diff_seconds": "'"$TIME_DIFF_SECONDS"'",
+                      "time_diff_human": "'"$TIME_DIFF_HUMAN"'"
+                  }' 2>&1) || true
+                
+                # Extract HTTP status code (last line)
+                http_code=$(echo "$response" | tail -n1)
+                response_body=$(echo "$response" | sed '$d')
+                
+                # Log the result
+                if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+                  echo "✅ Notification sent successfully (HTTP $http_code)"
+                else
+                  echo "⚠️ Failed to send notification (HTTP $http_code)"
+                  echo "Response: $response_body"
+                  echo "Continuing pipeline execution..."
+                fi
+            fi
+
+            
+            # Determine pipeline outcome
+            if [ "$VOTE" = "APPROVED" ] && [ "$PASS_RATE" -ge 80 ]; then
+                echo "✅✅✅ QA APPROVED with ${PASS_RATE}% pass rate!"
+                echo "⏱️  Time from publish to approval: $TIME_DIFF_HUMAN"
+                echo "##vso[task.setvariable variable=QA_PASSED]true"
+                exit 0
+            else
+                if [ "$VOTE" = "REJECTED" ]; then
+                    echo "❌❌❌ QA REJECTED by $USER!"
+                    echo "⏱️  Time from publish to rejection: $TIME_DIFF_HUMAN"
+                else
+                    echo "⚠️ Pass rate ${PASS_RATE}% below threshold (80%)"
+                fi
+            fi
+        else
+            echo "❌ Failed to save to Redis"
+            exit 1
+        fi
