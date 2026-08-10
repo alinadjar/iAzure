@@ -16,7 +16,7 @@ parameters:
       - REJECTED
   
   - name: pass_rate
-    displayName: 'Pass Rate (%)'
+    displayName: 'Overall Pass Rate (%)'
     type: number
     default: 0
   
