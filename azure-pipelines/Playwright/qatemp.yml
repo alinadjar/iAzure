@@ -1,0 +1,508 @@
+# Self-hosted Azure DevOps Server — API pytest pipeline
+# Working dir: pytest/api
+# Agent pool must have Python 3.12 (+ optional /opt/qavenv prebuilt venv)
+
+trigger:
+  branches:
+    include:
+      - pipe
+
+pr: none
+
+pool:
+  name: 'Playwright_FX'
+
+parameters:
+  # ── Environment ──────────────────────────────────────────────
+  - name: baseUrl
+    displayName: 'API Base URL'
+    type: string
+    default: 'https://alpha.api.fx.sadgan.int'
+    values:
+      - 'https://alpha.api.fx.sadgan.int'
+      - 'https://stage.api.fx.sadgan.int'
+      - 'http://dev.api.fx.sadgan.int'
+
+  - name: assembly
+    displayName: 'Enter Assembly Version'
+    default: '0.0.0.0'
+    type: string
+
+  - name: branch
+    displayName: 'Git branch to clone'
+    type: string
+    default: 'pipe_api'
+
+  # ── Run mode ─────────────────────────────────────────────────
+  - name: runMode
+    displayName: 'Run mode'
+    type: string
+    default: 'syncAndRun'
+    values:
+      - syncAndRun        # python -m integrations.azure_test_sync && pytest
+      - run               # pytest only (no pre-sync step)
+      - collectOnly       # pytest --collect-only -q
+      - azureSyncOnly     # pytest --azure-sync-only
+
+  # ── Feature marker (-m) ──────────────────────────────────────
+  - name: featureMarker
+    displayName: 'Feature marker (-m)  |  e.g. bank, auth'
+    type: string
+    default: '(all)'
+    values:
+      - '(all)'
+      - bank
+      - auth
+      - receipt_payment_forms
+      - receipt_entry_forms
+      - payment_entry_forms
+      - stock_issues
+      - stock_entries
+      - sales_invoices
+      - purchase_invoices
+
+  # ── CSV / tag marker (-m) ────────────────────────────────────
+  - name: tagMarker
+    displayName: 'Tag marker (-m)  |  e.g. happy-path, validation'
+    type: string
+    default: '(all)'
+    values:
+      - '(all)'
+      - happy-path
+      - validation
+      - create
+      - get
+      - update
+      - delete
+      - paginated
+      - login
+
+  # ── Custom marker expression (overrides feature + tag) ───────
+  # Use '(none)' — empty default '' is treated as required by Azure DevOps UI
+  - name: markerExpression
+    displayName: 'Custom -m expression (overrides feature/tag)  |  (none) = skip'
+    type: string
+    default: '(none)'
+    # Examples (replace (none)):
+    #   receipt_payment_forms and happy-path
+    #   auth and validation
+    #   bank and create
+    #   happy-path and not validation
+
+  # ── Folder path ──────────────────────────────────────────────
+  - name: testPath
+    displayName: 'Test folder (relative to pytest/api)'
+    type: string
+    default: '(all)'
+    values:
+      - '(all)'
+      - tests/auth/
+      - tests/bank/
+      - tests/payment_entry_forms/
+      - tests/receipt_entry_forms/
+      - tests/receipt_payment_forms/
+      - tests/stock_issues/
+      - tests/stock_entries/
+      - tests/sales_invoices/
+      - tests/purchase_invoices/
+
+  # ── Scenario name filter (-k) ────────────────────────────────
+  # Use '(none)' — empty default '' is treated as required by Azure DevOps UI
+  - name: keyword
+    displayName: 'Scenario name filter (-k)  |  (none) = all'
+    type: string
+    default: '(none)'
+    # Examples (replace (none)): Add full payment | Get payment entry | Delete | Login successfully
+
+  - name: verbose
+    displayName: 'Verbose (-v)'
+    type: boolean
+    default: true
+
+  - name: azureReport
+    displayName: 'Report results to Azure Test Plan'
+    type: boolean
+    default: true
+
+  - name: publishAllure
+    displayName: 'Publish Allure results as pipeline artifact'
+    type: boolean
+    default: true
+
+  - name: publishEvaluation
+    displayName: 'Publish evaluation-result artifact (+ Redis if REDIS_URL set)'
+    type: boolean
+    default: true
+
+  # ── Azure Test Plan selection ────────────────────────────────
+  # Priority: testPlanId > testPlanName > auto (testPlanTarget)
+  - name: testPlanId
+    displayName: 'Azure Test Plan ID  |  (none) = auto'
+    type: string
+    default: '(none)'
+    # Find it in Test Plans URL: .../_testPlans/define?planId=39639
+
+  - name: testPlanName
+    displayName: 'Azure Test Plan name  |  (none) = skip'
+    type: string
+    default: '(none)'
+    # Exact name, e.g. TP_Sprint16_FX_API — used only if testPlanId is (none)
+
+  - name: testPlanTarget
+    displayName: 'Auto-select plan suffix (when ID/name empty)'
+    type: string
+    default: 'API'
+    values:
+      - API
+      - UI
+
+  - name: API_REF_COMPANY_BRANCH_NAME
+    displayName: 'شرکت پیش فرض'
+    type: string
+    default: 'پالود پارسیان خیام'
+    values:
+      - 'پالود پارسیان خیام'
+      - 'صنایع غذایی پالودپارسیان خیام'
+
+
+
+variables:
+  python.version: '3.12'
+  projectName: 'Sadgan.ERP.Playwright'
+  projectDir: '$(System.DefaultWorkingDirectory)/$(projectName)'
+  apiDir: '$(System.DefaultWorkingDirectory)/$(projectName)/pytest/api'
+  PIP_CACHE_DIR: '$(Pipeline.Workspace)/.pip'
+
+steps:
+  # ── 1. Checkout (on-prem clone; avoids agent checkout SSL issues) ──
+  - checkout: none
+
+  - script: |
+      set -euo pipefail
+
+      echo "Cleaning previous checkout..."
+      rm -rf "$(projectDir)"
+
+      git config --global user.email "S_Bot_Azure@sadgan.int"
+      git config --global user.name "S_Bot_Azure"
+      git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+      git config --global http.sslVerify false
+      git config --global --add safe.directory '*'
+      git config --global core.compression 0
+      git config --global http.postBuffer 1048576000
+      git config --global pack.threads 1
+      git config --global pull.rebase false
+
+      echo "Cloning $(projectName) @ ${{ parameters.branch }}..."
+      git clone --depth 1 --branch "${{ parameters.branch }}" "http://$(GIT_PAT)@azure.sadgan.int/WebApp/SadganErp/_git/$(projectName)" "$(projectDir)"
+
+      test -d "$(projectDir)/.git"
+      echo "✅ Cloned → $(projectDir)"
+      ls -la "$(projectDir)"
+    displayName: 'Git Checkout'
+    env:
+      GIT_PAT: $(GIT_PAT)
+
+  # ── 2. Python / venv ─────────────────────────────────────────
+  # Priority:
+  #   1) /opt/qavenv  → copy into job-local ./venv (fast baseline)
+  #   2) else         → python3 -m venv
+  # Then always sync requirements with `python -m pip` into THAT copy
+  # (writable; picks up new deps like redis without depending on root installs).
+  - script: |
+      set -euo pipefail
+      cd "$(projectDir)"
+
+      python3 --version
+      python3 -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version"
+
+      rm -rf venv
+      if [ -d "/opt/qavenv" ]; then
+        echo "✅ Preferring prebuilt venv from /opt/qavenv (copy → ./venv)"
+        mkdir -p venv
+        cp -a /opt/qavenv/. ./venv/
+      else
+        echo "⚠️ /opt/qavenv not found — creating fresh venv"
+        python3 -m venv venv
+      fi
+
+      # Prefer explicit interpreter from the job copy (avoids broken shebangs)
+      VENV_PY="$(pwd)/venv/bin/python"
+      test -x "$VENV_PY"
+      # shellcheck disable=SC1091
+      source ./venv/bin/activate
+      hash -r
+
+      echo "Python: $(command -v python)"
+      echo "VENV_PY: $VENV_PY"
+      "$VENV_PY" -c "import sys; print('prefix:', sys.prefix); print('version:', sys.version)"
+
+      # Sync deps into the job-local venv (no-op for packages already present)
+      "$VENV_PY" -m pip install --upgrade pip
+      "$VENV_PY" -m pip install -r pytest/api/requirements.txt
+      "$VENV_PY" -c "import redis; print('redis OK', redis.__version__)"
+
+      "$VENV_PY" -m pip show redis pytest azure-devops allure-pytest
+
+      echo "##vso[task.setvariable variable=VENV_ACTIVATE]$(projectDir)/venv/bin/activate"
+      echo "##vso[task.setvariable variable=VENV_PYTHON]$(projectDir)/venv/bin/python"
+    displayName: 'Setup Python 3.12'
+
+  # ── 3. Build pytest argv + run ───────────────────────────────
+  - script: |
+      set -euo pipefail
+
+      # shellcheck disable=SC1091
+      source "$(VENV_ACTIVATE)"
+      cd "$(apiDir)"
+
+      export API_BASE_URL="${{ parameters.baseUrl }}"
+      export VERIFY_SSL="${VERIFY_SSL:-false}"
+
+      RUN_MODE="$(echo "${{ parameters.runMode }}" | xargs)"
+      FEATURE="${{ parameters.featureMarker }}"
+      TAG="${{ parameters.tagMarker }}"
+      CUSTOM_MARKER="${{ parameters.markerExpression }}"
+      TEST_PATH="${{ parameters.testPath }}"
+      KEYWORD="${{ parameters.keyword }}"
+      VERBOSE="${{ parameters.verbose }}"
+
+      # Normalize sentinels (Azure UI treats default '' as required)
+      [ "$FEATURE" = "(all)" ] && FEATURE=""
+      [ "$TAG" = "(all)" ] && TAG=""
+      [ "$TEST_PATH" = "(all)" ] && TEST_PATH=""
+      [ "$CUSTOM_MARKER" = "(none)" ] && CUSTOM_MARKER=""
+      [ "$KEYWORD" = "(none)" ] && KEYWORD=""
+      CUSTOM_MARKER="$(echo "$CUSTOM_MARKER" | xargs)"   # trim
+      KEYWORD="$(echo "$KEYWORD" | xargs)"
+
+      # Plugin auto-syncs when AZURE_TEST_SYNC_ENABLED=true. Keep it false here:
+      # - run:        no sync
+      # - syncAndRun: explicit `python -m integrations.azure_test_sync` below (once)
+      # - azureSyncOnly: uses pytest --azure-sync-only (ignores this flag)
+      export AZURE_TEST_SYNC_ENABLED=false
+
+      # Plan selection: '(none)' → empty → auto-select by target
+      if [ "${AZURE_TEST_PLAN_ID:-}" = "(none)" ]; then export AZURE_TEST_PLAN_ID=""; fi
+      if [ "${AZURE_TEST_PLAN_NAME:-}" = "(none)" ]; then export AZURE_TEST_PLAN_NAME=""; fi
+
+      # Resolve -m expression
+      MARKER=""
+      if [ -n "$CUSTOM_MARKER" ]; then
+        MARKER="$CUSTOM_MARKER"
+      elif [ -n "$FEATURE" ] && [ -n "$TAG" ]; then
+        MARKER="$FEATURE and $TAG"
+      elif [ -n "$FEATURE" ]; then
+        MARKER="$FEATURE"
+      elif [ -n "$TAG" ]; then
+        MARKER="$TAG"
+      fi
+
+      PYTEST_ARGS=()
+      if [ "$VERBOSE" = "True" ] || [ "$VERBOSE" = "true" ]; then
+        PYTEST_ARGS+=(-v)
+      fi
+      if [ -n "$MARKER" ]; then
+        PYTEST_ARGS+=(-m "$MARKER")
+      fi
+      if [ -n "$TEST_PATH" ]; then
+        PYTEST_ARGS+=("$TEST_PATH")
+      fi
+      if [ -n "$KEYWORD" ]; then
+        PYTEST_ARGS+=(-k "$KEYWORD")
+      fi
+
+      echo "=================================================="
+      echo " 🔧 TEST CONFIGURATION"
+      echo "=================================================="
+      echo "Mode:      $RUN_MODE"
+      echo "Base URL:  $API_BASE_URL"
+      echo "Marker:    ${MARKER:-(none)}"
+      echo "Path:      ${TEST_PATH:-(all)}"
+      echo "Keyword:   ${KEYWORD:-(none)}"
+      echo "Verbose:   $VERBOSE"
+      echo "Sync:      $AZURE_TEST_SYNC_ENABLED"
+      echo "Report:    ${AZURE_TEST_REPORT_ENABLED:-}"
+      echo "=================================================="
+
+      case "$RUN_MODE" in
+        azureSyncOnly)
+          echo "→ pytest --azure-sync-only"
+          pytest --azure-sync-only
+          ;;
+        collectOnly)
+          echo "→ pytest --collect-only -q ${PYTEST_ARGS[*]:-}"
+          pytest --collect-only -q "${PYTEST_ARGS[@]}"
+          ;;
+        syncAndRun)
+          echo "→ python -m integrations.azure_test_sync"
+          python -m integrations.azure_test_sync
+          echo "→ pytest ${PYTEST_ARGS[*]:-} --junitxml=test-results.xml"
+          pytest "${PYTEST_ARGS[@]}" --junitxml=test-results.xml
+          ;;
+        run)
+          echo "→ pytest ${PYTEST_ARGS[*]:-} --junitxml=test-results.xml  (no Azure sync)"
+          pytest "${PYTEST_ARGS[@]}" --junitxml=test-results.xml
+          ;;
+        *)
+          echo "Unknown runMode: '$RUN_MODE'"
+          exit 1
+          ;;
+      esac
+    displayName: 'Run API tests'
+    env:
+      CI: 'true'
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      # Default false; script overrides to true only for syncAndRun / azureSyncOnly.
+      # Hardcoding 'true' made 'run' behave like syncAndRun (plugin auto-sync).
+      AZURE_TEST_SYNC_ENABLED: 'false'
+      AZURE_TEST_REPORT_ENABLED: ${{ parameters.azureReport }}
+      AZURE_DEVOPS_URL: $(AZURE_DEVOPS_URL)
+      AZURE_DEVOPS_PROJECT: $(AZURE_DEVOPS_PROJECT)
+      AZURE_TEST_PLAN_ID: ${{ parameters.testPlanId }}
+      AZURE_TEST_PLAN_NAME: ${{ parameters.testPlanName }}
+      AZURE_TEST_PLAN_TARGET: ${{ parameters.testPlanTarget }}
+      AZURE_TEST_PLAN_NAME_PREFIX: $(AZURE_TEST_PLAN_NAME_PREFIX)
+      AZURE_VERIFY_SSL: $(AZURE_VERIFY_SSL)
+      AZURE_TEST_CONFIGURATION_ID: $(AZURE_TEST_CONFIGURATION_ID)
+      API_USERNAME: $(API_USERNAME)
+      API_PASSWORD: $(API_PASSWORD)
+      API_ADMIN_USERNAME: $(API_ADMIN_USERNAME)
+      API_ADMIN_PASSWORD: $(API_ADMIN_PASSWORD)
+      API_REF_COMPANY_BRANCH_NAME: ${{ parameters.API_REF_COMPANY_BRANCH_NAME }}
+
+  # ── 4. Evaluation summary from JUnit (artifact + optional Redis) ──
+  # Later job: DownloadBuildArtifacts artifactName=evaluation-result
+  # Redis: GET qa:api:eval:latest → buildId ; GET qa:api:eval:{buildId}
+  - script: |
+      set -euo pipefail
+      # shellcheck disable=SC1091
+      source "$(VENV_ACTIVATE)"
+      cd "$(apiDir)"
+
+      mkdir -p evaluation-result
+      python -m integrations.evaluation_summary \
+        --junit test-results.xml \
+        --out evaluation-result/evaluation-result.json --skip-redis
+
+      cp -f test-results.xml evaluation-result/test-results.xml
+      echo "evaluation-result contents:"
+      ls -la evaluation-result
+      # cat evaluation-result/evaluation-result.json
+
+      # ── Redis: Read JSON and store selected fields ──
+      if [ -n "${REDIS_URL:-}" ] && [ -f "evaluation-result/evaluation-result.json" ]; then
+        echo "📦 Processing evaluation-result.json for Redis..."
+
+        # Extract required fields using jq
+        BASE_URL=$(jq -r '.run.baseUrl' evaluation-result/evaluation-result.json)
+        TESTS=$(jq -r '.results.tests' evaluation-result/evaluation-result.json)
+        PASSED=$(jq -r '.results.passed' evaluation-result/evaluation-result.json)
+        FAILURES=$(jq -r '.results.failures' evaluation-result/evaluation-result.json)
+        ERRORS=$(jq -r '.results.errors' evaluation-result/evaluation-result.json)
+        SKIPPED=$(jq -r '.results.skipped' evaluation-result/evaluation-result.json)
+        TIME_SECONDS=$(jq -r '.results.timeSeconds' evaluation-result/evaluation-result.json)
+        PASS_RATE=$(jq -r '.results.passRate * 100 | floor' evaluation-result/evaluation-result.json)
+
+        # Build Redis key (using fx:xxxx:qa format)
+        REDIS_KEY="fx:${ASSEMBLY:-latest}:qa"
+
+        # Create JSON string with only the fields we want
+        JSON_DATA=$(jq -n \
+          --arg baseUrl "$BASE_URL" \
+          --arg tests "$TESTS" \
+          --arg passed "$PASSED" \
+          --arg failures "$FAILURES" \
+          --arg errors "$ERRORS" \
+          --arg skipped "$SKIPPED" \
+          --arg timeSeconds "$TIME_SECONDS" \
+          --arg passRate "$PASS_RATE" \
+          '{
+            baseUrl: $baseUrl,
+            tests: $tests,
+            passed: $passed,
+            failures: $failures,
+            errors: $errors,
+            skipped: $skipped,
+            timeSeconds: $timeSeconds,
+            passRate: $passRate
+          }')
+
+        echo "🔑 Redis Key: $REDIS_KEY"
+        echo "📊 Data to store:"
+        echo "$JSON_DATA" | jq '.'
+
+        # Store as string using SET (simple and works everywhere)
+        redis-cli -u "$REDIS_URL" SET "$REDIS_KEY" "$JSON_DATA"
+        echo "✅ Stored data in Redis key: $REDIS_KEY"
+
+        # Also store latest reference (just the key name)
+        LATEST_KEY="fx:latest:qa"
+        redis-cli -u "$REDIS_URL" SET "$LATEST_KEY" "$REDIS_KEY"
+        echo "✅ Updated latest reference: $LATEST_KEY → $REDIS_KEY"
+
+        # Verify stored data
+        echo "🔍 Verifying stored data:"
+        redis-cli -u "$REDIS_URL" GET "$REDIS_KEY" | jq '.'
+
+        # Set TTL if needed (optional - 86400 seconds = 24 hours)
+        # redis-cli -u "$REDIS_URL" EXPIRE "$REDIS_KEY" 86400
+        
+        echo "✅ Redis update completed successfully"
+      else
+        echo "⚠️  Skipping Redis update (REDIS_URL not set or JSON file missing)"
+      fi
+    displayName: 'Write evaluation-result (JSON + Redis)'
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    env:
+      REDIS_URL: $(REDIS_URL)
+      EVAL_REDIS_PREFIX: 'qa:api:eval'
+      EVAL_REDIS_TTL_SECONDS: '86400'
+      EVAL_RUN_MODE: ${{ parameters.runMode }}
+      EVAL_FEATURE_MARKER: ${{ parameters.featureMarker }}
+      EVAL_TAG_MARKER: ${{ parameters.tagMarker }}
+      EVAL_MARKER_EXPRESSION: ${{ parameters.markerExpression }}
+      EVAL_TEST_PATH: ${{ parameters.testPath }}
+      EVAL_KEYWORD: ${{ parameters.keyword }}
+      API_BASE_URL: ${{ parameters.baseUrl }}
+      AZURE_TEST_PLAN_ID: ${{ parameters.testPlanId }}
+      AZURE_TEST_PLAN_TARGET: ${{ parameters.testPlanTarget }}
+      ASSEMBLY: ${{ parameters.assembly }}
+
+  - task: PublishBuildArtifacts@1
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    inputs:
+      PathtoPublish: '$(apiDir)/evaluation-result'
+      ArtifactName: 'evaluation-result'
+      publishLocation: 'Container'
+    displayName: 'Publish evaluation-result artifact'
+
+  # ── 5. Publish JUnit (Tests tab) ─────────────────────────────
+  - task: PublishTestResults@2
+    condition: and(always(), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    inputs:
+      testResultsFormat: 'JUnit'
+      testResultsFiles: '$(apiDir)/test-results.xml'
+      searchFolder: '$(apiDir)'
+      testRunTitle: 'API Tests [${{ parameters.featureMarker }}/${{ parameters.tagMarker }}]'
+      failTaskOnFailedTests: true
+      mergeTestResults: false
+    displayName: 'Publish JUnit results'
+
+  # ── 6. Publish Allure raw results (on-prem: Build Artifact) ───
+  - task: PublishBuildArtifacts@1
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishAllure }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    inputs:
+      PathtoPublish: '$(apiDir)/allure-results'
+      ArtifactName: 'allure-results'
+      publishLocation: 'Container'
+    displayName: 'Publish Allure results artifact'
+
+
+  # ── 7. Allure Report tab (requires Allure Report extension on server) ──
+  - task: PublishAllureReport@2
+    displayName: 'publish allure report'
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishAllure }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    inputs:
+      testResultsDir: '$(apiDir)/allure-results'
+      reportName: 'API Allure Report'    
