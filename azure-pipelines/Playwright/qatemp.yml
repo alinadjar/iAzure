@@ -392,7 +392,7 @@ steps:
       # cat evaluation-result/evaluation-result.json
 
       # ── MongoDB: Upsert using Docker mongosh ──
-      if [ -n "${MONGODB_URI:-}" ] && [ -f "evaluation-result/evaluation-result.json" ]; then
+      if [ -n "$(MONGODB_URI)" ] && [ -f "evaluation-result/evaluation-result.json" ]; then
         echo "📦 Processing evaluation-result.json for MongoDB..."
 
         # Extract required fields using jq
@@ -435,7 +435,7 @@ steps:
         echo "$JSON_DATA" | jq '.'
 
         # MongoDB connection details
-        MONGO_URI="${MONGODB_URI}"
+        MONGO_URI="$(MONGODB_URI)"
         MONGO_DB="${MONGODB_DB:-qa}"
         MONGO_COLLECTION="${MONGODB_COLLECTION:-api_test_results}"
 
@@ -524,7 +524,7 @@ steps:
 
         # Export variables for the mongosh script
         export TEST_DATA_JSON="$JSON_DATA"
-        export MONGO_URI="$(MONGODB_DB)"
+        export MONGO_URI="$(MONGODB_URI)"
         export MONGO_DB="$MONGODB_DB"
         export MONGO_COLLECTION="$MONGODB_COLLECTION"
         export BUILD_ID="$BUILD_ID"
@@ -550,6 +550,7 @@ steps:
     displayName: 'Reflect evaluation-results'
     condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     env:
+      MONGODB_URI: $(MONGODB_URI)
       MONGODB_DB: $(MONGODB_DB)
       MONGODB_COLLECTION: $(MONGODB_COLLECTION)
       EVAL_RUN_MODE: ${{ parameters.runMode }}
