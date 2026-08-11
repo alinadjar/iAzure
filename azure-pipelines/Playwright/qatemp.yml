@@ -172,6 +172,9 @@ variables:
   projectDir: '$(System.DefaultWorkingDirectory)/$(projectName)'
   apiDir: '$(System.DefaultWorkingDirectory)/$(projectName)/pytest/api'
   PIP_CACHE_DIR: '$(Pipeline.Workspace)/.pip'
+  # MONGODB_URI: 'mongodb://username:password@host:port/'
+  MONGODB_DB: 'qa'
+  MONGODB_COLLECTION: 'api_test_results'
 
 steps:
   # ── 1. Checkout (on-prem clone; avoids agent checkout SSL issues) ──
@@ -371,9 +374,7 @@ steps:
       API_ADMIN_PASSWORD: $(API_ADMIN_PASSWORD)
       API_REF_COMPANY_BRANCH_NAME: ${{ parameters.API_REF_COMPANY_BRANCH_NAME }}
 
-  # ── 4. Evaluation summary from JUnit (artifact + optional Redis) ──
-  # Later job: DownloadBuildArtifacts artifactName=evaluation-result
-  # Redis: GET qa:api:eval:latest → buildId ; GET qa:api:eval:{buildId}
+  # ── 4. Evaluation summary from JUnit (artifact + Push to MongoDB) ──
   - script: |
       set -euo pipefail
       # shellcheck disable=SC1091
@@ -390,9 +391,9 @@ steps:
       ls -la evaluation-result
       # cat evaluation-result/evaluation-result.json
 
-      # ── Redis: Read JSON and store selected fields ──
-      if [ -n "${REDIS_URL:-}" ] && [ -f "evaluation-result/evaluation-result.json" ]; then
-        echo "📦 Processing evaluation-result.json for Redis..."
+      # ── MongoDB: Upsert using Docker mongosh ──
+      if [ -n "${MONGODB_URI:-}" ] && [ -f "evaluation-result/evaluation-result.json" ]; then
+        echo "📦 Processing evaluation-result.json for MongoDB..."
 
         # Extract required fields using jq
         BASE_URL=$(jq -r '.run.baseUrl' evaluation-result/evaluation-result.json)
@@ -403,9 +404,11 @@ steps:
         SKIPPED=$(jq -r '.results.skipped' evaluation-result/evaluation-result.json)
         TIME_SECONDS=$(jq -r '.results.timeSeconds' evaluation-result/evaluation-result.json)
         PASS_RATE=$(jq -r '.results.passRate * 100 | floor' evaluation-result/evaluation-result.json)
-
-        # Build Redis key (using fx:xxxx:qa format)
-        REDIS_KEY="fx:${ASSEMBLY:-latest}:qa"
+        
+        # Get additional fields for MongoDB document
+        BUILD_ID=$(jq -r '.pipeline.buildId // ""' evaluation-result/evaluation-result.json)
+        BUILD_NUMBER=$(jq -r '.pipeline.buildNumber // ""' evaluation-result/evaluation-result.json)
+        PROJECT="FX"
 
         # Create JSON string with only the fields we want
         JSON_DATA=$(jq -n \
@@ -428,36 +431,127 @@ steps:
             passRate: $passRate
           }')
 
-        echo "🔑 Redis Key: $REDIS_KEY"
         echo "📊 Data to store:"
         echo "$JSON_DATA" | jq '.'
 
-        # Store as string using SET (simple and works everywhere)
-        redis-cli -u "$REDIS_URL" SET "$REDIS_KEY" "$JSON_DATA"
-        echo "✅ Stored data in Redis key: $REDIS_KEY"
+        # MongoDB connection details
+        MONGO_URI="${MONGODB_URI}"
+        MONGO_DB="${MONGODB_DB:-qa}"
+        MONGO_COLLECTION="${MONGODB_COLLECTION:-api_test_results}"
 
-        # Also store latest reference (just the key name)
-        LATEST_KEY="fx:latest:qa"
-        redis-cli -u "$REDIS_URL" SET "$LATEST_KEY" "$REDIS_KEY"
-        echo "✅ Updated latest reference: $LATEST_KEY → $REDIS_KEY"
+        echo "🔗 MongoDB URI: ${MONGO_URI//@*/@****}"  # Mask password
+        echo "📁 Database: $MONGO_DB"
+        echo "📂 Collection: $MONGO_COLLECTION"
 
-        # Verify stored data
-        echo "🔍 Verifying stored data:"
-        redis-cli -u "$REDIS_URL" GET "$REDIS_KEY" | jq '.'
+        # Create the MongoDB upsert script
+        cat > /tmp/mongo-upsert.js << 'EOF'
+        // MongoDB Upsert Script
+        const uri = process.env.MONGO_URI;
+        const dbName = process.env.MONGO_DB || 'qa';
+        const collectionName = process.env.MONGO_COLLECTION || 'api_test_results';
+        const buildId = process.env.BUILD_ID;
+        const assembly = process.env.ASSEMBLY || 'latest';
 
-        # Set TTL if needed (optional - 86400 seconds = 24 hours)
-        # redis-cli -u "$REDIS_URL" EXPIRE "$REDIS_KEY" 86400
-        
-        echo "✅ Redis update completed successfully"
+        // Parse the JSON data from environment variable
+        const testData = JSON.parse(process.env.TEST_DATA_JSON);
+
+        // Connect to MongoDB
+        const client = new Mongo(uri);
+        const db = client.getDB(dbName);
+        const collection = db.getCollection(collectionName);
+
+        // Create a unique document with buildId as the identifier
+        const filte = {};
+        // const filter = { 
+        //   $or: [
+        //     { buildId: buildId },
+        //     { assembly: assembly, 'pipeline.buildNumber': testData.buildNumber }
+        //   ]
+        // };
+
+        // If buildId is empty, use assembly as the identifier
+        // if (!buildId || buildId === '') {
+        //   filter.$or = [
+        //     { assembly: assembly }
+        //   ];
+        // }
+
+        // Prepare the document to upsert
+        const document = {
+          $set: {
+            assembly: assembly,
+            buildId: buildId || 'unknown',
+            buildNumber: testData.buildNumber || '',
+            project: testData.project || '',
+            baseUrl: testData.baseUrl,
+            tests: parseInt(testData.tests) || 0,
+            passed: parseInt(testData.passed) || 0,
+            failures: parseInt(testData.failures) || 0,
+            errors: parseInt(testData.errors) || 0,
+            skipped: parseInt(testData.skipped) || 0,
+            timeSeconds: parseFloat(testData.timeSeconds) || 0,
+            passRate: parseInt(testData.passRate) || 0,
+            updatedAt: new Date().toISOString()
+          },
+          $setOnInsert: {
+            createdAt: new Date().toISOString()
+          }
+        };
+
+        // Perform the upsert
+        const result = collection.updateOne(filter, document, { upsert: true });
+
+        // Output results
+        print(`✅ MongoDB upsert completed:`);
+        print(`   Matched: ${result.getMatchedCount()}`);
+        print(`   Modified: ${result.getModifiedCount()}`);
+        print(`   Upserted: ${result.getUpsertedCount()}`);
+        if (result.getUpsertedId()) {
+          print(`   Upserted ID: ${result.getUpsertedId()}`);
+        }
+
+        // Verify the document was saved
+        const savedDoc = collection.findOne(filter);
+        if (savedDoc) {
+          print(`✅ Document verified: ${savedDoc._id}`);
+          print(`   Assembly: ${savedDoc.assembly}`);
+          print(`   Build ID: ${savedDoc.buildId}`);
+          print(`   Pass Rate: ${savedDoc.passRate}%`);
+        }
+
+        client.close();
+        EOF
+
+        # Export variables for the mongosh script
+        export TEST_DATA_JSON="$JSON_DATA"
+        export MONGO_URI="$MONGODB_URI"
+        export MONGO_DB="$MONGODB_DB"
+        export MONGO_COLLECTION="$MONGODB_COLLECTION"
+        export BUILD_ID="$BUILD_ID"
+        export ASSEMBLY="${ASSEMBLY:-latest}"
+
+        # Run mongosh in Docker container
+        echo "🐳 Running MongoDB upsert via Docker..."
+        docker run --rm \
+          -e MONGO_URI="$MONGO_URI" \
+          -e MONGO_DB="$MONGO_DB" \
+          -e MONGO_COLLECTION="$MONGO_COLLECTION" \
+          -e BUILD_ID="$BUILD_ID" \
+          -e ASSEMBLY="$ASSEMBLY" \
+          -e TEST_DATA_JSON="$TEST_DATA_JSON" \
+          -v /tmp/mongo-upsert.js:/tmp/mongo-upsert.js \
+          mongo:latest \
+          mongosh "$MONGO_URI" --quiet /tmp/mongo-upsert.js
+
+        echo "✅ MongoDB upsert completed successfully"
       else
-        echo "⚠️  Skipping Redis update (REDIS_URL not set or JSON file missing)"
+        echo "⚠️  Skipping MongoDB update (MONGODB_URI not set or JSON file missing)"
       fi
-    displayName: 'Write evaluation-result (JSON + Redis)'
+    displayName: 'Reflect evaluation-results'
     condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     env:
-      REDIS_URL: $(REDIS_URL)
-      EVAL_REDIS_PREFIX: 'qa:api:eval'
-      EVAL_REDIS_TTL_SECONDS: '86400'
+      MONGODB_DB: $(MONGODB_DB)
+      MONGODB_COLLECTION: $(MONGODB_COLLECTION)
       EVAL_RUN_MODE: ${{ parameters.runMode }}
       EVAL_FEATURE_MARKER: ${{ parameters.featureMarker }}
       EVAL_TAG_MARKER: ${{ parameters.tagMarker }}
