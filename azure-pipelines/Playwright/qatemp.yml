@@ -540,7 +540,7 @@ steps:
           -e ASSEMBLY="$ASSEMBLY" \
           -e TEST_DATA_JSON="$TEST_DATA_JSON" \
           -v /tmp/mongo-upsert.js:/tmp/mongo-upsert.js \
-          mongo:latest \
+          mongo:8.3.2-noble \
           mongosh "$MONGO_URI" --quiet /tmp/mongo-upsert.js
 
         echo "✅ MongoDB upsert completed successfully"
