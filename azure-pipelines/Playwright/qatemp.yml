@@ -461,7 +461,7 @@ steps:
         const collection = db.getCollection(collectionName);
 
         // Create a unique document with buildId as the identifier
-        const filte = {};
+        const filter = {};
         // const filter = { 
         //   $or: [
         //     { buildId: buildId },
