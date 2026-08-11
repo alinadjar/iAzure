@@ -503,21 +503,21 @@ steps:
 
         // Output results
         print(`✅ MongoDB upsert completed:`);
-        print(`   Matched: ${result.getMatchedCount()}`);
-        print(`   Modified: ${result.getModifiedCount()}`);
-        print(`   Upserted: ${result.getUpsertedCount()}`);
-        if (result.getUpsertedId()) {
-          print(`   Upserted ID: ${result.getUpsertedId()}`);
-        }
+        // print(`   Matched: ${result.getMatchedCount()}`);
+        // print(`   Modified: ${result.getModifiedCount()}`);
+        // print(`   Upserted: ${result.getUpsertedCount()}`);
+        // if (result.getUpsertedId()) {
+        //   print(`   Upserted ID: ${result.getUpsertedId()}`);
+        // }
 
         // Verify the document was saved
-        const savedDoc = collection.findOne(filter);
-        if (savedDoc) {
-          print(`✅ Document verified: ${savedDoc._id}`);
-          print(`   Assembly: ${savedDoc.assembly}`);
-          print(`   Build ID: ${savedDoc.buildId}`);
-          print(`   Pass Rate: ${savedDoc.passRate}%`);
-        }
+        // const savedDoc = collection.findOne(filter);
+        // if (savedDoc) {
+        //   print(`✅ Document verified: ${savedDoc._id}`);
+        //   print(`   Assembly: ${savedDoc.assembly}`);
+        //   print(`   Build ID: ${savedDoc.buildId}`);
+        //   print(`   Pass Rate: ${savedDoc.passRate}%`);
+        // }
 
         client.close();
       EOF
