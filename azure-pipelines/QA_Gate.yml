@@ -337,37 +337,36 @@ steps:
         fi
 
 
-             # Mattermost Notification
-            # dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
-            # response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
-            #   --header 'Content-Type: application/json' \
-            #   --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
-            #   --data '{
-            #       "ERP": "FX",
-            #       "tag": "'"$DOCKER_TAG"'",
-            #       "assembly": "'"$ASSEMBLY"'",
-            #       "vote": "'"$QA_VOTE"'",
-            #       "voted_by": "'"$QA_USER"'",
-            #       "pass_rate": "'"$QA_PASS_RATE"'",
-            #       "confirm_dt": "'"$QA_CONFIRM_DT"'",
-            #       "publish_dt": "'"$QA_PUSH_DT"'",
-            #       "qa_comments": "'"$COMMENTS"'",
-            #       "time_diff_seconds": "'"$QA_TIME_DIFF_SECONDS"'",
-            #       "time_diff_human": "'"$QA_TIME_DIFF_HUMAN"'"
-            #   }' 2>&1) || true
+        # Mattermost Notification
+        dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
+        response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
+          --header 'Content-Type: application/json' \
+          --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
+          --data '{
+              "ERP": "FX",
+              "tag": "'"$DOCKER_TAG"'",
+              "assembly": "'"$ASSEMBLY"'",
+              "vote": "'"$QA_VOTE"'",
+              "voted_by": "'"$QA_USER"'",
+              "pass_rate": "'"$QA_PASS_RATE"'",
+              "confirm_dt": "'"$QA_CONFIRM_DT"'",
+              "publish_dt": "'"$QA_PUSH_DT"'",
+              "qa_comments": "'"$COMMENTS"'",
+              "time_diff_seconds": "'"$QA_TIME_DIFF_SECONDS"'",
+              "time_diff_human": "'"$QA_TIME_DIFF_HUMAN"'"
+          }' 2>&1) || true
             
-            # Extract HTTP status code (last line)
-            # http_code=$(echo "$response" | tail -n1)
-            # response_body=$(echo "$response" | sed '$d')
-            
-            # # Log the result
-            # if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
-            #   echo "✅ Notification sent successfully (HTTP $http_code)"
-            # else
-            #   echo "⚠️ Failed to send notification (HTTP $http_code)"
-            #   echo "Response: $response_body"
-            #   echo "Continuing pipeline execution..."
-            # fi
+         Extract HTTP status code (last line)
+         http_code=$(echo "$response" | tail -n1)
+         response_body=$(echo "$response" | sed '$d')
+         # Log the result
+         if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+           echo "✅ Notification sent successfully (HTTP $http_code)"
+         else
+           echo "⚠️ Failed to send notification (HTTP $http_code)"
+           echo "Response: $response_body"
+           echo "Continuing pipeline execution..."
+         fi
 
 
 
