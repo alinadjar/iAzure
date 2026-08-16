@@ -218,21 +218,27 @@ steps:
         print(JSON.stringify(updatedDoc, null, 2));
         print("");
 
-        // Set variables for pipeline
-        print(`##vso[task.setvariable variable=QA_USER]${user}`);
-        print(`##vso[task.setvariable variable=QA_VOTE]${vote}`);
-        print(`##vso[task.setvariable variable=QA_CONFIRM_DT]${confirmDt}`);
-        print(`##vso[task.setvariable variable=QA_PUSH_DT]${push_dt}`);
-        print(`##vso[task.setvariable variable=QA_PASS_RATE]${passRate}`);
-        print(`##vso[task.setvariable variable=QA_TIME_DIFF_SECONDS]${timeDiffSeconds}`);
-        print(`##vso[task.setvariable variable=QA_TIME_DIFF_HUMAN]${timeDiffHuman}`);
-        print(`##vso[task.setvariable variable=DOCKER_TAG]${dockerTag || ''}`);
+        // Write results to a JSON file that the shell script can read
+        const fs = require('fs');
+        const resultData = {
+          qa_user: user,
+          qa_vote: vote,
+          qa_confirm_dt: confirmDt,
+          qa_push_dt: push_dt,
+          qa_pass_rate: passRate,
+          qa_time_diff_seconds: timeDiffSeconds,
+          qa_time_diff_human: timeDiffHuman,
+          docker_tag: dockerTag,
+          qa_passed: (vote === "APPROVED" && passRate >= 80)
+        };
+        
+        fs.writeFileSync('/tmp/qa-result.json', JSON.stringify(resultData));
+        print(`📄 Results written to /tmp/qa-result.json`);
 
         // Determine pipeline outcome
         if (vote === "APPROVED" && passRate >= 80) {
           print(`✅✅✅ QA APPROVED with ${passRate}% pass rate!`);
           print(`⏱️  Time from publish to approval: ${timeDiffHuman}`);
-          print(`##vso[task.setvariable variable=QA_PASSED]true`);
         } else {
           if (vote === "REJECTED") {
             print(`❌❌❌ QA REJECTED by ${user}!`);
@@ -258,23 +264,9 @@ steps:
         export CONFIRM_DT="$CONFIRM_DT"
         export CURRENT_TIMESTAMP="$CURRENT_TIMESTAMP"
 
-        # Run mongosh in Docker container
-        echo "🐳 Running MongoDB QA decision via Docker..."
-        docker run --rm \
-          -e MONGO_URI="$MONGO_URI" \
-          -e MONGO_DB="$MONGO_DB" \
-          -e MONGO_COLLECTION="$MONGO_COLLECTION" \
-          -e ASSEMBLY="$ASSEMBLY" \
-          -e ERP="$ERP" \
-          -e USER="$USER" \
-          -e VOTE="$VOTE" \
-          -e PASS_RATE="$PASS_RATE" \
-          -e COMMENTS="$COMMENTS" \
-          -e CONFIRM_DT="$CONFIRM_DT" \
-          -e CURRENT_TIMESTAMP="$CURRENT_TIMESTAMP" \
-          -v /tmp/qa-decision.js:/tmp/qa-decision.js \
-          mongo:8.3.2-noble \
-          mongosh "$MONGO_URI" --quiet /tmp/qa-decision.js
+        # Run mongosh directly (no Docker)
+        echo "🐳 Running MongoDB QA decision..."
+        mongosh "$MONGO_URI" --quiet /tmp/qa-decision.js
 
         # Capture the exit code
         MONGOSH_EXIT_CODE=$?
@@ -284,12 +276,122 @@ steps:
             exit $MONGOSH_EXIT_CODE
         fi
 
+        # Read the results from the JSON file
+        echo "📊 Reading results from /tmp/qa-result.json..."
+        if [ -f /tmp/qa-result.json ]; then
+            QA_USER=$(jq -r '.qa_user' /tmp/qa-result.json)
+            QA_VOTE=$(jq -r '.qa_vote' /tmp/qa-result.json)
+            QA_CONFIRM_DT=$(jq -r '.qa_confirm_dt' /tmp/qa-result.json)
+            QA_PUSH_DT=$(jq -r '.qa_push_dt' /tmp/qa-result.json)
+            QA_PASS_RATE=$(jq -r '.qa_pass_rate' /tmp/qa-result.json)
+            QA_TIME_DIFF_SECONDS=$(jq -r '.qa_time_diff_seconds' /tmp/qa-result.json)
+            QA_TIME_DIFF_HUMAN=$(jq -r '.qa_time_diff_human' /tmp/qa-result.json)
+            DOCKER_TAG=$(jq -r '.docker_tag' /tmp/qa-result.json)
+            QA_PASSED=$(jq -r '.qa_passed' /tmp/qa-result.json)
+            
+            # Set Azure DevOps pipeline variables
+            # echo "##vso[task.setvariable variable=QA_USER]${QA_USER}"
+            # echo "##vso[task.setvariable variable=QA_VOTE]${QA_VOTE}"
+            # echo "##vso[task.setvariable variable=QA_CONFIRM_DT]${QA_CONFIRM_DT}"
+            # echo "##vso[task.setvariable variable=QA_PUSH_DT]${QA_PUSH_DT}"
+            # echo "##vso[task.setvariable variable=QA_PASS_RATE]${QA_PASS_RATE}"
+            # echo "##vso[task.setvariable variable=QA_TIME_DIFF_SECONDS]${QA_TIME_DIFF_SECONDS}"
+            # echo "##vso[task.setvariable variable=QA_TIME_DIFF_HUMAN]${QA_TIME_DIFF_HUMAN}"
+            # echo "##vso[task.setvariable variable=DOCKER_TAG]${DOCKER_TAG}"
+            # echo "##vso[task.setvariable variable=QA_PASSED]${QA_PASSED}"
+            
+            # Also export to current shell for immediate use
+            export QA_USER="$QA_USER"
+            export QA_VOTE="$QA_VOTE"
+            export QA_CONFIRM_DT="$QA_CONFIRM_DT"
+            export QA_PUSH_DT="$QA_PUSH_DT"
+            export QA_PASS_RATE="$QA_PASS_RATE"
+            export QA_TIME_DIFF_SECONDS="$QA_TIME_DIFF_SECONDS"
+            export QA_TIME_DIFF_HUMAN="$QA_TIME_DIFF_HUMAN"
+            export DOCKER_TAG="$DOCKER_TAG"
+            export QA_PASSED="$QA_PASSED"
+            
+            # Display extracted variables
+            echo ""
+            echo "================================================================="
+            echo "📊 EXTRACTED VARIABLES:"
+            echo "   QA_VOTE: ${QA_VOTE:-NOT SET}"
+            echo "   QA_USER: ${QA_USER:-NOT SET}"
+            echo "   QA_CONFIRM_DT: ${QA_CONFIRM_DT:-NOT SET}"
+            echo "   QA_PASS_RATE: ${QA_PASS_RATE:-NOT SET}"
+            echo "   QA_PUSH_DT: ${QA_PUSH_DT:-NOT SET}"
+            echo "   QA_TIME_DIFF_SECONDS: ${QA_TIME_DIFF_SECONDS:-NOT SET}"
+            echo "   QA_TIME_DIFF_HUMAN: ${QA_TIME_DIFF_HUMAN:-NOT SET}"
+            echo "   DOCKER_TAG: ${DOCKER_TAG:-NOT SET}"
+            echo "   QA_PASSED: ${QA_PASSED:-NOT SET}"
+            echo "================================================================="
+            
+            # Clean up
+            rm -f /tmp/qa-result.json
+        else
+            echo "❌ Error: QA result file not found!"
+            exit 1
+        fi
+
         echo "✅ MongoDB QA decision completed successfully"
 
+        # Now you can use the QA_VOTE variable in shell
+        echo ""
         echo "================================================================="
-        echo "QA_VOTE : $QA_VOTE"
-        echo "QA_VOTE : $(QA_VOTE)"
-        echo "QA_VOTE : ${QA_VOTE}"
+        echo "SHELL DECISION BASED ON QA_VOTE:"
+        
+        if [ "$QA_VOTE" == "APPROVED" ] && [ "$QA_PASSED" == "true" ]; then
+            echo "✅ QA was APPROVED - Proceeding with post-approval actions..."
+                        
+
+            # Mattermost Notification
+            # dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
+            # response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
+            #   --header 'Content-Type: application/json' \
+            #   --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
+            #   --data '{
+            #       "ERP": "FX",
+            #       "tag": "'"$DOCKER_TAG"'",
+            #       "assembly": "'"$ASSEMBLY"'",
+            #       "vote": "'"$QA_VOTE"'",
+            #       "voted_by": "'"$QA_USER"'",
+            #       "pass_rate": "'"$QA_PASS_RATE"'",
+            #       "confirm_dt": "'"$QA_CONFIRM_DT"'",
+            #       "publish_dt": "'"$QA_PUSH_DT"'",
+            #       "qa_comments": "'"$COMMENTS"'",
+            #       "time_diff_seconds": "'"$QA_TIME_DIFF_SECONDS"'",
+            #       "time_diff_human": "'"$QA_TIME_DIFF_HUMAN"'"
+            #   }' 2>&1) || true
+            
+            # Extract HTTP status code (last line)
+            # http_code=$(echo "$response" | tail -n1)
+            # response_body=$(echo "$response" | sed '$d')
+            
+            # # Log the result
+            # if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+            #   echo "✅ Notification sent successfully (HTTP $http_code)"
+            # else
+            #   echo "⚠️ Failed to send notification (HTTP $http_code)"
+            #   echo "Response: $response_body"
+            #   echo "Continuing pipeline execution..."
+            # fi
+            
+        elif [ "$QA_VOTE" == "REJECTED" ]; then
+            echo "❌ QA was REJECTED "
+            exit 0
+        else
+            echo "⚠️ QA_VOTE is not set or invalid: ${QA_VOTE:-EMPTY}"
+            echo "   This might indicate the pipeline ran but didn't complete properly"
+            exit 1
+        fi
+
+        # Clean up temporary files
+        rm -f /tmp/qa-decision.js /tmp/update-version.js
+
+        echo ""
+        echo "================================================================="
+        echo "Pipeline execution completed"
+        echo "================================================================="
 
 
         #          # Mattermost Notif
