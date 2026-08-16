@@ -61,7 +61,7 @@ steps:
       ASSEMBLY_4Segment="$_MAJOR.$_MINOR.$_PATCH.$_BN"
 
       # TTL 30 days
-      # redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:"$ASSEMBLY_4Segment":qa "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"publish_dt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"vote\":\"pending\"}" EX 2592000
+      redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:"$ASSEMBLY_4Segment":qa "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"publish_dt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"vote\":\"pending\"}" EX 2592000
 
       # redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
       # # redis-cli -h  "$(REDIS_HOST)" -p 6379   GET v_one:version | jq .
@@ -244,26 +244,26 @@ steps:
 
 
        # Mattermost Notif
-      # dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
-      # response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/8bba3a01-1710-4268-b54b-10cdab8f8437' \
-      #   --header 'Content-Type: application/json' \
-      #   --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___Push-Harbor-Notif)' \
-      #   --data '{
-      #       "ERP": "FX",
-      #       "DOCKER_TAG": "'"$DOCKER_TAG"'",
-      #       "dt": "'"$dt"'",
-      #       "ASSEMBLY": "'"$ASSEMBLY_4Segment"'"
-      #   }' 2>&1) || true
+      dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
+      response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/8bba3a01-1710-4268-b54b-10cdab8f8437' \
+        --header 'Content-Type: application/json' \
+        --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___Push-Harbor-Notif)' \
+        --data '{
+            "ERP": "FX",
+            "DOCKER_TAG": "'"$DOCKER_TAG"'",
+            "dt": "'"$dt"'",
+            "ASSEMBLY": "'"$ASSEMBLY_4Segment"'"
+        }' 2>&1) || true
       
-      # # Extract HTTP status code (last line)
-      # http_code=$(echo "$response" | tail -n1)
-      # response_body=$(echo "$response" | sed '$d')
+      # Extract HTTP status code (last line)
+      http_code=$(echo "$response" | tail -n1)
+      response_body=$(echo "$response" | sed '$d')
       
-      # # Log the result
-      # if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
-      #   echo "✅ Notification sent successfully (HTTP $http_code)"
-      # else
-      #   echo "⚠️ Failed to send notification (HTTP $http_code)"
-      #   echo "Response: $response_body"
-      #   echo "Continuing pipeline execution..."
-      # fi
+      # Log the result
+      if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+        echo "✅ Notification sent successfully (HTTP $http_code)"
+      else
+        echo "⚠️ Failed to send notification (HTTP $http_code)"
+        echo "Response: $response_body"
+        echo "Continuing pipeline execution..."
+      fi
