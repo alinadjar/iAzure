@@ -111,7 +111,7 @@ parameters:
       - FX_Modules.Sale_Management.Setting.CustomerGroup.Module_CustomerGroup
       - FX_Modules.Financial_Management.Operation.Receipt_Entry.ReceiptEntry__fixed_amount_ExCurrency.Module_ReceiptEntry_fixed_amount_ExCurrency
       - FX_Modules.Financial_Management.Operation.Receipt_Entry.ReceiptEntry__fixed_amount.Module_ReceiptEntry_fixed_amount
-
+      - FX_Modules.PurchaseInventory_Management.Operation.PurchaseInvoiceEntity.PurchaseInvoiceEntity__fixed_amount.Module_PurchaseInvoiceEntity_fixed_amount
   - name: customModule
     displayName: 'Custom python -m path  |  used when preset=(custom)'
     type: string
