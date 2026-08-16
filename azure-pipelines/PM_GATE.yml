@@ -3,7 +3,7 @@ pool:
 
 parameters:
   - name: assembly
-    displayName: 'Confirm Assembly for Public Access: (e.g.: 0.0.0.0)'
+    displayName: 'Confirm Assembly for Public Access (e.g.: 0.0.0.0)'
     type: string
   
   - name: comments
