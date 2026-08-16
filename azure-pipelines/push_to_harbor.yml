@@ -61,7 +61,7 @@ steps:
       ASSEMBLY_4Segment="$_MAJOR.$_MINOR.$_PATCH.$_BN"
 
       # TTL 30 days
-      redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:"$ASSEMBLY_4Segment":qa "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"publish_dt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"vote\":\"pending\"}" EX 2592000
+      # redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:"$ASSEMBLY_4Segment":qa "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"publish_dt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\", \"vote\":\"pending\"}" EX 2592000
 
       # redis-cli -h  "$(REDIS_HOST)" -p 6379   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY_4Segment}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
       # # redis-cli -h  "$(REDIS_HOST)" -p 6379   GET v_one:version | jq .
@@ -69,27 +69,201 @@ steps:
       # curl -fsSL https://get.sadgan.com/releases/fx | jq .
 
 
-       # Mattermost Notif
-      dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
-      response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/8bba3a01-1710-4268-b54b-10cdab8f8437' \
-        --header 'Content-Type: application/json' \
-        --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___Push-Harbor-Notif)' \
-        --data '{
-            "ERP": "FX",
-            "DOCKER_TAG": "'"$DOCKER_TAG"'",
-            "dt": "'"$dt"'",
-            "ASSEMBLY": "'"$ASSEMBLY_4Segment"'"
-        }' 2>&1) || true
-      
-      # Extract HTTP status code (last line)
-      http_code=$(echo "$response" | tail -n1)
-      response_body=$(echo "$response" | sed '$d')
-      
-      # Log the result
-      if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
-        echo "✅ Notification sent successfully (HTTP $http_code)"
-      else
-        echo "⚠️ Failed to send notification (HTTP $http_code)"
-        echo "Response: $response_body"
-        echo "Continuing pipeline execution..."
+      export ERP="FX"
+      export ASSEMBLY="$ASSEMBLY_4Segment"
+      export PUSH_DT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+      export CURRENT_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+      # Get user information
+      USER="${BUILD_REQUESTEDFOR}"
+      if [ -z "$USER" ]; then
+          USER="${BUILD_QUEUEDBY}"
       fi
+      if [ -z "$USER" ]; then
+          USER="${AGENT_NAME:-unknown-user}"
+      fi
+      # Clean up username
+      USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//' | sed 's/ .*//')
+      echo "👤 User: $USER"
+      echo ""
+
+
+
+      # ── MongoDB: Upsert using Docker mongosh ──
+      if [ -n "$(MONGODB_URI)" ]; then
+        
+        # Create JSON string with only the fields we want
+        JSON_DATA=$(jq -n \
+          --arg erp "$ERP" \
+          --arg assembly "$ASSEMBLY" \
+          --arg tag "$DOCKER_TAG" \
+          --arg push_dt "$PUSH_DT" \
+          --arg push_by "$USER" \
+          --arg created_at "$CURRENT_TIMESTAMP" \
+          --arg updated_at "$CURRENT_TIMESTAMP" \
+          '{
+            erp: $erp,
+            assembly: $assembly,
+            tag: $tag,
+            push_dt: $push_dt,
+            push_by: $push_by,
+            qa_vote: "NA",
+            is_published: false,
+            createdAt: $created_at,
+            updatedAt: $updated_at
+          }')
+  
+        echo "📊 Data to store:"
+        echo "$JSON_DATA" | jq '.'
+  
+        # MongoDB connection details
+        MONGO_URI="$(MONGODB_URI)"
+        MONGO_DB="${MONGODB_DB:-qa}"
+        MONGO_COLLECTION="${MONGODB_COLLECTION:-releases}"
+        # MONGODB_URI: 'mongodb://username:password@host:port/'
+  
+        echo "🔗 MongoDB URI: ${MONGO_URI//@*/@****}"  # Mask password
+        echo "📁 Database: $MONGO_DB"
+        echo "📂 Collection: $MONGO_COLLECTION"
+  
+          # Create the MongoDB upsert script
+        cat > /tmp/create-release.js << 'EOF'
+        // MongoDB Upsert Script with createdAt and updatedAt
+        const uri = process.env.MONGO_URI;
+        const dbName = process.env.MONGO_DB || 'qa';
+        const collectionName = process.env.MONGO_COLLECTION || 'releases';
+        const assembly = process.env.ASSEMBLY;
+        const erp = process.env.ERP;
+        const currentTimestamp = process.env.CURRENT_TIMESTAMP;
+
+        // Connect to MongoDB
+        const client = new Mongo(uri);
+        const db = client.getDB(dbName);
+        const collection = db.getCollection(collectionName);
+
+        const filter = { 
+          erp: erp,
+          assembly: assembly
+        };
+
+        // First, check if document exists
+        const existingDoc = collection.findOne(filter);
+          
+        let updateDoc;
+          
+        if (existingDoc) {
+          // Document exists - update it, preserving createdAt
+          updateDoc = {
+            $set: {
+              erp: erp,
+              assembly: assembly,
+              tag: process.env.DOCKER_TAG,
+              push_dt: process.env.PUSH_DT,
+              push_by: process.env.USER,
+              qa_vote: "NA",
+              is_published: false,
+              updatedAt: currentTimestamp
+            }
+          };
+        } else {
+          // Document doesn't exist - create new with both timestamps
+          updateDoc = {
+            $set: {
+              erp: erp,
+              assembly: assembly,
+              tag: process.env.DOCKER_TAG,
+              push_dt: process.env.PUSH_DT,
+              push_by: process.env.USER,
+              qa_vote: "NA",
+              is_published: false,
+              createdAt: currentTimestamp,
+              updatedAt: currentTimestamp
+            }
+          };
+        }
+
+        // Perform the upsert
+        const result = collection.updateOne(filter, updateDoc, {upsert: true});
+
+        // Output results
+        print(`✅ MongoDB upsert completed:`);
+        print(`   - Matched: ${result.matchedCount}`);
+        print(`   - Modified: ${result.modifiedCount}`);
+        print(`   - Upserted: ${result.upsertedCount}`);
+          
+        if (existingDoc) {
+          print(`   - Document updated (createdAt preserved: ${existingDoc.createdAt || 'N/A'})`);
+        } else {
+          print(`   - New document created with createdAt and updatedAt`);
+        }
+
+        // Verify the inserted document
+        const verifiedDoc = collection.findOne(filter);
+        print(`\n📄 Verified document:`);
+        print(JSON.stringify(verifiedDoc, null, 2));
+
+        client.close();
+      EOF
+
+        # Export variables for the mongosh script
+        export DATA_JSON="$JSON_DATA"
+        export MONGO_URI="$(MONGODB_URI)"
+        export MONGO_DB="$MONGODB_DB"
+        export MONGO_COLLECTION="$MONGODB_COLLECTION"
+        export ASSEMBLY="${ASSEMBLY:-latest}"
+        export CURRENT_TIMESTAMP="$CURRENT_TIMESTAMP"
+        export ERP="$ERP"
+        export DOCKER_TAG="$DOCKER_TAG"
+        export PUSH_DT="$PUSH_DT"
+        export USER="$USER"
+
+        # Run mongosh in Docker container
+        echo "🐳 Running MongoDB upsert via Docker..."
+        docker run --rm \
+          -e MONGO_URI="$MONGO_URI" \
+          -e MONGO_DB="$MONGO_DB" \
+          -e MONGO_COLLECTION="$MONGO_COLLECTION" \
+          -e ASSEMBLY="$ASSEMBLY" \
+          -e ERP="$ERP" \
+          -e DATA_JSON="$DATA_JSON" \
+          -e DOCKER_TAG="$DOCKER_TAG" \
+          -e PUSH_DT="$PUSH_DT" \
+          -e USER="$USER" \
+          -e CURRENT_TIMESTAMP="$CURRENT_TIMESTAMP" \
+          -v /tmp/create-release.js:/tmp/create-release.js \
+          mongo:8.3.2-noble \
+          mongosh "$MONGO_URI" --quiet /tmp/create-release.js
+
+        echo "✅ MongoDB upsert completed successfully"
+      else
+        echo "❌ Error (MONGODB_URI not set or JSON file missing)"
+        exit 1
+      fi
+
+
+
+
+       # Mattermost Notif
+      # dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
+      # response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/8bba3a01-1710-4268-b54b-10cdab8f8437' \
+      #   --header 'Content-Type: application/json' \
+      #   --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___Push-Harbor-Notif)' \
+      #   --data '{
+      #       "ERP": "FX",
+      #       "DOCKER_TAG": "'"$DOCKER_TAG"'",
+      #       "dt": "'"$dt"'",
+      #       "ASSEMBLY": "'"$ASSEMBLY_4Segment"'"
+      #   }' 2>&1) || true
+      
+      # # Extract HTTP status code (last line)
+      # http_code=$(echo "$response" | tail -n1)
+      # response_body=$(echo "$response" | sed '$d')
+      
+      # # Log the result
+      # if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+      #   echo "✅ Notification sent successfully (HTTP $http_code)"
+      # else
+      #   echo "⚠️ Failed to send notification (HTTP $http_code)"
+      #   echo "Response: $response_body"
+      #   echo "Continuing pipeline execution..."
+      # fi
