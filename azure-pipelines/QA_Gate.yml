@@ -289,16 +289,6 @@ steps:
             DOCKER_TAG=$(jq -r '.docker_tag' /tmp/qa-result.json)
             QA_PASSED=$(jq -r '.qa_passed' /tmp/qa-result.json)
             
-            # Set Azure DevOps pipeline variables
-            # echo "##vso[task.setvariable variable=QA_USER]${QA_USER}"
-            # echo "##vso[task.setvariable variable=QA_VOTE]${QA_VOTE}"
-            # echo "##vso[task.setvariable variable=QA_CONFIRM_DT]${QA_CONFIRM_DT}"
-            # echo "##vso[task.setvariable variable=QA_PUSH_DT]${QA_PUSH_DT}"
-            # echo "##vso[task.setvariable variable=QA_PASS_RATE]${QA_PASS_RATE}"
-            # echo "##vso[task.setvariable variable=QA_TIME_DIFF_SECONDS]${QA_TIME_DIFF_SECONDS}"
-            # echo "##vso[task.setvariable variable=QA_TIME_DIFF_HUMAN]${QA_TIME_DIFF_HUMAN}"
-            # echo "##vso[task.setvariable variable=DOCKER_TAG]${DOCKER_TAG}"
-            # echo "##vso[task.setvariable variable=QA_PASSED]${QA_PASSED}"
             
             # Also export to current shell for immediate use
             export QA_USER="$QA_USER"
@@ -394,6 +384,15 @@ steps:
         echo "================================================================="
 
 
+
+
+     
+
+
+
+
+
+     
         #          # Mattermost Notif
         #         dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
         #         response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
