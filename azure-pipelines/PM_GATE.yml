@@ -1,0 +1,265 @@
+pool:
+  name: "QA_FX"
+
+parameters:
+  - name: assembly
+    displayName: 'Confirm Assembly for Public Access:'
+    type: string
+    default: '0.0.0.0'    
+  
+  - name: comments
+    displayName: 'Additional Comments'
+    type: string
+    default: '-'
+
+steps:
+  - checkout: none
+
+  - task: Bash@3
+    displayName: 'PM Decision'
+    env:
+      ASSEMBLY: ${{ parameters.assembly }}
+    inputs:
+      targetType: 'inline'
+      script: |
+        #!/bin/bash
+        
+        set -e
+        
+        echo "===================================="
+        echo "            PM PIPELINE             "
+        echo "===================================="
+        
+        # Validate inputs
+        if [ -z "$ASSEMBLY" ]; then
+            echo "❌ Error: ASSEMBLY environment variable is required"
+            echo "   Set this in your pipeline or pass as parameter"
+            exit 1
+        fi
+
+        # MongoDB connection details
+        MONGO_URI="$(MONGODB_URI)"
+        MONGO_DB="${MONGODB_DB:-qa}"
+        MONGO_COLLECTION="${MONGODB_COLLECTION:-releases}"
+        ERP="FX"
+        COMMENTS="${{ parameters.comments }}"
+        
+        echo "📋 Configuration:"
+        echo "   Assembly: ${ASSEMBLY}"
+        echo "   ERP: ${ERP}"
+        echo "   Comments: ${COMMENTS:-None}"
+        echo ""
+        
+        # Validate MongoDB connection
+        if [ -z "$MONGO_URI" ]; then
+            echo "❌ Error: MONGODB_URI environment variable is not set"
+            exit 1
+        fi
+        
+        echo "🔗 MongoDB URI: ${MONGO_URI//@*/@****}"  # Mask password
+        echo ""
+        
+        # Get user information
+        USER="${BUILD_REQUESTEDFOR}"
+        if [ -z "$USER" ]; then
+            USER="${BUILD_QUEUEDBY}"
+        fi
+        if [ -z "$USER" ]; then
+            USER="${AGENT_NAME:-unknown-user}"
+        fi
+        # Clean up username
+        USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//' | sed 's/ .*//')
+        
+        # Timestamps
+        CONFIRM_DT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        CURRENT_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        
+        echo "👤 User: $USER"
+        echo "📅 Confirm Date: $CONFIRM_DT"
+        echo ""
+
+        # Create MongoDB query script
+        cat > /tmp/pm-decision.js << 'EOF'
+        // MongoDB QA Decision Script
+        const uri = process.env.MONGO_URI;
+        const dbName = process.env.MONGO_DB || 'qa';
+        const collectionName = process.env.MONGO_COLLECTION || 'releases';
+        const assembly = process.env.ASSEMBLY;
+        const erp = process.env.ERP;
+        const user = process.env.USER;
+        const comments = process.env.COMMENTS || '-';
+        const confirmDt = process.env.CONFIRM_DT;
+        const currentTimestamp = process.env.CURRENT_TIMESTAMP;
+
+        // Connect to MongoDB
+        const client = new Mongo(uri);
+        const db = client.getDB(dbName);
+        const collection = db.getCollection(collectionName);
+
+        // Find the document
+        const filter = { 
+          erp: erp,
+          assembly: assembly
+        };
+
+        print(`🔍 Fetching current record from MongoDB...`);
+        const currentDoc = collection.findOne(filter);
+
+        if (!currentDoc) {
+          print(`❌ No record found for erp: ${erp}, assembly: ${assembly}`);
+          print(`   The record may not have been created yet.`);
+          client.close();
+          process.exit(1);
+        }
+
+        if (currentDoc.qa_vote === "NA") {
+          print(`❌ Not Possible to Confirm Before QA Audit !!!`);          
+          client.close();
+          process.exit(1);
+        }
+
+        if (currentDoc.qa_vote === "REJECTED") {
+          print(`❌ QA rejected this assembly version for public release !!!`);          
+          client.close();
+          process.exit(1);
+        }
+
+        print(`✅ Current record found:`);
+        print(JSON.stringify(currentDoc, null, 2));
+        print("");
+
+        // Extract qa_vote_dt from current document
+        const qa_vote_dt = currentDoc.qa_vote_dt || null;
+        const dockerTag = currentDoc.tag || null;
+
+        let timeDiffSeconds = null;
+        let timeDiffHuman = "unknown";
+
+        if (qa_vote_dt) {
+          print(`📅 Publish Date: ${qa_vote_dt}`);
+          
+          // Calculate time difference
+          const qaVoteEpoch = new Date(qa_vote_dt).getTime() / 1000;
+          const confirmEpoch = new Date(confirmDt).getTime() / 1000;
+          
+          if (!isNaN(qaVoteEpoch) && !isNaN(confirmEpoch)) {
+            timeDiffSeconds = Math.abs(confirmEpoch - qaVoteEpoch);
+            
+            // Format the time difference in human-readable format
+            const days = Math.floor(timeDiffSeconds / 86400);
+            const hours = Math.floor((timeDiffSeconds % 86400) / 3600);
+            const minutes = Math.floor((timeDiffSeconds % 3600) / 60);
+            const seconds = Math.floor(timeDiffSeconds % 60);
+            
+            if (days > 0) {
+              timeDiffHuman = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+            } else if (hours > 0) {
+              timeDiffHuman = `${hours}h ${minutes}m ${seconds}s`;
+            } else if (minutes > 0) {
+              timeDiffHuman = `${minutes}m ${seconds}s`;
+            } else {
+              timeDiffHuman = `${seconds}s`;
+            }
+            
+            print(`⏱️  Time difference: ${timeDiffHuman} (${timeDiffSeconds} seconds)`);
+          } else {
+            print(`⚠️ Warning: Could not calculate time difference`);
+          }
+        } else {
+          print(`⚠️ Warning: qa_vote_dt not found in current record`);
+        }
+        print("");
+
+
+        // Prepare update document
+        print(`📝 Updating document with PM decision and time difference...`);
+        
+        const updateDoc = {
+          $set: {
+            pm_confirm_by: user,
+            is_published: true,
+            pm_confirm_dt: confirmDt,
+            pm_comments: comments,
+            updatedAt: currentTimestamp,
+            pm_time_diff_seconds: timeDiffSeconds,
+            pm_time_diff_human: timeDiffHuman
+          }
+        };
+
+        // Perform the update
+        const result = collection.updateOne(filter, updateDoc);
+
+        print(`✅ Updated document:`);
+        const updatedDoc = collection.findOne(filter);
+        print(JSON.stringify(updatedDoc, null, 2));
+        print("");
+
+        client.close();
+        EOF
+
+        # Export variables for the mongosh script
+        export MONGO_URI="$(MONGODB_URI)"
+        export MONGO_DB="${MONGODB_DB:-qa}"
+        export MONGO_COLLECTION="${MONGODB_COLLECTION:-releases}"
+        export ASSEMBLY="$ASSEMBLY"
+        export ERP="FX"
+        export USER="$USER"
+        export COMMENTS="$COMMENTS"
+        export CONFIRM_DT="$CONFIRM_DT"
+        export CURRENT_TIMESTAMP="$CURRENT_TIMESTAMP"
+
+        # Run mongosh directly (no Docker)
+        echo "Running MongoDB PM decision..."
+        mongosh "$MONGO_URI" --quiet /tmp/pm-decision.js
+
+        # Capture the exit code
+        MONGOSH_EXIT_CODE=$?
+        
+        if [ $MONGOSH_EXIT_CODE -ne 0 ]; then
+            echo "❌ MongoDB script failed with exit code: $MONGOSH_EXIT_CODE"
+            exit $MONGOSH_EXIT_CODE
+        fi
+
+
+        echo "✅ PM decision applied successfully"
+
+        echo ""
+        echo "================================================================="
+        
+
+         # Mattermost Notification
+        dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
+        response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
+          --header 'Content-Type: application/json' \
+          --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
+          --data '{
+              "ERP": "FX",
+              "assembly": "'"$ASSEMBLY"'",
+              "user": "'"$USER"'",
+              "confirm_dt": "'"$CONFIRM_DT"'",
+              "pm_comments": "'"$COMMENTS"'",
+              "pm_gate": "true"
+          }' 2>&1) || true
+
+         # Extract HTTP status code (last line)
+        http_code=$(echo "$response" | tail -n1)
+        response_body=$(echo "$response" | sed '$d')
+         # Log the result
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+          echo "✅ Notification sent successfully (HTTP $http_code)"
+        else
+          echo "⚠️ Failed to send notification (HTTP $http_code)"
+          echo "Response: $response_body"
+          echo "Continuing pipeline execution..."
+        fi
+
+
+
+        # Clean up temporary files
+        rm -f /tmp/pm-decision.js
+
+        echo ""
+        echo "================================================================="
+        echo "Pipeline execution completed"
+        echo "================================================================="
+    
