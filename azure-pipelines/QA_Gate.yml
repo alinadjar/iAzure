@@ -332,9 +332,12 @@ steps:
         
         if [ "$QA_VOTE" == "APPROVED" ] && [ "$QA_PASSED" == "true" ]; then
             echo "✅ QA was APPROVED - Proceeding with post-approval actions..."
-                        
+        elif [ "$QA_VOTE" == "REJECTED" ]; then
+            echo "❌ QA was REJECTED "
+        fi
 
-            # Mattermost Notification
+
+             # Mattermost Notification
             # dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
             # response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
             #   --header 'Content-Type: application/json' \
@@ -365,15 +368,8 @@ steps:
             #   echo "Response: $response_body"
             #   echo "Continuing pipeline execution..."
             # fi
-            
-        elif [ "$QA_VOTE" == "REJECTED" ]; then
-            echo "❌ QA was REJECTED "
-            exit 0
-        else
-            echo "⚠️ QA_VOTE is not set or invalid: ${QA_VOTE:-EMPTY}"
-            echo "   This might indicate the pipeline ran but didn't complete properly"
-            exit 1
-        fi
+
+
 
         # Clean up temporary files
         rm -f /tmp/qa-decision.js /tmp/update-version.js
@@ -382,52 +378,28 @@ steps:
         echo "================================================================="
         echo "Pipeline execution completed"
         echo "================================================================="
-
-
-
-
+    
      
 
 
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
      
-        #          # Mattermost Notif
-        #         dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
-        #         response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
-        #           --header 'Content-Type: application/json' \
-        #           --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
-        #           --data '{
-        #               "ERP": "FX",
-        #               "tag": "'"$DOCKER_TAG"'",
-        #               "assembly": "'"$ASSEMBLY"'",
-        #               "vote": "'"$VOTE"'",
-        #               "voted_by": "'"$USER"'",
-        #               "pass_rate": "'"$PASS_RATE"'",
-        #               "confirm_dt": "'"$CONFIRM_DT"'",
-        #               "publish_dt": "'"$PUSH_DT"'",
-        #               "qa_comments": "'"$COMMENTS"'",
-        #               "time_diff_seconds": "'"$TIME_DIFF_SECONDS"'",
-        #               "time_diff_human": "'"$TIME_DIFF_HUMAN"'"
-        #           }' 2>&1) || true
-                
-        #         # Extract HTTP status code (last line)
-        #         http_code=$(echo "$response" | tail -n1)
-        #         response_body=$(echo "$response" | sed '$d')
-                
-        #         # Log the result
-        #         if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
-        #           echo "✅ Notification sent successfully (HTTP $http_code)"
-        #         else
-        #           echo "⚠️ Failed to send notification (HTTP $http_code)"
-        #           echo "Response: $response_body"
-        #           echo "Continuing pipeline execution..."
-        #         fi
-
-
-
-        
         
         # REDIS_KEY="fx:${ASSEMBLY}:qa"
         # REDIS_PORT="6379"
