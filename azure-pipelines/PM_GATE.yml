@@ -29,6 +29,9 @@ steps:
         echo "===================================="
         echo "            PM PIPELINE             "
         echo "===================================="
+
+        export REDISCLI_AUTH="$(REDIS_PASSWORD)"
+        REDIS_PORT="6379"
         
         # Validate inputs
         if [ -z "$ASSEMBLY" ]; then
@@ -207,6 +210,12 @@ steps:
             echo "   PASS_RATE: ${PASS_RATE:-NOT SET}"
             echo "   IS_PUBLISHED: ${IS_PUBLISHED:-NOT SET}"
             echo "================================================================="
+
+
+            redis-cli -h  "$(REDIS_HOST)" -p "$REDIS_PORT"   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+            # redis-cli -h  "$(REDIS_HOST)" -p "$REDIS_PORT"   GET fx:version | jq .
+            echo "curling https://get.sadgan.com/releases/fx:"
+            curl -fsSL https://get.sadgan.com/releases/fx | jq .
             
             # Clean up
             rm -f /tmp/pm-result.json
