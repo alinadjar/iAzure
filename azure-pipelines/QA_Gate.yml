@@ -330,11 +330,11 @@ steps:
         echo "================================================================="
         echo "SHELL DECISION BASED ON QA_VOTE:"
         
-        if [ "$QA_VOTE" == "APPROVED" ] && [ "$QA_PASSED" == "true" ]; then
-            echo "✅ QA was APPROVED - Proceeding with post-approval actions..."
-        elif [ "$QA_VOTE" == "REJECTED" ]; then
-            echo "❌ QA was REJECTED "
-        fi
+        # if [ "$QA_VOTE" == "APPROVED" ] && [ "$QA_PASSED" == "true" ]; then
+        #     echo "✅ QA was APPROVED - Proceeding with post-approval actions..."
+        # elif [ "$QA_VOTE" == "REJECTED" ]; then
+        #     echo "❌ QA was REJECTED "
+        # fi
 
 
         # Mattermost Notification
