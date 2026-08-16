@@ -3,9 +3,8 @@ pool:
 
 parameters:
   - name: assembly
-    displayName: 'Confirm Assembly for Public Access:'
+    displayName: 'Confirm Assembly for Public Access: (e.g.: 0.0.0.0)'
     type: string
-    default: '0.0.0.0'    
   
   - name: comments
     displayName: 'Additional Comments'
