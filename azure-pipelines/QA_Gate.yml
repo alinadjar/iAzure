@@ -356,7 +356,7 @@ steps:
               "time_diff_human": "'"$QA_TIME_DIFF_HUMAN"'"
           }' 2>&1) || true
             
-         Extract HTTP status code (last line)
+         # Extract HTTP status code (last line)
          http_code=$(echo "$response" | tail -n1)
          response_body=$(echo "$response" | sed '$d')
          # Log the result
