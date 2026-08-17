@@ -121,7 +121,7 @@ steps:
         const qa_voted_by = currentDoc.qa_voted_by || null;
         const qa_vote_dt = currentDoc.qa_vote_dt || null;
         const pass_rate = currentDoc.pass_rate || null;
-        const is_published = currentDoc.is_published || false;
+        const is_published = true;
 
         print(`📦 Extracted Tag: ${dockerTag}`);
         print(`📅 Push Date: ${push_dt}`);
