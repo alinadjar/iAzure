@@ -228,26 +228,26 @@ steps:
         echo ""
         echo "================================================================="
         
-        # # Mattermost Notification
-        # dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
-        # response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
-        #   --header 'Content-Type: application/json' \
-        #   --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
-        #   --data '{
-        #       "ERP": "FX",
-        #       "tag": "'"$DOCKER_TAG"'",
-        #       "assembly": "'"$ASSEMBLY"'",
-        #       "user": "'"$USER"'",
-        #       "confirm_dt": "'"$CONFIRM_DT"'",
-        #       "pm_comments": "'"$COMMENTS"'",
-        #       "pm_gate": "true",
-        #       "qa_vote": "'"$QA_VOTE"'",
-        #       "qa_voted_by": "'"$QA_VOTED_BY"'",
-        #       "qa_vote_dt": "'"$QA_VOTE_DT"'",
-        #       "pass_rate": "'"$PASS_RATE"'",
-        #       "push_dt": "'"$PUSH_DT"'",
-        #       "is_published": "'"$IS_PUBLISHED"'"
-        #   }' 2>&1) || true
+        # Mattermost Notification
+        dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
+        response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
+          --header 'Content-Type: application/json' \
+          --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
+          --data '{
+              "ERP": "FX",
+              "tag": "'"$DOCKER_TAG"'",
+              "assembly": "'"$ASSEMBLY"'",
+              "user": "'"$USER"'",
+              "confirm_dt": "'"$CONFIRM_DT"'",
+              "pm_comments": "'"$COMMENTS"'",
+              "pm_gate": "true",
+              "qa_vote": "'"$QA_VOTE"'",
+              "qa_voted_by": "'"$QA_VOTED_BY"'",
+              "qa_vote_dt": "'"$QA_VOTE_DT"'",
+              "pass_rate": "'"$PASS_RATE"'",
+              "push_dt": "'"$PUSH_DT"'",
+              "is_published": "'"$IS_PUBLISHED"'"
+          }' 2>&1) || true
 
         # # Extract HTTP status code (last line)
         # http_code=$(echo "$response" | tail -n1)
