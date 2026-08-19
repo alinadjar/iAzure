@@ -70,13 +70,18 @@ steps:
             USER="${AGENT_NAME:-unknown-user}"
         fi
         # Clean up username
-        USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//' | sed 's/ .*//')
+        USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//')
+        USER_ID="${BUILD_REQUESTEDFORID}"
+        if [ -z "$USER_ID" ]; then
+            USER_ID="${BUILD_QUEUEDBYID}"
+        fi
         
         # Timestamps
         CONFIRM_DT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         CURRENT_TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         
         echo "👤 User: $USER"
+        echo "👤 User Id: $USER_ID"
         echo "📅 Confirm Date: $CONFIRM_DT"
         echo ""
 
@@ -88,6 +93,9 @@ steps:
         const collectionName = process.env.MONGO_COLLECTION || 'releases';
         const assembly = process.env.ASSEMBLY;
         const erp = process.env.ERP;
+        const comments = process.env.COMMENTS || '-';
+        const user = process.env.USER;
+        const userId = process.env.USER_ID;
 
         // Connect to MongoDB
         const client = new Mongo(uri);
@@ -110,6 +118,12 @@ steps:
           process.exit(1);
         }
 
+        if(currentDoc.qa_vote === "NA") {
+          print(`❌ PM Cannot Approve Before QA !!!`);
+          client.close();
+          process.exit(1);
+        }
+
         print(`✅ Current record found:`);
         print(JSON.stringify(currentDoc, null, 2));
         print("");
@@ -123,6 +137,37 @@ steps:
         const pass_rate = currentDoc.pass_rate || null;
         const is_published = true;
 
+
+        const allowedUsers = [
+            {
+                localId: "ebfb862b-bba8-4aa2-82d7-46e0c486b9c9",
+                displayName: "Ali.Nadjar"
+            },
+            {
+                localId: "14510726-d0c4-4740-b427-708792571937",
+                displayName: "وحید رمزی"
+            },
+            {
+                localId: "45cd3274-aacb-4249-ba41-8607c9283444",
+                displayName: "احسان فقیه"
+            },
+            {
+                localId: "6ea0c03f-5b47-42d9-848c-1c9516f31075",
+                displayName: "حمید محمدپور"
+            }
+        ];
+        
+        // Create a Set of allowed user IDs for O(1) lookup
+        const allowedUserIds = new Set(allowedUsers.map(user => user.localId));
+
+        if (qa_vote === "REJECTED" && !allowedUserIds.has(userId)) {
+          print(`❌ QA has rejected release of assembly: ${assembly}`);
+          print(`❌ Permission Insufficient for ${user} to bypass !`);
+          print(`Allowed users: [${allowedUsers.map(user => user.displayName)}]`);
+          client.close();
+          process.exit(0);
+        }
+
         print(`📦 Extracted Tag: ${dockerTag}`);
         print(`📅 Push Date: ${push_dt}`);
         print(`✅ QA Vote: ${qa_vote}`);
@@ -130,6 +175,29 @@ steps:
         print(`📅 QA Vote Date: ${qa_vote_dt}`);
         print(`📊 Pass Rate: ${pass_rate}%`);
         print(`📌 Is Published: ${is_published}`);
+
+
+        // Prepare update document
+        print(`📝 Updating release document with PM decision ...`);
+        const updateDoc = {
+          $set: {
+            pm_confirm_by: user,
+            pm_confirm_dt: process.env.CURRENT_TIMESTAMP,
+            pm_comments: comments,
+            updatedAt: process.env.CURRENT_TIMESTAMP,
+            is_published: true
+          }
+        };
+
+        // Perform the update
+        const result = collection.updateOne(filter, updateDoc);
+
+        print(`✅ Updated document:`);
+        const updatedDoc = collection.findOne(filter);
+        print(JSON.stringify(updatedDoc, null, 2));
+        print("");
+
+
 
         // Write results to a JSON file for the shell script
         const fs = require('fs');
@@ -155,6 +223,10 @@ steps:
         export MONGO_COLLECTION="${MONGODB_COLLECTION:-releases}"
         export ASSEMBLY="$ASSEMBLY"
         export ERP="FX"
+        export USER="$USER"
+        export USER_ID="$USER_ID"
+        export COMMENTS="$COMMENTS"
+        export CURRENT_TIMESTAMP="$CURRENT_TIMESTAMP"
 
         # Run mongosh directly (no Docker) - READ ONLY
         echo "Running MongoDB PM decision (READ ONLY)..."
@@ -230,24 +302,59 @@ steps:
         
         # Mattermost Notification
         dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
+        # response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
+        #   --header 'Content-Type: application/json' \
+        #   --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
+        #   --data '{
+        #       "ERP": "FX",
+        #       "tag": "'"$DOCKER_TAG"'",
+        #       "assembly": "'"$ASSEMBLY"'",
+        #       "user": "'"$USER"'",
+        #       "confirm_dt": "'"$CONFIRM_DT"'",
+        #       "pm_comments": "'"$COMMENTS"'",
+        #       "pm_gate": "true",
+        #       "qa_vote": "'"$QA_VOTE"'",
+        #       "qa_voted_by": "'"$QA_VOTED_BY"'",
+        #       "qa_vote_dt": "'"$QA_VOTE_DT"'",
+        #       "pass_rate": "'"$PASS_RATE"'",
+        #       "push_dt": "'"$PUSH_DT"'",
+        #       "is_published": "'"$IS_PUBLISHED"'"
+        #   }' 2>&1) || true
+
+        JSON_PAYLOAD=$(jq -n \
+          --arg erp "FX" \
+          --arg tag "$DOCKER_TAG" \
+          --arg assembly "$ASSEMBLY" \
+          --arg user "$USER" \
+          --arg confirm_dt "$CONFIRM_DT" \
+          --arg pm_comments "$COMMENTS" \
+          --arg pm_gate "true" \
+          --arg qa_vote "$QA_VOTE" \
+          --arg qa_voted_by "$QA_VOTED_BY" \
+          --arg qa_vote_dt "$QA_VOTE_DT" \
+          --arg pass_rate "$PASS_RATE" \
+          --arg push_dt "$PUSH_DT" \
+          --arg is_published "true" \
+          '{
+            ERP: $erp,
+            tag: $tag,
+            assembly: $assembly,
+            user: $user,
+            confirm_dt: $confirm_dt,
+            pm_comments: $pm_comments,
+            pm_gate: $pm_gate,
+            qa_vote: $qa_vote,
+            qa_voted_by: $qa_voted_by,
+            qa_vote_dt: $qa_vote_dt,
+            pass_rate: $pass_rate,
+            push_dt: $push_dt,
+            is_published: $is_published
+          }')
+
         response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
           --header 'Content-Type: application/json' \
           --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
-          --data '{
-              "ERP": "FX",
-              "tag": "'"$DOCKER_TAG"'",
-              "assembly": "'"$ASSEMBLY"'",
-              "user": "'"$USER"'",
-              "confirm_dt": "'"$CONFIRM_DT"'",
-              "pm_comments": "'"$COMMENTS"'",
-              "pm_gate": "true",
-              "qa_vote": "'"$QA_VOTE"'",
-              "qa_voted_by": "'"$QA_VOTED_BY"'",
-              "qa_vote_dt": "'"$QA_VOTE_DT"'",
-              "pass_rate": "'"$PASS_RATE"'",
-              "push_dt": "'"$PUSH_DT"'",
-              "is_published": "'"$IS_PUBLISHED"'"
-          }' 2>&1) || true
+          --data "$JSON_PAYLOAD" 2>&1) || true
 
         # # Extract HTTP status code (last line)
         # http_code=$(echo "$response" | tail -n1)
