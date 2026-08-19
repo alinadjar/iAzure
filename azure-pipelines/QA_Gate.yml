@@ -335,72 +335,103 @@ steps:
         dt="$(TZ='GMT-3:30' date '+%Y-%m-%d  **%a  %H:%M:%S**')"
         
         # if [ "$QA_VOTE" == "APPROVED" ] && [ "$QA_PASSED" == "true" ]; then
-        if [ "$QA_VOTE" == "APPROVED" ]; then
-            echo "✅ QA was APPROVED - Proceeding with post-approval actions..."
-            response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
-              --header 'Content-Type: application/json' \
-              --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
-              --data '{
-                  "ERP": "FX",
-                  "tag": "'"$DOCKER_TAG"'",
-                  "assembly": "'"$ASSEMBLY"'",
-                  "vote": "'"$QA_VOTE"'",
-                  "voted_by": "'"$QA_USER"'",
-                  "pass_rate": "'"$QA_PASS_RATE"'",
-                  "confirm_dt": "'"$QA_CONFIRM_DT"'",
-                  "publish_dt": "'"$QA_PUSH_DT"'",
-                  "qa_comments": "'"$COMMENTS"'",
-                  "time_diff_seconds": "'"$QA_TIME_DIFF_SECONDS"'",
-                  "time_diff_human": "'"$QA_TIME_DIFF_HUMAN"'"
-              }' 2>&1) || true
+        # if [ "$QA_VOTE" == "APPROVED" ]; then
+        #     echo "✅ QA was APPROVED - Proceeding with post-approval actions..."
+        #     response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
+        #       --header 'Content-Type: application/json' \
+        #       --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
+        #       --data '{
+        #           "ERP": "FX",
+        #           "tag": "'"$DOCKER_TAG"'",
+        #           "assembly": "'"$ASSEMBLY"'",
+        #           "vote": "'"$QA_VOTE"'",
+        #           "voted_by": "'"$QA_USER"'",
+        #           "pass_rate": "'"$QA_PASS_RATE"'",
+        #           "confirm_dt": "'"$QA_CONFIRM_DT"'",
+        #           "publish_dt": "'"$QA_PUSH_DT"'",
+        #           "qa_comments": "'"$COMMENTS"'",
+        #           "time_diff_seconds": "'"$QA_TIME_DIFF_SECONDS"'",
+        #           "time_diff_human": "'"$QA_TIME_DIFF_HUMAN"'"
+        #       }' 2>&1) || true
 
-        elif [ "$QA_VOTE" == "REJECTED" ]; then
-            echo "❌ QA was REJECTED "
+        # elif [ "$QA_VOTE" == "REJECTED" ]; then
+        #     echo "❌ QA was REJECTED "
 
-            JSON_PAYLOAD=$(jq -n \
-              --arg erp "FX" \
-              --arg tag "$DOCKER_TAG" \
-              --arg assembly "$ASSEMBLY" \
-              --arg vote "$QA_VOTE" \
-              --arg voted_by "$QA_USER" \
-              --arg pass_rate "$QA_PASS_RATE" \
-              --arg confirm_dt "$QA_CONFIRM_DT" \
-              --arg publish_dt "$QA_PUSH_DT" \
-              --arg comments "$COMMENTS" \
-              --arg time_diff_seconds "$QA_TIME_DIFF_SECONDS" \
-              --arg time_diff_human "$QA_TIME_DIFF_HUMAN" \
-              '{
-                ERP: $erp,
-                tag: $tag,
-                assembly: $assembly,
-                vote: $vote,
-                voted_by: $voted_by,
-                pass_rate: $pass_rate,
-                confirm_dt: $confirm_dt,
-                publish_dt: $publish_dt,
-                qa_comments: $comments,
-                time_diff_seconds: $time_diff_seconds,
-                time_diff_human: $time_diff_human
-              }')
+        #     JSON_PAYLOAD=$(jq -n \
+        #       --arg erp "FX" \
+        #       --arg tag "$DOCKER_TAG" \
+        #       --arg assembly "$ASSEMBLY" \
+        #       --arg vote "$QA_VOTE" \
+        #       --arg voted_by "$QA_USER" \
+        #       --arg pass_rate "$QA_PASS_RATE" \
+        #       --arg confirm_dt "$QA_CONFIRM_DT" \
+        #       --arg publish_dt "$QA_PUSH_DT" \
+        #       --arg comments "$COMMENTS" \
+        #       --arg time_diff_seconds "$QA_TIME_DIFF_SECONDS" \
+        #       --arg time_diff_human "$QA_TIME_DIFF_HUMAN" \
+        #       '{
+        #         ERP: $erp,
+        #         tag: $tag,
+        #         assembly: $assembly,
+        #         vote: $vote,
+        #         voted_by: $voted_by,
+        #         pass_rate: $pass_rate,
+        #         confirm_dt: $confirm_dt,
+        #         publish_dt: $publish_dt,
+        #         qa_comments: $comments,
+        #         time_diff_seconds: $time_diff_seconds,
+        #         time_diff_human: $time_diff_human
+        #       }')
 
-            response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
-              --header 'Content-Type: application/json' \
-              --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
-              --data "$JSON_PAYLOAD" 2>&1) || true
+        #     response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
+        #       --header 'Content-Type: application/json' \
+        #       --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
+        #       --data "$JSON_PAYLOAD" 2>&1) || true
+        # fi
+
+        JSON_PAYLOAD=$(jq -n \
+          --arg erp "FX" \
+          --arg tag "$DOCKER_TAG" \
+          --arg assembly "$ASSEMBLY" \
+          --arg vote "$QA_VOTE" \
+          --arg voted_by "$QA_USER" \
+          --arg pass_rate "$QA_PASS_RATE" \
+          --arg confirm_dt "$QA_CONFIRM_DT" \
+          --arg publish_dt "$QA_PUSH_DT" \
+          --arg comments "$COMMENTS" \
+          --arg time_diff_seconds "$QA_TIME_DIFF_SECONDS" \
+          --arg time_diff_human "$QA_TIME_DIFF_HUMAN" \
+          '{
+            ERP: $erp,
+            tag: $tag,
+            assembly: $assembly,
+            vote: $vote,
+            voted_by: $voted_by,
+            pass_rate: $pass_rate,
+            confirm_dt: $confirm_dt,
+            publish_dt: $publish_dt,
+            qa_comments: $comments,
+            time_diff_seconds: $time_diff_seconds,
+            time_diff_human: $time_diff_human
+          }')
+
+        response=$(curl -k -w "\n%{http_code}" --location 'https://n8n.sadgan.int/webhook/3a91de48-0d38-4a13-9e7b-a9de00b4d783' \
+          --header 'Content-Type: application/json' \
+          --header 'Authorization: Bearer $(JWT_TOKEN_WFN8N___QA-Vote-Notif)' \
+          --data "$JSON_PAYLOAD" 2>&1) || true
+
+
+        # Extract HTTP status code (last line)
+        http_code=$(echo "$response" | tail -n1)
+        response_body=$(echo "$response" | sed '$d')
+        # Log the result
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
+          echo "✅ Notification sent successfully (HTTP $http_code)"
+        else
+          echo "⚠️ Failed to send notification (HTTP $http_code)"
+          echo "Response: $response_body"
+          echo "Continuing pipeline execution..."
         fi
-
-
-         # Extract HTTP status code (last line)
-         http_code=$(echo "$response" | tail -n1)
-         response_body=$(echo "$response" | sed '$d')
-         # Log the result
-         if [ "$http_code" = "200" ] || [ "$http_code" = "201" ]; then
-           echo "✅ Notification sent successfully (HTTP $http_code)"
-         else
-           echo "⚠️ Failed to send notification (HTTP $http_code)"
-           echo "Response: $response_body"
-           echo "Continuing pipeline execution..."
-         fi
 
 
 
