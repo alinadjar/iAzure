@@ -87,7 +87,8 @@ steps:
             USER="${AGENT_NAME:-unknown-user}"
         fi
         # Clean up username
-        USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//' | sed 's/ .*//')
+        # USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//' | sed 's/ .*//')
+        USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//')
         
         # Timestamps
         CONFIRM_DT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -131,6 +132,12 @@ steps:
           print(`   The record may not have been created yet.`);
           client.close();
           process.exit(1);
+        }
+
+        if (currentDoc.qa_vote !== "NA") {
+          print(`❌ QA Decision Vote Already Exists for Assembly: ${assembly}  -->  ${currentDoc.qa_vote} by ${currentDoc.qa_voted_by} at ${currentDoc.qa_vote_dt}`);
+          client.close();
+          process.exit(0);
         }
 
         print(`✅ Current record found:`);
