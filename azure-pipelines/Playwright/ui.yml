@@ -21,6 +21,11 @@ parameters:
       - 'https://stage.fx.sadgan.int'
       - 'https://dev.fx.sadgan.int'
 
+  - name: assembly
+    displayName: 'Enter Assembly Version'
+    default: '0.0.0.0'
+    type: string
+
   - name: branch
     displayName: 'Git branch to clone'
     type: string
@@ -438,6 +443,7 @@ steps:
       echo "=================================================="
       echo "Mode:       $RUN_MODE"
       echo "Base URL:   ${{ parameters.baseUrl }}"
+      echo "Assembly:   ${{ parameters.assembly }}"
       echo "Module:     ${MODULE:-(list only)}"
       echo "Headless:   ${{ parameters.headless }}"
       echo "Screenshot: ${{ parameters.screenshot }}"
@@ -473,6 +479,7 @@ steps:
       AZURE_TEST_PLAN_NAME: ${{ parameters.testPlanName }}
       AZURE_TEST_PLAN_TARGET: 'UI'
       AZURE_VERIFY_SSL: false
+      ASSEMBLY: ${{ parameters.assembly }}
 
   # ── 5. Publish logs ──────────────────────────────────────────
   # - task: PublishBuildArtifacts@1
