@@ -83,7 +83,7 @@ steps:
           USER="${AGENT_NAME:-unknown-user}"
       fi
       # Clean up username
-      USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//' | sed 's/ .*//')
+      USER=$(echo "$USER" | sed 's/.*\\//' | sed 's/@.*//')
       echo "👤 User: $USER"
       echo ""
 
