@@ -39,6 +39,13 @@ parameters:
   displayName: "WorkItem follow-up pipeline ID (CICD repo)"
   type: string
   default: '147'
+- name: NOTIFY_MATTERMOST
+  displayName: "Send work item summary to Mattermost?"
+  type: string
+  default: 'YES'
+  values:
+    - YES
+    - NO
 
 
 variables:
@@ -1359,4 +1366,277 @@ stages:
           echo "========================================="
           echo "Tagged ${#WI_IDS[@]} work item(s) with $BACKEND_TAG"
           echo "========================================="
+
+    - task: Bash@3
+      name: notify_mattermost
+      displayName: 'Notify Mattermost — work item summary'
+      condition: and(succeeded(), eq('${{ parameters.NOTIFY_MATTERMOST }}', 'YES'))
+      env:
+        GIT_PAT: $(GIT_PAT)
+        WORK_ITEM_IDS: $(tag_work_items.WORK_ITEM_IDS)
+        BACKEND_TAG: $(tag_work_items.BACKEND_TAG)
+        SOURCE_BRANCH: $(SOURCE_BRANCH)
+        TARGET_BRANCH: $(TARGET_BRANCH)
+        BUILD_ID: $(Build.BuildId)
+        BUILD_NUMBER: $(Build.BuildNumber)
+        ORG_URL: $(orgUrl)
+        PROJECT: $(project)
+        MM_WEBHOOK_URL: https://chat.sadgan.int/api/v4/posts
+        MM_JWT_TOKEN: ''
+        MM_BOT_TOKEN: $(MM_BOT_TOKEN)
+        MM_CHANNEL: 5n9f4s6jrtn63kmmajz5dzij7o
+        MM_USERNAME: 'a.najar'
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -euo pipefail
+
+          if [ -z "${MM_WEBHOOK_URL:-}" ]; then
+            echo "MATTERMOST_WI_NOTIFY_WEBHOOK is not set — skipping Mattermost notification."
+            exit 0
+          fi
+
+          if [ -z "${WORK_ITEM_IDS:-}" ]; then
+            echo "No WORK_ITEM_IDS to notify — skipping."
+            exit 0
+          fi
+
+          PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
+          BUILD_URL="${ORG_URL}/${PROJECT}/_build/results?buildId=${BUILD_ID}"
+          NOTIFY_DT="$(TZ='Asia/Tehran' date '+%Y-%m-%d %a %H:%M:%S')"
+          MM_USER="${MM_USERNAME#@}"
+
+          wi_type_icon() {
+            case "$1" in
+              Bug) echo "🐞" ;;
+              Task) echo "🛠️" ;;
+              "User Story") echo "📖" ;;
+              Feature) echo "✨" ;;
+              Epic) echo "🏔️" ;;
+              *) echo "📋" ;;
+            esac
+          }
+
+          format_work_item_line() {
+            local wi_id="$1"
+            local wi_type="$2"
+            local wi_title="$3"
+            local wi_url="$4"
+            local icon
+            icon=$(wi_type_icon "$wi_type")
+            if [ -n "$wi_title" ] && [ -n "$wi_url" ]; then
+              printf '%s / %s / [%s](%s)' "$icon" "$wi_id" "$wi_title" "$wi_url"
+            elif [ -n "$wi_title" ]; then
+              printf '%s / %s / %s' "$icon" "$wi_id" "$wi_title"
+            else
+              printf '%s / %s' "$icon" "$wi_id"
+            fi
+          }
+
+          fetch_work_item() {
+            local wi_id="$1"
+            curl -sS -u ":$GIT_PAT" \
+              "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0" 2>/dev/null || echo '{}'
+          }
+
+          wi_lines=""
+          wi_json_array='[]'
+
+          if [ -n "${WORK_ITEMS_NOTIFY_B64:-}" ]; then
+            WI_NOTIFY_JSON=$(echo "$WORK_ITEMS_NOTIFY_B64" | base64 -d 2>/dev/null || echo '[]')
+            echo "Using work item details from tag step ($(echo "$WI_NOTIFY_JSON" | jq 'length') item(s))"
+          else
+            WI_NOTIFY_JSON='[]'
+          fi
+
+          if [ "$(echo "$WI_NOTIFY_JSON" | jq 'length')" -eq 0 ]; then
+            echo "No cached work item details — fetching from API..."
+            mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' \
+              | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
+            for wi_id in "${WI_IDS[@]}"; do
+              wi_resp=$(fetch_work_item "$wi_id")
+              WI_NOTIFY_JSON=$(echo "$WI_NOTIFY_JSON" | jq \
+                --arg id "$wi_id" \
+                --arg type "$(echo "$wi_resp" | jq -r '.fields["System.WorkItemType"] // "Work Item"')" \
+                --arg title "$(echo "$wi_resp" | jq -r '.fields["System.Title"] // ""')" \
+                --arg url "$(echo "$wi_resp" | jq -r '._links.html.href // empty')" \
+                --arg state "$(echo "$wi_resp" | jq -r '.fields["System.State"] // ""')" \
+                '. + [{ id: $id, type: $type, title: $title, url: $url, state: $state }]')
+            done
+          fi
+
+          while IFS= read -r wi_row; do
+            wi_id=$(echo "$wi_row" | jq -r '.id')
+            wi_type=$(echo "$wi_row" | jq -r '.type')
+            wi_title=$(echo "$wi_row" | jq -r '.title')
+            wi_state=$(echo "$wi_row" | jq -r '.state')
+            wi_url=$(echo "$wi_row" | jq -r '.url')
+            if [ -z "$wi_url" ] || [ "$wi_url" = "null" ]; then
+              wi_url="${ORG_URL}/${PROJECT}/_workitems/edit/${wi_id}"
+            fi
+            wi_icon=$(wi_type_icon "$wi_type")
+            wi_line=$(format_work_item_line "$wi_id" "$wi_type" "$wi_title" "$wi_url")
+            echo "  Notify line: $wi_line"
+            if [ -n "$wi_lines" ]; then
+              wi_lines="${wi_lines}"$'\n'"${wi_line}"
+            else
+              wi_lines="$wi_line"
+            fi
+            wi_json_array=$(echo "$wi_json_array" | jq \
+              --arg id "$wi_id" --arg type "$wi_type" --arg state "$wi_state" \
+              --arg title "$wi_title" --arg url "$wi_url" --arg icon "$wi_icon" \
+              --arg line "$wi_line" \
+              '. + [{ id: $id, type: $type, state: $state, title: $title, url: $url, icon: $icon, line: $line }]')
+          done < <(echo "$WI_NOTIFY_JSON" | jq -c '.[]')
+
+          MM_TEXT=$(printf '%b' "**Branch promotion:** \`${SOURCE_BRANCH}\` → \`${TARGET_BRANCH}\`  |  **Tag:** \`${BACKEND_TAG}\`  |  [Build #${BUILD_NUMBER}](${BUILD_URL})\n_${NOTIFY_DT}_\n\n${wi_lines}")
+
+          if [ -n "$MM_USER" ] && echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
+            MM_TEXT="${MM_TEXT}"$'\n\n'"@${MM_USER}"
+          fi
+
+          # Route target for incoming webhooks (channel name or @username)
+          MM_TARGET=""
+          if [ -n "$MM_USER" ] && ! echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
+            MM_TARGET="@${MM_USER}"
+          elif [ -n "$MM_CHANNEL" ]; then
+            MM_TARGET="$MM_CHANNEL"
+          fi
+
+          MM_API_TOKEN="${MM_BOT_TOKEN:-${MM_JWT_TOKEN:-}}"
+
+          send_notification() {
+            local payload="$1"
+            shift
+            curl -k -sS -w "\n%{http_code}" --location "$MM_WEBHOOK_URL" \
+              --header 'Content-Type: application/json' \
+              "$@" \
+              --data "$payload" 2>&1 || true
+          }
+
+          mm_api_base() {
+            echo "$MM_WEBHOOK_URL" | sed -E 's|/api/v4/.*||'
+          }
+
+          resolve_dm_channel_id() {
+            local base user_id me_id dm_json
+            base="$(mm_api_base)"
+            user_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
+              "${base}/api/v4/users/username/${MM_USER}" 2>/dev/null || echo '{}')
+            user_id=$(echo "$user_json" | jq -r '.id // empty')
+            if [ -z "$user_id" ]; then
+              echo "  ⚠️ Mattermost user not found: ${MM_USER}" >&2
+              return 1
+            fi
+            me_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
+              "${base}/api/v4/users/me" 2>/dev/null || echo '{}')
+            me_id=$(echo "$me_json" | jq -r '.id // empty')
+            if [ -z "$me_id" ]; then
+              echo "  ⚠️ Could not resolve Mattermost bot user (/users/me)" >&2
+              return 1
+            fi
+            dm_json=$(curl -k -sS -X POST \
+              -H "Authorization: Bearer ${MM_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "[\"${me_id}\", \"${user_id}\"]" \
+              "${base}/api/v4/channels/direct" 2>/dev/null || echo '{}')
+            echo "$dm_json" | jq -r '.id // empty'
+          }
+
+          echo "Sending Mattermost notification (${#WI_IDS[@]} work item(s))..."
+
+          if echo "$MM_WEBHOOK_URL" | grep -qiE '/hooks/'; then
+            # Mattermost incoming webhook — token is in URL; do NOT send Bearer auth
+            echo "Mode: Mattermost incoming webhook (/hooks/)" >&2
+            JSON_PAYLOAD=$(jq -n \
+              --arg text "$MM_TEXT" \
+              --arg channel "$MM_TARGET" \
+              --arg username "Azure CI" \
+              '{
+                text: $text,
+                username: $username,
+                icon_emoji: ":label:"
+              } + (if ($channel | length) > 0 then { channel: $channel } else {} end)')
+            response=$(send_notification "$JSON_PAYLOAD")
+          elif echo "$MM_WEBHOOK_URL" | grep -qiE 'n8n\.|/webhook'; then
+            # n8n webhook — full payload + optional JWT (same pattern as QA_Gate / PM_GATE)
+            echo "Mode: n8n webhook" >&2
+            JSON_PAYLOAD=$(jq -n \
+              --arg erp "DevOps" \
+              --arg channel "$MM_CHANNEL" \
+              --arg username "$MM_USER" \
+              --arg text "$MM_TEXT" \
+              --arg source "$SOURCE_BRANCH" \
+              --arg target "$TARGET_BRANCH" \
+              --arg release_tag "$BACKEND_TAG" \
+              --arg work_item_ids "$WORK_ITEM_IDS" \
+              --arg build_id "$BUILD_ID" \
+              --arg build_number "$BUILD_NUMBER" \
+              --arg build_url "$BUILD_URL" \
+              --arg notify_dt "$NOTIFY_DT" \
+              --argjson work_items "$wi_json_array" \
+              '{
+                ERP: $erp,
+                channel: $channel,
+                username: $username,
+                text: $text,
+                promotion: ($source + " -> " + $target),
+                source_branch: $source,
+                target_branch: $target,
+                release_tag: $release_tag,
+                work_item_ids: $work_item_ids,
+                work_items: $work_items,
+                build_id: $build_id,
+                build_number: $build_number,
+                build_url: $build_url,
+                notify_dt: $notify_dt
+              }')
+            if [ -n "${MM_JWT_TOKEN:-}" ]; then
+              response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_JWT_TOKEN}")
+            else
+              response=$(send_notification "$JSON_PAYLOAD")
+            fi
+          elif echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
+            # Mattermost REST API POST /api/v4/posts — requires channel_id + Bearer token
+            echo "Mode: Mattermost REST API (/api/v4/posts)" >&2
+            if [ -z "${MM_API_TOKEN:-}" ]; then
+              echo "⚠️ Mattermost API token not set — use MATTERMOST_BOT_TOKEN or JWT_TOKEN_WFN8N___WI-Tag-Notif in variable group."
+              exit 0
+            fi
+
+            CHANNEL_ID=""
+            if [ -n "$MM_CHANNEL" ]; then
+              CHANNEL_ID="$MM_CHANNEL"
+              echo "  Target: channel_id=${CHANNEL_ID}" >&2
+            elif [ -n "$MM_USER" ]; then
+              echo "  Target: DM @${MM_USER}" >&2
+              CHANNEL_ID=$(resolve_dm_channel_id) || CHANNEL_ID=""
+            fi
+
+            if [ -z "$CHANNEL_ID" ]; then
+              echo "⚠️ No Mattermost channel_id — set MM_CHANNEL to a channel ID, or MM_USERNAME for DM."
+              exit 0
+            fi
+
+            JSON_PAYLOAD=$(jq -n \
+              --arg channel_id "$CHANNEL_ID" \
+              --arg message "$MM_TEXT" \
+              '{ channel_id: $channel_id, message: $message }')
+            response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_API_TOKEN}")
+          else
+            echo "⚠️ Unknown webhook URL pattern — using plain JSON POST without auth." >&2
+            JSON_PAYLOAD=$(jq -n --arg text "$MM_TEXT" '{ text: $text }')
+            response=$(send_notification "$JSON_PAYLOAD")
+          fi
+
+          http_code=$(echo "$response" | tail -n1)
+          response_body=$(echo "$response" | sed '$d')
+
+          if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "204" ]; then
+            echo "✅ Mattermost notification sent (HTTP $http_code)"
+          else
+            echo "⚠️ Mattermost notification failed (HTTP $http_code)"
+            echo "$response_body"
+            echo "Continuing pipeline..."
+          fi
 
