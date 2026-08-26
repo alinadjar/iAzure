@@ -24,7 +24,21 @@ parameters:
     - 'dev'
     - 'alpha'
     - 'beta'
-    - 'master'
+- name: WORK_ITEM_IDS
+  displayName: "Extra work item IDs to link (comma-separated, optional)"
+  type: string
+  default: ' '
+- name: TRIGGER_WI_FOLLOWUP
+  displayName: "Trigger WorkItem follow-up pipeline?"
+  type: string
+  default: 'YES'
+  values:
+    - YES
+    - NO
+- name: WI_FOLLOWUP_PIPELINE_ID
+  displayName: "WorkItem follow-up pipeline ID (CICD repo)"
+  type: string
+  default: '147'
 
 
 variables:
@@ -122,6 +136,11 @@ stages:
         GIT_PAT: $(GIT_PAT)
         SOURCE_BRANCH: $(SOURCE_BRANCH)
         TARGET_BRANCH: $(TARGET_BRANCH)
+        BUILD_ID: $(Build.BuildId)
+        BUILD_NUMBER: $(Build.BuildNumber)
+        MANUAL_WORK_ITEM_IDS: ${{ coalesce(parameters.WORK_ITEM_IDS, '') }}
+        TRIGGER_WI_FOLLOWUP: ${{ parameters.TRIGGER_WI_FOLLOWUP }}
+        WI_FOLLOWUP_PIPELINE_ID: ${{ parameters.WI_FOLLOWUP_PIPELINE_ID }}
       inputs:
         targetType: 'inline'
         script: |
@@ -143,6 +162,7 @@ stages:
             local url="$1"
             local method="${2:-GET}"
             local data="${3:-}"
+            local content_type="${4:-application/json}"
             local temp_file=$(mktemp)
             local http_code
             
@@ -158,8 +178,8 @@ stages:
                 -H "Pragma: no-cache" \
                 -o "$temp_file" "$url")
             else
-              http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
-                -H "Content-Type: application/json" \
+              http_code=$(curl -sS -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Content-Type: ${content_type}" \
                 -H "Cache-Control: no-cache" \
                 -H "Pragma: no-cache" \
                 -X "$method" \
@@ -176,8 +196,8 @@ stages:
               return 1
             fi
             
-            # Validate JSON response
-            if ! jq empty "$temp_file" 2>/dev/null; then
+            # Validate JSON response (skip for empty body)
+            if [ -s "$temp_file" ] && ! jq empty "$temp_file" 2>/dev/null; then
               echo "❌ Invalid JSON response" >&2
               cat "$temp_file" >&2
               rm -f "$temp_file"
@@ -188,7 +208,140 @@ stages:
             rm -f "$temp_file"
             return 0
           }
-          
+
+          # Extract work item IDs from PR commits (REST) and link them to the PR
+          extract_work_item_ids_from_pr() {
+            local project_api_url="$1"
+            local repo_id="$2"
+            local pr_id="$3"
+            local repo_id_clean
+            local pr_id_clean
+            local commits_url
+            local commits_json
+            local commit_count
+            local tmp_ids
+            local commit_id
+            local wi_url
+            local wi_json
+            
+            repo_id_clean=$(clean_repo_id "$repo_id")
+            pr_id_clean=$(echo "$pr_id" | tr -d '\n\r ')
+            tmp_ids=$(mktemp)
+            
+            echo "  🔗 Extracting work items from PR $pr_id_clean commits..." >&2
+            commits_url="${project_api_url}/git/repositories/${repo_id_clean}/pullrequests/${pr_id_clean}/commits?api-version=7.0&\$top=500"
+            commits_json=$(call_api "$commits_url") || {
+              echo "  ⚠️ Failed to list PR commits" >&2
+              rm -f "$tmp_ids"
+              return 0
+            }
+            
+            commit_count=$(echo "$commits_json" | jq '.value | length')
+            echo "  📋 PR commits found: $commit_count" >&2
+            
+            # Parse #123 / AB#123 from commit messages
+            echo "$commits_json" | jq -r '.value[].comment // empty' \
+              | grep -oE '(AB#|#)[0-9]+' | sed 's/AB#//;s/#//' >> "$tmp_ids" 2>/dev/null || true
+            
+            # Work items already associated with commits in Azure DevOps
+            while IFS= read -r commit_id; do
+              [ -z "$commit_id" ] && continue
+              wi_url="${project_api_url}/git/repositories/${repo_id_clean}/commits/${commit_id}/workItems?api-version=7.0"
+              wi_json=$(call_api "$wi_url") || continue
+              echo "$wi_json" | jq -r '.value[]?.id // empty' >> "$tmp_ids" 2>/dev/null || true
+            done < <(echo "$commits_json" | jq -r '.value[].commitId')
+            
+            sort -u "$tmp_ids" | grep -E '^[0-9]+$' || true
+            rm -f "$tmp_ids"
+          }
+
+
+          # Link work items to PR via WIT ArtifactLink (PR PATCH workItemRefs is ignored on on-prem ADO)
+          patch_pr_work_item_refs() {
+            local project_api_url="$1"
+            local repo_id="$2"
+            local pr_id="$3"
+            local ids_csv="$4"
+            local repo_id_clean
+            local pr_id_clean
+            local pr_url
+            local pr_json
+            local pr_artifact_id
+            local project_id
+            local wi_id
+            local wi_json
+            local wi_patch_url
+            local patch_body
+            local linked_count=0
+            
+            [ -z "$ids_csv" ] && return 0
+            
+            repo_id_clean=$(clean_repo_id "$repo_id")
+            pr_id_clean=$(echo "$pr_id" | tr -d '\n\r ')
+            pr_url="${project_api_url}/git/repositories/${repo_id_clean}/pullrequests/${pr_id_clean}?api-version=7.0"
+            
+            pr_json=$(call_api "$pr_url") || {
+              echo "  ⚠️ Failed to load PR $pr_id_clean for work item linking"
+              return 1
+            }
+            
+            pr_artifact_id=$(echo "$pr_json" | jq -r '.artifactId // empty')
+            if [ -z "$pr_artifact_id" ]; then
+              project_id=$(echo "$pr_json" | jq -r '.repository.project.id // empty')
+              if [ -n "$project_id" ]; then
+                pr_artifact_id="vstfs:///Git/PullRequestId/${project_id}%2f${repo_id_clean}%2f${pr_id_clean}"
+              fi
+            fi
+            
+            if [ -z "$pr_artifact_id" ]; then
+              echo "  ⚠️ Could not resolve PR artifactId for work item linking"
+              return 1
+            fi
+            
+            echo "  📎 Linking work items to PR $pr_id_clean via ArtifactLink: $(echo "$ids_csv" | tr '\n' ' ')"
+            echo "  🔗 PR artifact: $pr_artifact_id" >&2
+            
+            while IFS= read -r wi_id; do
+              [ -z "$wi_id" ] && continue
+              
+              wi_json=$(call_api "${project_api_url}/wit/workitems/${wi_id}?api-version=7.0&\$expand=Relations") || {
+                echo "  ⚠️ Could not load work item #$wi_id — skipping"
+                continue
+              }
+              
+              if [ "$(echo "$wi_json" | jq -r --arg url "$pr_artifact_id" '[.relations[]? | select(.url == $url)] | length')" -gt 0 ]; then
+                echo "  ℹ️ Work item #$wi_id already linked to PR"
+                continue
+              fi
+              
+              patch_body=$(jq -n --arg url "$pr_artifact_id" \
+                '[{ "op": "add", "path": "/relations/-", "value": { "rel": "ArtifactLink", "url": $url, "attributes": { "name": "Pull Request" } } }]')
+              wi_patch_url="${project_api_url}/wit/workitems/${wi_id}?api-version=7.0"
+              
+              if call_api "$wi_patch_url" "PATCH" "$patch_body" "application/json-patch+json" > /dev/null; then
+                echo "  ✅ Linked work item #$wi_id to PR"
+                linked_count=$((linked_count + 1))
+              else
+                echo "  ⚠️ Failed to link work item #$wi_id (check PAT: Work Items Read & Write)"
+              fi
+            done < <(echo "$ids_csv" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
+            
+            if [ "$linked_count" -gt 0 ]; then
+              echo "  ✅ Linked $linked_count work item(s) to PR"
+            else
+              echo "  ℹ️ No new work item links added to PR"
+            fi
+          }
+
+
+          append_work_item_ids() {
+            local global_file="$1"
+            local ids="$2"
+            while IFS= read -r id; do
+              [ -n "$id" ] && echo "$id" >> "$global_file"
+            done <<< "$ids"
+          }
+
           # Function to check if a branch exists using Git (more reliable than REST API)
           check_branch_exists_git() {
             local repo_url="$1"
@@ -250,6 +403,19 @@ stages:
           declare -A REPO_SKIPPED
           declare -A SOURCE_COMMIT_HASHES
           declare -A TARGET_COMMIT_HASHES
+          declare -A REPO_WI_IDS_MAP
+          GLOBAL_WI_FILE=$(mktemp)
+          touch "$GLOBAL_WI_FILE"
+
+          # Optional manual IDs — skip when parameter is empty/whitespace
+          MANUAL_WORK_ITEM_IDS="$(echo "${MANUAL_WORK_ITEM_IDS:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -n "$MANUAL_WORK_ITEM_IDS" ]; then
+            echo "$MANUAL_WORK_ITEM_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+              | grep -E '^[0-9]+$' >> "$GLOBAL_WI_FILE" || true
+            echo "Manual work item IDs: $MANUAL_WORK_ITEM_IDS"
+          else
+            echo "No manual WORK_ITEM_IDS — using PR commit extraction only"
+          fi
           
           # First pass: Check all repos for conflicts before any merges
           echo ""
@@ -392,6 +558,18 @@ stages:
                 continue
               fi
             fi
+
+            # Extract work item IDs from PR commits (PATCH in Phase 3 before completion — completed PRs are read-only)
+            EXTRACTED_WI_IDS=$(extract_work_item_ids_from_pr "$PROJECT_API_URL" "$REPO_ID" "${PR_IDS["$REPO_NAME"]}")
+            if [ -n "$EXTRACTED_WI_IDS" ]; then
+              echo "  📝 Work item IDs from PR commits:"
+              echo "$EXTRACTED_WI_IDS" | sed 's/^/    - /'
+              REPO_WI_IDS_MAP["$REPO_NAME"]="$(echo "$EXTRACTED_WI_IDS" | paste -sd, -)"
+              append_work_item_ids "$GLOBAL_WI_FILE" "$EXTRACTED_WI_IDS"
+            else
+              echo "  ℹ️ No work item IDs found in PR commits for $REPO_NAME"
+            fi
+
             
             # Quick check for immediate conflicts using project-specific API URL
             echo "  🔍 Checking initial merge status..."
@@ -553,6 +731,13 @@ stages:
             }
             
             echo "  ✅ PR approved"
+
+            # Link work items while PR is still active (completed PRs cannot be edited — TF401181)
+            if [ -n "${REPO_WI_IDS_MAP[$REPO_NAME]:-}" ]; then
+              echo "  🔗 Linking work items to PR before completion..."
+              patch_pr_work_item_refs "$PROJECT_API_URL" "$REPO_ID" "$PR_ID" "${REPO_WI_IDS_MAP[$REPO_NAME]}" || true
+            fi
+
             
             # Complete the PR with bypass
             echo "  🔄 Completing PR $PR_ID..."
@@ -605,6 +790,63 @@ stages:
             echo "⚠️ Skipped repositories: $(( ${#REPOSITORIES[@]} - ${#ACTIVE_REPOS[@]} ))"
           fi
           echo "========================================="
+
+          # Dedupe all collected work item IDs across repos
+          DEDUPED_WORK_ITEM_IDS=$(sort -u "$GLOBAL_WI_FILE" | grep -E '^[0-9]+$' | paste -sd, - || true)
+          rm -f "$GLOBAL_WI_FILE"
+          
+          echo ""
+          echo "========================================="
+          echo "WORK ITEMS SUMMARY"
+          echo "========================================="
+          if [ -n "$DEDUPED_WORK_ITEM_IDS" ]; then
+            echo "Deduped work item IDs: $DEDUPED_WORK_ITEM_IDS"
+            echo "$DEDUPED_WORK_ITEM_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//' | sed 's/^/  - /'
+            echo "##vso[task.setvariable variable=WORK_ITEM_IDS;isOutput=true]$DEDUPED_WORK_ITEM_IDS"
+            echo "##vso[task.setvariable variable=DEDUPED_WORK_ITEM_IDS;isOutput=true]$DEDUPED_WORK_ITEM_IDS"
+          else
+            echo "No work item IDs collected from PR commits"
+            echo "##vso[task.setvariable variable=WORK_ITEM_IDS;isOutput=true]"
+            echo "##vso[task.setvariable variable=DEDUPED_WORK_ITEM_IDS;isOutput=true]"
+          fi
+          
+          # Queue WorkItem follow-up pipeline in CICD repo (SadganErp project)
+          if [ "$TRIGGER_WI_FOLLOWUP" = "YES" ] && [ -n "$DEDUPED_WORK_ITEM_IDS" ] && [ -n "$WI_FOLLOWUP_PIPELINE_ID" ]; then
+            echo ""
+            echo "🚀 Queueing WorkItem follow-up pipeline (ID: $WI_FOLLOWUP_PIPELINE_ID)..."
+            QUEUE_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/pipelines/${WI_FOLLOWUP_PIPELINE_ID}/runs?api-version=7.0"
+            
+
+            QUEUE_BODY=$(jq -n \
+              --arg ids "$DEDUPED_WORK_ITEM_IDS" \
+              --arg target "$TARGET_BRANCH" \
+              --arg source "$SOURCE_BRANCH" \
+              --arg buildId "$BUILD_ID" \
+              --arg buildNumber "$BUILD_NUMBER" \
+              '{ 
+                resources: { repositories: { self: { refName: "refs/heads/cicd" } } },
+                templateParameters: { 
+                  WORK_ITEM_IDS: $ids, 
+                  TARGET_BRANCH: $target, 
+                  SOURCE_BRANCH: $source, 
+                  PROMOTION_BUILD_ID: $buildId, 
+                  PROMOTION_BUILD_NUMBER: $buildNumber 
+                } 
+              }')  
+            
+            QUEUE_RESPONSE=$(call_api "$QUEUE_URL" "POST" "$QUEUE_BODY") || {
+              echo "⚠️ Failed to queue WorkItem follow-up pipeline"
+            }
+
+            if [ -n "$QUEUE_RESPONSE" ]; then
+              FOLLOWUP_RUN_ID=$(echo "$QUEUE_RESPONSE" | jq -r '.id // empty')
+              FOLLOWUP_RUN_URL=$(echo "$QUEUE_RESPONSE" | jq -r '._links.web.href // empty')
+              echo "✅ Follow-up pipeline queued: run ID ${FOLLOWUP_RUN_ID}"
+              [ -n "$FOLLOWUP_RUN_URL" ] && echo "   $FOLLOWUP_RUN_URL"
+            fi
+          elif [ "$TRIGGER_WI_FOLLOWUP" = "YES" ] && [ -z "$WI_FOLLOWUP_PIPELINE_ID" ]; then
+            echo "⚠️ TRIGGER_WI_FOLLOWUP=YES but WI_FOLLOWUP_PIPELINE_ID is empty — set pipeline ID parameter after creating WorkItem_FollowUp.yml in Azure DevOps"
+          fi
           
     # Publish PR completion status for next stages
     # - task: PublishPipelineArtifact@1
@@ -790,252 +1032,6 @@ stages:
         GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
         GIT_HOME: $(GIT_HOME)
 
-    # - bash: |
-    #     # Get the commit message from the API repo
-    #     cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
-        
-    #     # Extract work item IDs from commit message
-    #     COMMIT_MSG=$(git log -1 --pretty=%B)
-    #     echo "Commit message: $COMMIT_MSG"
-    
-    #     # Extract work item IDs (supports both #123 and AB#123 formats)
-    #     WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
-        
-    #     if [ -n "$WORK_ITEM_IDS" ]; then
-    #       echo "Found work items: $WORK_ITEM_IDS"
-          
-    #       # Convert to JSON array
-    #       # Convert newlines to commas and wrap in array
-    #       # WORK_ITEM_ARRAY=$(echo "$WORK_ITEM_IDS" | jq -R -s -c 'split("\n") | map(select(length>0)) | map(tonumber)')
-    #       WORK_ITEM_IDS_CLEAN=$(echo "$WORK_ITEM_IDS" | tr '\n' ',' | sed 's/,$//')
-    #       WORK_ITEM_JSON="[${WORK_ITEM_IDS_CLEAN}]"
-    #       echo "Work item JSON: $WORK_ITEM_JSON"
-
-    #       # Associate work items with the build
-    #       BUILD_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
-    #       echo "BUILD_URL= $BUILD_URL"
-          
-          
-          
-    #       echo "Associating work items with build $(Build.BuildId)..."
-    #       # Use PAT with Basic Auth - encode properly
-    #       PAT_BASE64=$(echo -n ":$(GIT_PAT)" | base64)
-
-
-          
-    #       # Make the API call with verbose output for debugging
-    #       RESPONSE=$(curl -v -X POST \
-    #         -H "Authorization: Basic $PAT_BASE64" \
-    #         -H "Content-Type: application/json" \
-    #         -d "{\"workItemIds\": $WORK_ITEM_JSON}" \
-    #         "$BUILD_URL" 2>&1)
-          
-    #       echo "=== Full Response ==="
-    #       echo "$RESPONSE"
-    #       echo "=== End Response ==="
-          
-    #       # Check if the request was successful
-    #       if echo "$RESPONSE" | grep -q '"count"'; then
-    #         echo "✅ Successfully associated work items: $WORK_ITEM_IDS"
-            
-    #         # Verify the association
-    #         VERIFY_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
-    #         VERIFY_RESPONSE=$(curl -s -H "Authorization: Basic $PAT_BASE64" "$VERIFY_URL")
-            
-    #         echo "=== Verification Result ==="
-    #         echo "$VERIFY_RESPONSE" | jq '.'
-    #       else
-    #         echo "❌ Failed to associate work items"
-            
-    #         # Try alternative method with -u flag
-    #         echo "Trying alternative authentication method..."
-    #         RESPONSE2=$(curl -s -X POST \
-    #           -u ":$(GIT_PAT)" \
-    #           -H "Content-Type: application/json" \
-    #           -d "{\"workItemIds\": $WORK_ITEM_JSON}" \
-    #           "$BUILD_URL")
-            
-    #         echo "Response from alternative method: $RESPONSE2"
-            
-    #         if echo "$RESPONSE2" | grep -q '"count"'; then
-    #           echo "✅ Successfully associated work items using alternative method"
-    #         else
-    #           echo "❌ Both authentication methods failed"
-    #           exit 1
-    #         fi
-    #       fi
-          
-    #       # Verify association
-    #       # echo "Verifying work items..."
-    #       # VERIFY_URL="$(System.CollectionUri)$(System.TeamProject)/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
-    #       # curl -s -u ":$(System.AccessToken)" "$VERIFY_URL" | jq '.'
-    #     else
-    #       echo "No work items found in commit message"
-    #     fi
-        
-    #   displayName: 'Associate Work Items to Build (Backend)'
-    #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-    #   env:
-    #     GIT_PAT: $(GIT_PAT)
-    #   #   SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-
-
-    # - bash: |
-    #     # Get the commit message from the API repo
-    #     cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
-        
-    #     # Extract work item IDs from commit message
-    #     COMMIT_MSG=$(git log -1 --pretty=%B)
-    #     echo "Commit message: $COMMIT_MSG"
-        
-    #     # Extract work item IDs (supports both #123 and AB#123 formats)
-    #     WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
-        
-    #     if [ -n "$WORK_ITEM_IDS" ]; then
-    #       echo "Found work items: $WORK_ITEM_IDS"
-          
-    #       # Add work items as build tags using Azure DevOps built-in command
-    #       echo "Adding work items as build tags..."
-          
-    #       for WI_ID in $WORK_ITEM_IDS; do
-    #         echo "Adding tag: WorkItem-$WI_ID"
-    #         echo "##vso[build.addbuildtag]WorkItem-$WI_ID"
-    #       done
-          
-    #       echo "✅ Added work items as build tags"
-          
-    #       # The build will automatically associate these tags as work items
-    #       # Wait a moment for the system to process the tags
-    #       echo "Waiting 3 seconds for tags to be processed..."
-    #       sleep 3
-          
-    #       # Verify the association using the API (optional)
-    #       echo "Verifying work item association..."
-    #       VERIFY_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/workitems?api-version=6.0"
-          
-    #       VERIFY_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$VERIFY_URL")
-          
-    #       echo "=== Work Items Associated with Build $(Build.BuildId) ==="
-    #       echo "$VERIFY_RESPONSE" | jq '.'
-          
-    #       # Check if verification was successful
-    #       COUNT=$(echo "$VERIFY_RESPONSE" | jq '.count')
-    #       if [ "$COUNT" -gt 0 ]; then
-    #         echo "✅ Successfully verified $COUNT work items associated with build"
-    #         echo "Work item IDs:"
-    #         echo "$VERIFY_RESPONSE" | jq '.value[].id'
-    #       else
-    #         echo "⚠️ No work items found in verification (they may take a moment to appear)"
-    #         echo "The tags have been added and should appear shortly"
-            
-    #         # List all build tags
-    #         echo "Current build tags:"
-    #         TAGS_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/build/builds/$(Build.BuildId)/tags?api-version=6.0"
-    #         curl -s -u ":$(GIT_PAT)" "$TAGS_URL" | jq '.'
-    #       fi
-          
-    #     else
-    #       echo "No work items found in commit message"
-    #     fi
-        
-    #   displayName: 'Associate Work Items to Build (Backend)'
-    #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-    #   env:
-    #     GIT_PAT: $(GIT_PAT)
-
-
-    # - bash: |
-    #     # Get the commit message from the API repo
-    #     cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
-        
-    #     # Extract work item IDs from commit message
-    #     COMMIT_MSG=$(git log -1 --pretty=%B)
-    #     WORK_ITEM_IDS=$(echo "$COMMIT_MSG" | grep -oE '(#|AB#)[0-9]+' | sed 's/[#AB]//g' | sort -u)
-        
-    #     if [ -n "$WORK_ITEM_IDS" ]; then
-    #       echo "Found work items: $WORK_ITEM_IDS"
-          
-    #       # Get developer info
-    #       DEVELOPER_NAME=$(git log -1 --pretty=%an)
-    #       DEVELOPER_EMAIL=$(git log -1 --pretty=%ae)
-          
-    #       # Determine build type
-    #       BUILD_TYPE="Backend"
-    #       if [[ "$(Build.DefinitionName)" == *"Frontend"* ]]; then
-    #         BUILD_TYPE="Frontend"
-    #       fi
-          
-    #       # Build work items array
-    #       WORK_ITEMS_ARRAY=""
-    #       FIRST=true
-    #       for WI_ID in $WORK_ITEM_IDS; do
-    #         WI_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/wit/workitems/${WI_ID}?api-version=6.0"
-    #         WI_RESPONSE=$(curl -s -u ":$(GIT_PAT)" "$WI_URL")
-            
-    #         WI_TITLE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.Title"] // "N/A"')
-    #         WI_TYPE=$(echo "$WI_RESPONSE" | jq -r '.fields["System.WorkItemType"] // "N/A"')
-    #         WI_STATUS=$(echo "$WI_RESPONSE" | jq -r '.fields["System.State"] // "N/A"')
-            
-    #         if [ "$FIRST" = true ]; then
-    #           WORK_ITEMS_ARRAY="{\"id\":${WI_ID},\"title\":\"${WI_TITLE}\",\"type\":\"${WI_TYPE}\",\"status\":\"${WI_STATUS}\"}"
-    #           FIRST=false
-    #         else
-    #           WORK_ITEMS_ARRAY="${WORK_ITEMS_ARRAY},{\"id\":${WI_ID},\"title\":\"${WI_TITLE}\",\"type\":\"${WI_TYPE}\",\"status\":\"${WI_STATUS}\"}"
-    #         fi
-    #       done
-          
-    #       # Create JSON payload for n8n
-    #       JSON_PAYLOAD=$(cat <<EOF
-    #       {
-    #         "event": "build_completed",
-    #         "timestamp": "$(date -Iseconds)",
-    #         "build": {
-    #           "id": $(Build.BuildId),
-    #           "number": "$(Build.BuildNumber)",
-    #           "type": "${BUILD_TYPE}",
-    #           "branch": "$(Build.SourceBranch)",
-    #           "commit": "$(Build.SourceVersion)",
-    #           "commitShort": "$(echo $(Build.SourceVersion) | cut -c1-8)",
-    #           "url": "http://azure.sadgan.int/WebApp/SadganErp/_build/results?buildId=$(Build.BuildId)"
-    #         },
-    #         "developer": {
-    #           "name": "${DEVELOPER_NAME}",
-    #           "email": "${DEVELOPER_EMAIL}"
-    #         },
-    #         "workItems": [${WORK_ITEMS_ARRAY}],
-    #         "workItemCount": $(echo "$WORK_ITEM_IDS" | wc -l)
-    #       }
-    #     EOF
-    #       )
-          
-    #       echo "Sending to n8n..."
-    #       echo "$JSON_PAYLOAD" | jq '.'
-          
-    #       # Send to n8n webhook
-    #       # N8N_URL="https://your-n8n-url.com/webhook/build-notifications"
-          
-    #       # RESPONSE=$(curl -s -X POST \
-    #       #   -H "Content-Type: application/json" \
-    #       #   -d "$JSON_PAYLOAD" \
-    #       #   "$N8N_URL")
-          
-    #       # echo "Response: $RESPONSE"
-          
-    #       # if echo "$RESPONSE" | grep -q '"success"\|"ok"'; then
-    #       #   echo "✅ Notification sent successfully!"
-    #       # else
-    #       #   echo "⚠️ Notification may have failed. Response: $RESPONSE"
-    #       # fi
-          
-    #     else
-    #       echo "No work items found in commit message"
-    #     fi
-        
-    #   displayName: 'Send Work Items to n8n'
-    #   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-    #   env:
-    #     GIT_PAT: $(GIT_PAT)
-
 
     - template: templates/build-backend-steps.yml
       parameters:
@@ -1055,7 +1051,7 @@ stages:
     variables:
       FRONTEND_TAG: $[ dependencies.Build_Frontend.outputs['tagSetting.DOCKER_TAG'] ]
       FRONTEND_COMMIT: $[ dependencies.Build_Frontend.outputs['gitPull.FRONTEND_COMMIT'] ]
-      BACKEND_TAG: $[ dependencies.Build_Backend.outputs['tagSetting.DOCKER_TAG'] ]      
+      BACKEND_TAG: $[ dependencies.Build_Backend.outputs['tagSetting.DOCKER_TAG'] ]
       BACKEND_COMMIT: $[ dependencies.Build_Backend.outputs['gitPull.BACKEND_COMMIT'] ]
     steps:
     - checkout: none
@@ -1063,7 +1059,7 @@ stages:
     - bash: |
         set -e
         
-        # Function to create tag for a repository
+        # Function to create tag on Git repository
         create_tag() {
           local repo_name="$1"
           local repo_url="$2"
@@ -1200,3 +1196,167 @@ stages:
     
           echo "curling http://localget.sadgan.com/releases/fx:"
           curl -k -fsSL http://localget.sadgan.com/releases/fx | jq .
+
+
+
+# Stage 3: Tag work items with backend release version
+- stage: WorkItem_Tagging
+  displayName: 'Work Item Tagging'
+  dependsOn:
+    - INIT
+    - PR_Creation
+    - Build
+  # condition: and(
+  #     in(stageDependencies.PR_Creation.result, 'Succeeded', 'SucceededWithIssues'),
+  #     in(stageDependencies.Build.result, 'Succeeded', 'SucceededWithIssues'),
+  #     or(
+  #       ne(coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.WORK_ITEM_IDS'], ''), ''),
+  #       ne(coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.DEDUPED_WORK_ITEM_IDS'], ''), '')
+  #     )
+  #   )
+  variables:
+    WORK_ITEM_IDS: $[ coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.WORK_ITEM_IDS'], stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.DEDUPED_WORK_ITEM_IDS'], '') ]
+    BACKEND_TAG: $[ coalesce(stageDependencies.Build.Build_Backend.outputs['tagSetting.DOCKER_TAG'], stageDependencies.Build.Build_Frontend.outputs['gitPull.FRONTEND_COMMIT'], '') ]
+    SOURCE_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.SOURCE_BRANCH'] ]
+    TARGET_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.TARGET_BRANCH'] ]
+  jobs:
+  - job: TagWorkItems
+    displayName: 'Print & Tag Work Items'
+    pool: 'WEB-1'
+    steps:
+    - checkout: none
+
+    - task: Bash@3
+      name: tag_work_items
+      displayName: 'Print work item IDs and apply BACKEND_TAG'
+      env:
+        GIT_PAT: $(GIT_PAT)
+        WORK_ITEM_IDS: $(WORK_ITEM_IDS)
+        BACKEND_TAG: $(BACKEND_TAG)
+        SOURCE_BRANCH: $(SOURCE_BRANCH)
+        TARGET_BRANCH: $(TARGET_BRANCH)
+        ORG_URL: $(orgUrl)
+        PROJECT: $(project)
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -euo pipefail
+
+          PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
+          AUTH_HEADER="Authorization: Basic $(echo -n ":${GIT_PAT}" | base64 | tr -d '\n')"
+
+          call_api() {
+            local url="$1"
+            local method="${2:-GET}"
+            local body="${3:-}"
+            local content_type="${4:-application/json}"
+            local tmp http_code
+            tmp=$(mktemp)
+
+            if [ -n "$body" ]; then
+              http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+                -H "$AUTH_HEADER" -H "Content-Type: ${content_type}" \
+                -d "$body" "$url")
+            else
+              http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+                -H "$AUTH_HEADER" "$url")
+            fi
+
+            if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+              cat "$tmp"
+              rm -f "$tmp"
+              return 0
+            fi
+
+            echo "API $method $url failed (HTTP $http_code):" >&2
+            cat "$tmp" >&2
+            rm -f "$tmp"
+            return 1
+          }
+
+          patch_work_item() {
+            local wi_id="$1"
+            local patch_body="$2"
+            call_api \
+              "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0" \
+              "PATCH" "$patch_body" "application/json-patch+json"
+          }
+
+          tag_already_present() {
+            local existing_tags="$1"
+            local new_tag="$2"
+            echo "$existing_tags" | tr ';' '\n' \
+              | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+              | grep -Fxqi "$new_tag"
+          }
+
+          echo "========================================="
+          echo "WORK ITEM RELEASE TAGGING"
+          echo "========================================="
+          echo "Promotion: ${SOURCE_BRANCH:-?} -> ${TARGET_BRANCH:-?}"
+          echo "BACKEND_TAG: ${BACKEND_TAG:-<not set>}"
+          echo ""
+
+          if [ -z "$WORK_ITEM_IDS" ]; then
+            echo "No WORK_ITEM_IDS from PR_Creation stage — skipping."
+            exit 0
+          fi
+
+          if [ -z "$BACKEND_TAG" ]; then
+            echo "BACKEND_TAG is empty — cannot tag work items."
+            exit 0
+          fi
+
+          mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
+
+          echo "Work item IDs (${#WI_IDS[@]}):"
+          printf '  - %s\n' "${WI_IDS[@]}"
+          echo ""
+          echo "##vso[task.setvariable variable=WORK_ITEM_IDS;isOutput=true]$(IFS=,; echo "${WI_IDS[*]}")"
+          echo "##vso[task.setvariable variable=BACKEND_TAG;isOutput=true]${BACKEND_TAG}"
+          echo ""
+
+          for wi_id in "${WI_IDS[@]}"; do
+            echo "-----------------------------------------"
+            echo "Work item #$wi_id"
+            echo "-----------------------------------------"
+
+            wi_json=$(call_api "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0") || {
+              echo "  ⚠️ Could not fetch work item #$wi_id — skipping"
+              continue
+            }
+
+            wi_title=$(echo "$wi_json" | jq -r '.fields["System.Title"] // ""')
+            wi_state=$(echo "$wi_json" | jq -r '.fields["System.State"] // ""')
+            wi_tags=$(echo "$wi_json" | jq -r '.fields["System.Tags"] // ""')
+
+            echo "  State:  $wi_state"
+            echo "  Title:  $wi_title"
+            [ -n "$wi_tags" ] && echo "  Tags:   $wi_tags"
+
+            if tag_already_present "$wi_tags" "$BACKEND_TAG"; then
+              echo "  ℹ️ Tag already present: $BACKEND_TAG"
+              continue
+            fi
+
+            if [ -z "$wi_tags" ]; then
+              patch_body=$(jq -n --arg tag "$BACKEND_TAG" \
+                '[{ "op": "add", "path": "/fields/System.Tags", "value": $tag }]')
+            else
+              patch_body=$(jq -n --arg existing "$wi_tags" --arg tag "$BACKEND_TAG" \
+                '[{ "op": "replace", "path": "/fields/System.Tags", "value": ($existing + "; " + $tag) }]')
+            fi
+
+            if patch_work_item "$wi_id" "$patch_body" > /dev/null; then
+              echo "  ✅ Tagged with BACKEND_TAG: $BACKEND_TAG"
+            else
+              echo "  ⚠️ Failed to tag work item (check PAT: Work Items Read & Write)"
+            fi
+            echo ""
+          done
+
+          echo "========================================="
+          echo "Tagged ${#WI_IDS[@]} work item(s) with $BACKEND_TAG"
+          echo "========================================="
+
