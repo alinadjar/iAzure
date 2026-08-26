@@ -1384,8 +1384,8 @@ stages:
         MM_WEBHOOK_URL: https://chat.sadgan.int/api/v4/posts
         MM_JWT_TOKEN: ''
         MM_BOT_TOKEN: $(MM_BOT_TOKEN)
-        MM_CHANNEL: 5n9f4s6jrtn63kmmajz5dzij7o
-        MM_USERNAME: 'a.najar'
+        MM_CHANNEL: 7rj46o9qwjfpxfgwzw4fjpjaph
+        MM_USERNAME: 'p.akhlaqhpour'
       inputs:
         targetType: 'inline'
         script: |
