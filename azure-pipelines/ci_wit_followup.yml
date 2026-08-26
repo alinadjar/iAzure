@@ -1,0 +1,232 @@
+# WorkItem follow-up pipeline — queued by CI.yml after PR creation / merge
+trigger: none
+
+pool:
+  name: 'FX_FOLLOWUP'
+
+parameters:
+  - name: WORK_ITEM_IDS
+    displayName: 'Work item IDs (comma-separated)'
+    type: string
+    default: ''
+  - name: TARGET_BRANCH
+    displayName: 'Promotion target branch'
+    type: string
+    default: ''
+  - name: SOURCE_BRANCH
+    displayName: 'Promotion source branch'
+    type: string
+    default: ''
+  - name: PROMOTION_BUILD_ID
+    displayName: 'CI build ID that triggered this run'
+    type: string
+    default: '-'
+  - name: PROMOTION_BUILD_NUMBER
+    displayName: 'CI build number that triggered this run'
+    type: string
+    default: '-'
+  - name: ADD_WI_COMMENT
+    displayName: 'Add promotion comment to each work item?'
+    type: string
+    default: 'YES'
+    values:
+      - YES
+      - NO
+  - name: ADD_WI_TAG
+    displayName: 'Add tag to each work item?'
+    type: string
+    default: 'YES'
+    values:
+      - YES
+      - NO
+  - name: WI_TAG
+    displayName: 'Tag to add (empty = promoted-{TARGET_BRANCH})'
+    type: string
+    default: ''
+
+variables:
+  - name: orgUrl
+    value: 'http://azure.sadgan.int/WebApp'
+  - name: project
+    value: 'SadganErp'
+
+steps:
+  - checkout: none
+
+  - task: Bash@3
+    displayName: 'Work item follow-up activities'
+    env:
+      GIT_PAT: $(GIT_PAT)
+      WORK_ITEM_IDS: ${{ parameters.WORK_ITEM_IDS }}
+      TARGET_BRANCH: ${{ parameters.TARGET_BRANCH }}
+      SOURCE_BRANCH: ${{ parameters.SOURCE_BRANCH }}
+      PROMOTION_BUILD_ID: ${{ parameters.PROMOTION_BUILD_ID }}
+      PROMOTION_BUILD_NUMBER: ${{ parameters.PROMOTION_BUILD_NUMBER }}
+      ADD_WI_COMMENT: ${{ parameters.ADD_WI_COMMENT }}
+      ADD_WI_TAG: ${{ parameters.ADD_WI_TAG }}
+      WI_TAG: ${{ parameters.WI_TAG }}
+      ORG_URL: $(orgUrl)
+      PROJECT: $(project)
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -euo pipefail
+
+        PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
+        AUTH_HEADER="Authorization: Basic $(echo -n ":${GIT_PAT}" | base64 | tr -d '\n')"
+
+        call_api() {
+          local url="$1"
+          local method="${2:-GET}"
+          local body="${3:-}"
+          local content_type="${4:-application/json}"
+          local tmp
+          tmp=$(mktemp)
+          local http_code
+
+          if [ -n "$body" ]; then
+            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+              -H "$AUTH_HEADER" -H "Content-Type: ${content_type}" \
+              -d "$body" "$url")
+          else
+            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+              -H "$AUTH_HEADER" "$url")
+          fi
+
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            cat "$tmp"
+            rm -f "$tmp"
+            return 0
+          fi
+
+          echo "API $method $url failed (HTTP $http_code):" >&2
+          cat "$tmp" >&2
+          rm -f "$tmp"
+          return 1
+        }
+
+        # WIT updates must use PATCH + JSON Patch (RFC 6902), not POST/PUT
+        patch_work_item() {
+          local wi_id="$1"
+          local patch_body="$2"
+          call_api \
+            "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0" \
+            "PATCH" \
+            "$patch_body" \
+            "application/json-patch+json"
+        }
+
+        tag_already_present() {
+          local existing_tags="$1"
+          local new_tag="$2"
+          echo "$existing_tags" | tr ';' '\n' \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+            | grep -Fxqi "$new_tag"
+        }
+
+        build_work_item_patch() {
+          local existing_tags="$1"
+          local tag_to_add="$2"
+          local patch='[]'
+
+          if [ "$ADD_WI_COMMENT" = "YES" ]; then
+            patch=$(jq -n --argjson ops "$patch" --arg text "$COMMENT_TEXT" \
+              '$ops + [{ "op": "add", "path": "/fields/System.History", "value": $text }]')
+          fi
+
+          if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$tag_to_add" ] && ! tag_already_present "$existing_tags" "$tag_to_add"; then
+            if [ -z "$existing_tags" ]; then
+              patch=$(jq -n --argjson ops "$patch" --arg tag "$tag_to_add" \
+                '$ops + [{ "op": "add", "path": "/fields/System.Tags", "value": $tag }]')
+            else
+              patch=$(jq -n --argjson ops "$patch" --arg existing "$existing_tags" --arg tag "$tag_to_add" \
+                '$ops + [{ "op": "replace", "path": "/fields/System.Tags", "value": ($existing + "; " + $tag) }]')
+            fi
+          fi
+
+          echo "$patch"
+        }
+
+        echo "========================================="
+        echo "WORK ITEM FOLLOW-UP"
+        echo "========================================="
+        echo "Promotion: ${SOURCE_BRANCH:-?} -> ${TARGET_BRANCH:-?}"
+        echo "CI build: ${PROMOTION_BUILD_NUMBER:-?} (ID ${PROMOTION_BUILD_ID:-?})"
+        echo ""
+
+        if [ -z "$WORK_ITEM_IDS" ]; then
+          echo "No WORK_ITEM_IDS parameter — nothing to do."
+          exit 0
+        fi
+
+        mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
+        echo "Processing ${#WI_IDS[@]} work item(s): ${WI_IDS[*]}"
+        echo ""
+
+        COMMENT_TEXT="Branch promotion completed via CI: ${SOURCE_BRANCH} -> ${TARGET_BRANCH}. Build ${PROMOTION_BUILD_NUMBER} (ID ${PROMOTION_BUILD_ID})."
+
+        if [ -n "$WI_TAG" ]; then
+          TAG_TO_ADD="$WI_TAG"
+        elif [ -n "$TARGET_BRANCH" ]; then
+          TAG_TO_ADD="promoted-${TARGET_BRANCH}"
+        else
+          TAG_TO_ADD=""
+        fi
+
+        echo "Tag to add: ${TAG_TO_ADD:-<none>}"
+        echo ""
+
+        for wi_id in "${WI_IDS[@]}"; do
+          echo "-----------------------------------------"
+          echo "Work item #$wi_id"
+          echo "-----------------------------------------"
+
+          wi_json=$(call_api "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0") || {
+            echo "  ⚠️ Could not fetch work item #$wi_id — skipping"
+            continue
+          }
+
+          wi_type=$(echo "$wi_json" | jq -r '.fields["System.WorkItemType"] // "Unknown"')
+          wi_title=$(echo "$wi_json" | jq -r '.fields["System.Title"] // ""')
+          wi_state=$(echo "$wi_json" | jq -r '.fields["System.State"] // ""')
+          wi_tags=$(echo "$wi_json" | jq -r '.fields["System.Tags"] // ""')
+          wi_url=$(echo "$wi_json" | jq -r '._links.html.href // empty')
+
+          echo "  Type:   $wi_type"
+          echo "  State:  $wi_state"
+          echo "  Title:  $wi_title"
+          [ -n "$wi_tags" ] && echo "  Tags:   $wi_tags"
+          [ -n "$wi_url" ] && echo "  URL:    $wi_url"
+
+          patch_body=$(build_work_item_patch "$wi_tags" "$TAG_TO_ADD")
+
+          if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$TAG_TO_ADD" ] && tag_already_present "$wi_tags" "$TAG_TO_ADD"; then
+            echo "  ℹ️ Tag already present: $TAG_TO_ADD"
+          fi
+
+          if [ "$patch_body" != "[]" ] && [ -n "$patch_body" ]; then
+            if patch_work_item "$wi_id" "$patch_body" > /dev/null; then
+              [ "$ADD_WI_COMMENT" = "YES" ] && echo "  ✅ Added promotion comment"
+              if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$TAG_TO_ADD" ] && ! tag_already_present "$wi_tags" "$TAG_TO_ADD"; then
+                echo "  ✅ Added tag: $TAG_TO_ADD"
+              fi
+            else
+              echo "  ⚠️ Failed to update work item (check PAT scope: Work Items Read & Write)"
+            fi
+          else
+            echo "  ℹ️ No updates needed for this work item"
+          fi
+
+          # Extend here: state transitions, link to release, notify Teams, etc.
+          # Example (disabled):
+          # if [ "$TARGET_BRANCH" = "master" ] && [ "$wi_state" = "Resolved" ]; then
+          #   state_patch='[{ "op": "replace", "path": "/fields/System.State", "value": "Closed" }]'
+          #   patch_work_item "$wi_id" "$state_patch"
+          # fi
+
+          echo ""
+        done
+
+        echo "========================================="
+        echo "Follow-up complete for ${#WI_IDS[@]} work item(s)"
+        echo "========================================="
