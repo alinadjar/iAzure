@@ -1,0 +1,128 @@
+# Azure DevOps Server pipeline: build Dify images, push to Nexus, deploy via SSH.
+#
+
+trigger:none
+pr: none
+
+parameters:
+  - name: buildTargets
+    displayName: Build targets
+    type: string
+    default: api web
+  - name: pushLatestTag
+    displayName: Also push :latest to Nexus
+    type: boolean
+    default: false
+  - name: runDeploy
+    displayName: Deploy to target server
+    type: boolean
+    default: true
+
+variables:
+  nexusRegistry:   nexus.sadgan.int
+  nexusRepository: fx
+  deploySshServiceConnection: Dify-Production-SSH
+  deployPath:   /opt/Dify  
+  composeFile:  -f docker-compose.yaml -f docker-compose.local-build.yaml
+  agentPool:    FX_OSS      
+  difyApiImage: $(nexusRegistry)/$(nexusRepository)/dify-api
+  difyWebImage: $(nexusRegistry)/$(nexusRepository)/dify-web
+
+stages:
+  - stage: BuildAndPush
+    displayName: Build and push images
+    jobs:
+      - job: Build
+        displayName: Build Docker images
+        pool:
+          name: $(agentPool)
+        steps:
+          - checkout: self
+            clean: true
+            fetchDepth: 0
+
+          - bash: |
+              chmod +x docker/build-images.sh docker/push-images.sh docker/deploy-remote.sh
+            displayName: Make scripts executable
+
+          - bash: |
+              set -euo pipefail
+              export DIFY_API_IMAGE="$(difyApiImage)"
+              export DIFY_WEB_IMAGE="$(difyWebImage)"
+              export DOCKER_BUILDKIT=1
+              ./docker/build-images.sh ${{ parameters.buildTargets }}
+            displayName: Build images
+
+          - bash: |
+              set -euo pipefail
+              source docker/.build-tag.env
+              echo "API  ${DIFY_API_IMAGE}:${DIFY_API_IMAGE_TAG}"
+              echo "WEB  ${DIFY_WEB_IMAGE}:${DIFY_WEB_IMAGE_TAG}"
+              echo "##vso[task.setvariable variable=imageTag;isOutput=true]${DIFY_IMAGE_TAG}"
+              echo "##vso[task.setvariable variable=apiImageTag;isOutput=true]${DIFY_API_IMAGE_TAG}"
+              echo "##vso[task.setvariable variable=webImageTag;isOutput=true]${DIFY_WEB_IMAGE_TAG}"
+            name: exportTags
+            displayName: Export image tags
+
+          - bash: |
+              set -euo pipefail
+              echo "$(nexusPassword)" | docker login "$(nexusRegistry)" \
+                -u "$(nexusUsername)" --password-stdin
+            displayName: Docker login (Nexus)
+
+          - bash: |
+              set -euo pipefail
+              extra=()
+              if [[ "${{ parameters.pushLatestTag }}" == "True" || "${{ parameters.pushLatestTag }}" == "true" ]]; then
+                extra+=(--latest)
+              fi
+              ./docker/push-images.sh "${extra[@]}"
+            displayName: Push images to Nexus
+
+  - stage: Deploy
+    displayName: Deploy to server
+    dependsOn: BuildAndPush
+    condition: and(succeeded(), eq('${{ parameters.runDeploy }}', 'true'))
+    variables:
+      imageTag: $[ stageDependencies.BuildAndPush.Build.outputs['exportTags.imageTag'] ]
+      apiImageTag: $[ stageDependencies.BuildAndPush.Build.outputs['exportTags.apiImageTag'] ]
+      webImageTag: $[ stageDependencies.BuildAndPush.Build.outputs['exportTags.webImageTag'] ]
+    jobs:
+      - job: DeploySsh
+        displayName: SSH deploy
+        pool:
+          name: $(agentPool)
+        steps:
+          - bash: |
+              set -euo pipefail
+              targets="${{ parameters.buildTargets }}"
+              services="web"
+              if echo "${targets}" | grep -q api; then
+                services="api api_websocket worker worker_beat ${services}"
+              fi
+              if ! echo "${targets}" | grep -q web; then
+                services="${services/api api_websocket worker worker_beat /}"
+                services="${services/web/}"
+              fi
+              echo "##vso[task.setvariable variable=deployServices]${services}"
+            displayName: Resolve deploy services
+
+          - task: SSH@0
+            displayName: Run deploy-remote.sh on target
+            inputs:
+              sshEndpoint: $(deploySshServiceConnection)
+              runOptions: inline
+              failOnStdErr: false
+              inline: |
+                set -euo pipefail
+                export DEPLOY_PATH='$(deployPath)'
+                export DIFY_API_IMAGE='$(difyApiImage)'
+                export DIFY_WEB_IMAGE='$(difyWebImage)'
+                export DIFY_API_IMAGE_TAG='$(apiImageTag)'
+                export DIFY_WEB_IMAGE_TAG='$(webImageTag)'
+                export COMPOSE_FILE='$(composeFile)'
+                export DEPLOY_SERVICES='$(deployServices)'
+                export NEXUS_USERNAME='$(NEXUS_DOCKER_USERNAME)'
+                export NEXUS_PASSWORD='$(NEXUS_DOCKER_PASSWORD)'
+                export GIT_PULL=true
+                bash "${DEPLOY_PATH}/docker/deploy-remote.sh"
