@@ -1,7 +1,7 @@
 # Azure DevOps Server pipeline: build Dify images, push to Nexus, deploy via SSH.
 #
 
-trigger:none
+trigger: none
 pr: none
 
 parameters:
