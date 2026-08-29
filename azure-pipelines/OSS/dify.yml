@@ -107,22 +107,31 @@ stages:
               echo "##vso[task.setvariable variable=deployServices]${services}"
             displayName: Resolve deploy services
 
-          - task: SSH@0
-            displayName: Run deploy-remote.sh on target
-            inputs:
-              sshEndpoint: $(deploySshServiceConnection)
-              runOptions: inline
-              failOnStdErr: false
-              inline: |
-                set -euo pipefail
-                export DEPLOY_PATH='$(deployPath)'
-                export DIFY_API_IMAGE='$(difyApiImage)'
-                export DIFY_WEB_IMAGE='$(difyWebImage)'
-                export DIFY_API_IMAGE_TAG='$(apiImageTag)'
-                export DIFY_WEB_IMAGE_TAG='$(webImageTag)'
-                export COMPOSE_FILE='$(composeFile)'
-                export DEPLOY_SERVICES='$(deployServices)'
-                export NEXUS_USERNAME='$(NEXUS_DOCKER_USERNAME)'
-                export NEXUS_PASSWORD='$(NEXUS_DOCKER_PASSWORD)'
-                export GIT_PULL=true
-                bash "${DEPLOY_PATH}/docker/deploy-remote.sh"
+
+          - bash: |
+              SSH_KEY_10_2="$(SSH_KEY_10_2)"
+              SSH_TARGET="root@192.168.10.2"
+              SSH_OPTS=(-i "$SSH_KEY_10_2" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+              whoami 
+              ssh -i "$SSH_KEY_10_2" root@192.168.10.2 "whoami && docker ps"
+              ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "mkdir -p '$(deployPath)'"
+              ssh "${SSH_OPTS[@]}" "$SSH_TARGET" bash -s <<EOF
+              set -euo pipefail
+              export DEPLOY_PATH='$(deployPath)'
+              export DIFY_API_IMAGE='$(difyApiImage)'
+              export DIFY_WEB_IMAGE='$(difyWebImage)'
+              export DIFY_API_IMAGE_TAG='$(apiImageTag)'
+              export DIFY_WEB_IMAGE_TAG='$(webImageTag)'
+              export NEXUS_REGISTRY="$(nexusRegistry)"
+              export NEXUS_USER="$(NEXUS_USER)"
+              export NEXUS_PASSWORD="$(NEXUS_PASSWORD)"
+              export DEPLOY_DIR="$(deployPath)"
+              export GIT_PULL=true
+              export COMPOSE_FILE="docker-compose.yaml"
+              bash "${DEPLOY_PATH}/docker/deploy-remote.sh"
+              EOF
+            displayName: Deploy via SSH
+            env:
+              NEXUS_USER: $(NEXUS_DOCKER_USERNAME)
+              NEXUS_PASSWORD: $(NEXUS_DOCKER_USERNAME)
+              SSH_KEY_10_2: $(SSH_KEY_10_2)
