@@ -5,6 +5,10 @@ trigger: none
 pr: none
 
 parameters:
+  - name: sourceBranch
+    displayName: Branch to build
+    type: string
+    default: main
   - name: buildTargets
     displayName: Build targets
     type: string
@@ -40,6 +44,10 @@ stages:
           - checkout: self
             clean: true
             fetchDepth: 0
+
+          - bash: |
+              git checkout "${{ parameters.sourceBranch }}"
+            displayName: Checkout branch
 
           - bash: |
               chmod +x docker/build-images.sh docker/push-images.sh docker/deploy-remote.sh
