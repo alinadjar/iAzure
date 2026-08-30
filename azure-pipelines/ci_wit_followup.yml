@@ -28,7 +28,7 @@ parameters:
   - name: ADD_WI_COMMENT
     displayName: 'Add promotion comment to each work item?'
     type: string
-    default: 'YES'
+    default: 'NO'
     values:
       - YES
       - NO
