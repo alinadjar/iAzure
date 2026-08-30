@@ -22,9 +22,9 @@ variables:
   nexusRegistry:   nexus.sadgan.int
   nexusRepository: fx
   deploySshServiceConnection: Dify-Production-SSH
-  deployPath:   /opt/Dify  
+  deployPath:   /opt/Dify
   composeFile:  -f docker-compose.yaml -f docker-compose.local-build.yaml
-  agentPool:    FX_OSS      
+  agentPool:    FX_OSS
   difyApiImage: $(nexusRegistry)/$(nexusRepository)/dify-api
   difyWebImage: $(nexusRegistry)/$(nexusRepository)/dify-web
 
