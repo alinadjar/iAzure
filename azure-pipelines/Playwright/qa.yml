@@ -53,6 +53,7 @@ parameters:
       - '(all)'
       - bank
       - auth
+      - cash_accounts
       - receipt_payment_forms
       - receipt_entry_forms
       - payment_entry_forms
@@ -98,6 +99,7 @@ parameters:
       - '(all)'
       - tests/auth/
       - tests/bank/
+      - tests/cash_accounts/
       - tests/payment_entry_forms/
       - tests/receipt_entry_forms/
       - tests/receipt_payment_forms/
