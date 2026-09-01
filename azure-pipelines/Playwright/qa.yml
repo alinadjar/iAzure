@@ -51,8 +51,8 @@ parameters:
     default: '(all)'
     values:
       - '(all)'
-      - bank
       - auth
+      - bank
       - cash_accounts
       - receipt_payment_forms
       - receipt_entry_forms
