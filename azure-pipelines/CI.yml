@@ -1422,12 +1422,23 @@ stages:
             local wi_type="$2"
             local wi_title="$3"
             local wi_url="$4"
+            local wi_state="${5:-}"
             local icon
             icon=$(wi_type_icon "$wi_type")
             if [ -n "$wi_title" ] && [ -n "$wi_url" ]; then
-              printf '%s / %s / [%s](%s)' "$icon" "$wi_id" "$wi_title" "$wi_url"
+              if [ -n "$wi_state" ]; then
+                printf '%s / %s / %s / [%s](%s)' "$icon" "$wi_id" "$wi_state" "$wi_title" "$wi_url"
+              else
+                printf '%s / %s / [%s](%s)' "$icon" "$wi_id" "$wi_title" "$wi_url"
+              fi
             elif [ -n "$wi_title" ]; then
-              printf '%s / %s / %s' "$icon" "$wi_id" "$wi_title"
+              if [ -n "$wi_state" ]; then
+                printf '%s / %s / %s / %s' "$icon" "$wi_id" "$wi_state" "$wi_title"
+              else
+                printf '%s / %s / %s' "$icon" "$wi_id" "$wi_title"
+              fi
+            elif [ -n "$wi_state" ]; then
+              printf '%s / %s / %s' "$icon" "$wi_id" "$wi_state"
             else
               printf '%s / %s' "$icon" "$wi_id"
             fi
@@ -1475,7 +1486,7 @@ stages:
               wi_url="${ORG_URL}/${PROJECT}/_workitems/edit/${wi_id}"
             fi
             wi_icon=$(wi_type_icon "$wi_type")
-            wi_line=$(format_work_item_line "$wi_id" "$wi_type" "$wi_title" "$wi_url")
+            wi_line=$(format_work_item_line "$wi_id" "$wi_type" "$wi_title" "$wi_url" "$wi_state")
             echo "  Notify line: $wi_line"
             if [ -n "$wi_lines" ]; then
               wi_lines="${wi_lines}"$'\n'"${wi_line}"
