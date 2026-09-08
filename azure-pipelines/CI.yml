@@ -1417,28 +1417,46 @@ stages:
             esac
           }
 
+          wi_state_badge() {
+            local state="$1"
+            local normalized dot=""
+            normalized=$(echo "$state" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            case "$normalized" in
+              doing|developing) dot="🔵" ;;                       # active
+              test|"ui review"|"po review"|suspended) dot="🟡" ;; # review / waiting
+              release|done) dot="🟢" ;;                                # shipping
+              *) dot="⚪" ;;                                      # to do, done, removed, unknown
+            esac
+            if [ -n "$state" ]; then
+              printf '%s `%s`' "$dot" "$state"
+            fi
+          }
+
           format_work_item_line() {
             local wi_id="$1"
             local wi_type="$2"
             local wi_title="$3"
             local wi_url="$4"
             local wi_state="${5:-}"
-            local icon
+            local icon state_label=""
             icon=$(wi_type_icon "$wi_type")
+            if [ -n "$wi_state" ]; then
+              state_label=$(wi_state_badge "$wi_state")
+            fi
             if [ -n "$wi_title" ] && [ -n "$wi_url" ]; then
-              if [ -n "$wi_state" ]; then
-                printf '%s / %s / %s / [%s](%s)' "$icon" "$wi_id" "$wi_state" "$wi_title" "$wi_url"
+              if [ -n "$state_label" ]; then
+                printf '%s / %s / %s / [%s](%s)' "$icon" "$wi_id" "$state_label" "$wi_title" "$wi_url"
               else
                 printf '%s / %s / [%s](%s)' "$icon" "$wi_id" "$wi_title" "$wi_url"
               fi
             elif [ -n "$wi_title" ]; then
-              if [ -n "$wi_state" ]; then
-                printf '%s / %s / %s / %s' "$icon" "$wi_id" "$wi_state" "$wi_title"
+              if [ -n "$state_label" ]; then
+                printf '%s / %s / %s / %s' "$icon" "$wi_id" "$state_label" "$wi_title"
               else
                 printf '%s / %s / %s' "$icon" "$wi_id" "$wi_title"
               fi
-            elif [ -n "$wi_state" ]; then
-              printf '%s / %s / %s' "$icon" "$wi_id" "$wi_state"
+            elif [ -n "$state_label" ]; then
+              printf '%s / %s / %s' "$icon" "$wi_id" "$state_label"
             else
               printf '%s / %s' "$icon" "$wi_id"
             fi
