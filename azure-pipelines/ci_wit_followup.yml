@@ -208,7 +208,18 @@ steps:
           [ -n "$wi_tags" ] && echo "  Tags:   $wi_tags"
           [ -n "$wi_url" ] && echo "  URL:    $wi_url"
 
-          wi_icon="◦"
+          case "$(echo "$wi_type" | tr '[:upper:]' '[:lower:]')" in
+            *bug*) wi_icon=':bug:' ;;
+            *task*) wi_icon=':clipboard:' ;;
+            *product*backlog*|*pbi*) wi_icon=':bookmark:' ;;
+            *user*stor*|*story*) wi_icon=':notebook:' ;;
+            *feature*) wi_icon=':star:' ;;
+            *epic*) wi_icon=':crown:' ;;
+            *impediment*) wi_icon=':construction:' ;;
+            *issue*) wi_icon=':exclamation:' ;;
+            *test*) wi_icon=':white_check_mark:' ;;
+            *) wi_icon=':label:' ;;
+          esac
           wi_json_array=$(echo "$wi_json_array" | jq \
             --arg id "$wi_id" --arg type "$wi_type" --arg state "$wi_state" \
             --arg title "$wi_title" --arg url "$wi_url" --arg icon "$wi_icon" \
@@ -294,39 +305,71 @@ steps:
           fi
         }
 
-        force_rtl() {
-          # RLM + RLE … PDF — forces Mattermost markdown to render RTL
-          printf '%s%s%s' $'\u200F\u202B' "$1" $'\u202C'
+        rtl_text() {
+          # RLM only — full RLE wrapping breaks markdown tables and links
+          printf '%s%s' $'\u200F' "$1"
         }
 
-        # Markdown list item (not a Unicode bullet — those render large and break RTL)
-        format_work_item_line() {
+        escape_md_cell() {
+          printf '%s' "$1" | sed 's/|/\\|/g' | tr '\n\r' '  '
+        }
+
+        wi_type_icon() {
+          local t
+          t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+          case "$t" in
+            *bug*)                   printf '%s' ':bug:' ;;
+            *task*)                  printf '%s' ':clipboard:' ;;
+            *product*backlog*|*pbi*) printf '%s' ':bookmark:' ;;
+            *user*stor*|*story*)     printf '%s' ':notebook:' ;;
+            *feature*)               printf '%s' ':star:' ;;
+            *epic*)                  printf '%s' ':crown:' ;;
+            *impediment*)            printf '%s' ':construction:' ;;
+            *issue*)                 printf '%s' ':exclamation:' ;;
+            *test*)                  printf '%s' ':white_check_mark:' ;;
+            *)                       printf '%s' ':label:' ;;
+          esac
+        }
+
+        wi_type_short() {
+          local t
+          t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+          case "$t" in
+            *bug*)                   printf '%s' 'Bug' ;;
+            *task*)                  printf '%s' 'Task' ;;
+            *product*backlog*|*pbi*) printf '%s' 'PBI' ;;
+            *user*stor*|*story*)     printf '%s' 'Story' ;;
+            *feature*)               printf '%s' 'Feature' ;;
+            *epic*)                  printf '%s' 'Epic' ;;
+            *impediment*)            printf '%s' 'Imped.' ;;
+            *issue*)                 printf '%s' 'Issue' ;;
+            *test*)                  printf '%s' 'Test' ;;
+            *)                       printf '%s' "$1" ;;
+          esac
+        }
+
+        format_work_item_row() {
           local wi_id="$1"
           local wi_type="$2"
           local wi_title="$3"
           local wi_url="$4"
           local wi_state="${5:-}"
-          local state_label=""
+          local icon type_cell title_cell state_label=""
+          icon=$(wi_type_icon "$wi_type")
+          type_cell=$(printf '%s %s' "$icon" "$(wi_type_short "$wi_type")")
+          title_cell=$(escape_md_cell "$wi_title")
+          if [ -n "$title_cell" ]; then
+            title_cell=$(rtl_text "$title_cell")
+            if [ -n "$wi_url" ]; then
+              title_cell=$(printf '[%s](%s)' "$title_cell" "$wi_url")
+            fi
+          else
+            title_cell=$(printf '#%s' "$wi_id")
+          fi
           if [ -n "$wi_state" ]; then
             state_label=$(wi_state_badge "$wi_state")
           fi
-          if [ -n "$wi_title" ] && [ -n "$wi_url" ]; then
-            if [ -n "$state_label" ]; then
-              printf -- '- [%s](%s) · %s · #%s' "$wi_title" "$wi_url" "$state_label" "$wi_id"
-            else
-              printf -- '- [%s](%s) · #%s' "$wi_title" "$wi_url" "$wi_id"
-            fi
-          elif [ -n "$wi_title" ]; then
-            if [ -n "$state_label" ]; then
-              printf -- '- %s · %s · #%s' "$wi_title" "$state_label" "$wi_id"
-            else
-              printf -- '- %s · #%s' "$wi_title" "$wi_id"
-            fi
-          elif [ -n "$state_label" ]; then
-            printf -- '- %s · #%s' "$state_label" "$wi_id"
-          else
-            printf -- '- #%s' "$wi_id"
-          fi
+          printf '| %s | %s | %s | #%s |' "$type_cell" "$title_cell" "$state_label" "$wi_id"
         }
 
         fetch_work_item() {
@@ -335,7 +378,7 @@ steps:
             "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0" 2>/dev/null || echo '{}'
         }
 
-        wi_lines=""
+        wi_table=$(printf '%s\n%s' '| | Title | State | ID |' '|:--:|:--|:-:|:-:|')
         wi_json_array='[]'
 
         if [ -n "${WORK_ITEMS_NOTIFY_B64:-}" ]; then
@@ -371,14 +414,10 @@ steps:
           if [ -z "$wi_url" ] || [ "$wi_url" = "null" ]; then
             wi_url="${ORG_URL}/${PROJECT}/_workitems/edit/${wi_id}"
           fi
-          wi_icon="-"
-          wi_line=$(format_work_item_line "$wi_id" "$wi_type" "$wi_title" "$wi_url" "$wi_state")
-          echo "  Notify line: $wi_line"
-          if [ -n "$wi_lines" ]; then
-            wi_lines="${wi_lines}"$'\n'"${wi_line}"
-          else
-            wi_lines="$wi_line"
-          fi
+          wi_icon=$(wi_type_icon "$wi_type")
+          wi_line=$(format_work_item_row "$wi_id" "$wi_type" "$wi_title" "$wi_url" "$wi_state")
+          echo "  Notify row: $wi_line"
+          wi_table="${wi_table}"$'\n'"${wi_line}"
           wi_json_array=$(echo "$wi_json_array" | jq \
             --arg id "$wi_id" --arg type "$wi_type" --arg state "$wi_state" \
             --arg title "$wi_title" --arg url "$wi_url" --arg icon "$wi_icon" \
@@ -387,13 +426,14 @@ steps:
         done < <(echo "$WI_NOTIFY_JSON" | jq -c '.[]')
 
         TAG_LABEL="${TAG_APPLIED:-<none>}"
-        MM_BODY=$(printf '%b' "**Branch promotion:** \`${SOURCE_BRANCH}\` ← \`${TARGET_BRANCH}\`  ·  **Tag:** \`${TAG_LABEL}\`  ·  [Build #${BUILD_NUMBER}](${BUILD_URL})\n_${NOTIFY_DT}_\n\n${wi_lines}")
+        # Do not wrap the table in RLE — that reverses columns. RTL is applied to titles only.
+        MM_BODY=$(printf '%b' "**Branch promotion:** \`${SOURCE_BRANCH}\` ← \`${TARGET_BRANCH}\`  ·  **Tag:** \`${TAG_LABEL}\`  ·  [Build #${BUILD_NUMBER}](${BUILD_URL})\n_${NOTIFY_DT}_\n\n${wi_table}")
 
         if [ -n "$MM_USER" ] && echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
           MM_BODY="${MM_BODY}"$'\n\n'"@${MM_USER}"
         fi
 
-        MM_TEXT=$(force_rtl "$MM_BODY")
+        MM_TEXT="$MM_BODY"
 
         MM_TARGET=""
         if [ -n "$MM_USER" ] && ! echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
