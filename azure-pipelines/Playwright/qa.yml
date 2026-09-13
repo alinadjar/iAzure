@@ -458,6 +458,7 @@ steps:
     displayName: 'Write evaluation-result (JSON + Redis)'
     condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     env:
+      AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
       REDIS_URL: $(REDIS_URL)
       EVAL_REDIS_PREFIX: 'qa:api:eval'
       EVAL_REDIS_TTL_SECONDS: '86400'
