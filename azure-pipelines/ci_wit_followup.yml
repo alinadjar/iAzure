@@ -259,7 +259,7 @@ steps:
       MM_BOT_TOKEN: $(MM_BOT_TOKEN)
       MATTERMOST_BOT_TOKEN: $(MATTERMOST_BOT_TOKEN)
       MM_WI_TAG_JWT: $(JWT_TOKEN_WFN8N___WI-Tag-Notif)
-      MM_CHANNEL: 5n9f4s6jrtn63kmmajz5dzij7o
+      MM_CHANNEL: 7rj46o9qwjfpxfgwzw4fjpjaph
       MM_USERNAME: 'p.akhlaghpour'
     inputs:
       targetType: 'inline'
