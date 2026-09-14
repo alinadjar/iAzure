@@ -473,13 +473,13 @@ steps:
   #     AZURE_TEST_PLAN_TARGET: ${{ parameters.testPlanTarget }}
   #     ASSEMBLY: ${{ parameters.assembly }}
 
-  - task: PublishBuildArtifacts@1
-    condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
-    inputs:
-      PathtoPublish: '$(apiDir)/evaluation-result'
-      ArtifactName: 'evaluation-result'
-      publishLocation: 'Container'
-    displayName: 'Publish evaluation-result artifact'
+  # - task: PublishBuildArtifacts@1
+  #   condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+  #   inputs:
+  #     PathtoPublish: '$(apiDir)/evaluation-result'
+  #     ArtifactName: 'evaluation-result'
+  #     publishLocation: 'Container'
+  #   displayName: 'Publish evaluation-result artifact'
 
   # ── 5. Publish JUnit (Tests tab) ─────────────────────────────
   - task: PublishTestResults@2
