@@ -283,7 +283,44 @@ steps:
             echo "================================================================="
 
 
-            redis-cli -h  "$(REDIS_HOST)" -p "$REDIS_PORT"   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+            # redis-cli -h  "$(REDIS_HOST)" -p "$REDIS_PORT"   SET  fx:version "{\"tag\":\"${DOCKER_TAG}\",\"assembly\":\"${ASSEMBLY}\",\"last_updated\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+            BACKEND_IMAGE="registry.sadgan.com/fx/backend:${DOCKER_TAG}"
+            FRONT_IMAGE="registry.sadgan.com/fx/front:${DOCKER_TAG}"
+
+            echo "🐳 Pulling Docker images..."
+            echo "   Backend: ${BACKEND_IMAGE}"
+            docker pull "$BACKEND_IMAGE"
+            echo "   Front: ${FRONT_IMAGE}"
+            docker pull "$FRONT_IMAGE"
+
+            BACKEND_SIZE=$(docker image inspect "$BACKEND_IMAGE" --format '{{.Size}}')
+            FRONT_SIZE=$(docker image inspect "$FRONT_IMAGE" --format '{{.Size}}')
+            BACKEND_SIZE_HUMAN=$(docker images "$BACKEND_IMAGE" --format '{{.Size}}')
+            FRONT_SIZE_HUMAN=$(docker images "$FRONT_IMAGE" --format '{{.Size}}')
+
+            echo "   Backend size: ${BACKEND_SIZE_HUMAN} (${BACKEND_SIZE} bytes)"
+            echo "   Front size: ${FRONT_SIZE_HUMAN} (${FRONT_SIZE} bytes)"
+
+            REDIS_PAYLOAD=$(jq -n \
+              --arg tag "$DOCKER_TAG" \
+              --arg assembly "$ASSEMBLY" \
+              --arg last_updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --argjson backend_size "$BACKEND_SIZE" \
+              --argjson front_size "$FRONT_SIZE" \
+              --arg backend_size_human "$BACKEND_SIZE_HUMAN" \
+              --arg front_size_human "$FRONT_SIZE_HUMAN" \
+              '{
+                tag: $tag,
+                assembly: $assembly,
+                last_updated: $last_updated,
+                backend_size: $backend_size,
+                front_size: $front_size,
+                backend_size_human: $backend_size_human,
+                front_size_human: $front_size_human
+              }')
+
+            redis-cli -h "$(REDIS_HOST)" -p "$REDIS_PORT" SET fx:version "$REDIS_PAYLOAD"
+
             # redis-cli -h  "$(REDIS_HOST)" -p "$REDIS_PORT"   GET fx:version | jq .
             echo "curling https://get.sadgan.com/releases/fx:"
             curl -fsSL https://get.sadgan.com/releases/fx | jq .
