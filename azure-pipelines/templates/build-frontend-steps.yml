@@ -193,13 +193,15 @@ steps:
   displayName: "Override appsettings.json (Frontend)"
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
-# Create global NuGet.Config
+# Per-job NuGet.Config (avoid shared /usr/share race when multiple agents build in parallel)
 - bash: |
     # Nuget SSL
-    echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"    
+    echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"
 
-    sudo mkdir -p /usr/share
-    echo '<?xml version="1.0" encoding="utf-8"?>
+    NUGET_CONFIG="$(Agent.TempDirectory)/NuGet.Config"
+    mkdir -p "$(Agent.TempDirectory)"
+    cat > "$NUGET_CONFIG" <<EOF
+    <?xml version="1.0" encoding="utf-8"?>
     <configuration>
       <packageSources>
         <clear />
@@ -211,14 +213,16 @@ steps:
           <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
         </NupkgWeb2>
       </packageSourceCredentials>
-    </configuration>' | sudo tee /usr/share/NuGet.Config > /dev/null
+    </configuration>
+    EOF
 
     # Remove project-specific NuGet.Config files
     find $(Build.SourcesDirectory) -name "NuGet.Config" -type f -delete
 
-    ls -l /usr/share/NuGet.Config
-    cat /usr/share/NuGet.Config
-  displayName: 'Create global NuGet.Config (Frontend)'
+    echo "##vso[task.setvariable variable=NUGET_CONFIG_PATH]$NUGET_CONFIG"
+    ls -l "$NUGET_CONFIG"
+    cat "$NUGET_CONFIG"
+  displayName: 'Create NuGet.Config (Frontend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
   env:
     BOT_TOKEN: $(BOT_TOKEN)
@@ -226,8 +230,8 @@ steps:
 # .Net Restore
 - bash: |
     export PATH="/opt/net_sdk_10:$PATH"
-    
-    dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config # --verbosity detailed
+    export MSBUILDDISABLENODEREUSE=1
+    dotnet restore "$(solution)" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
   displayName: 'Dotnet Restore (Frontend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
@@ -319,22 +323,25 @@ steps:
 
 
 - bash: |
+    set -e
     export PATH="/opt/net_sdk_10:$PATH"
-    dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish  --disable-parallel  -p:BuildInParallel=false  -p:NodeReuse=false
+    export MSBUILDDISABLENODEREUSE=1
+    export DOTNET_CLI_TELEMETRY_OPTOUT=1
+    mkdir -p "$(Build.ArtifactStagingDirectory)/publish"
+    dotnet publish "$(solution)" \
+      --no-restore \
+      --configuration $(buildConfiguration) \
+      --output "$(Build.ArtifactStagingDirectory)/publish" \
+      --disable-parallel \
+      -p:BuildInParallel=false \
+      -p:NodeReuse=false \
+      -m:1
 
-    # Retry build up to 3 times
-    # for i in 1 2 3; do
-    #   dotnet publish "$(solution)" \
-    #     --no-restore \
-    #     --configuration $(buildConfiguration) \
-    #     --output $(Build.ArtifactStagingDirectory)/publish \
-    #     --disable-parallel && break || sleep 5
-    # done
-
-
-    cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+    cp "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json" "$(Build.ArtifactStagingDirectory)/publish/wwwroot/"
   displayName: 'Publish Solution (Frontend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  env:
+    MSBUILDDISABLENODEREUSE: '1'
 
 # Cache Busting (Frontend only)
 # - bash: |
