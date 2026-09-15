@@ -1,6 +1,6 @@
 trigger: none
 pool:
-  name: 'FX_OSS'
+  name: 'WEB-1'
 
 parameters:
 - name: SHOULD_RELEASE
@@ -72,7 +72,7 @@ stages:
   - job: Build_Frontend
     displayName: 'Build Frontend'
     condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'front'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
-    pool: 'FX_OSS'
+    pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
       DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
@@ -330,7 +330,7 @@ stages:
   - job: Build_Backend
     displayName: 'Build Backend'
     condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
-    pool: 'FX_OSS'
+    pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
       DOCKER_IMG: $(DOCKER_REGISTRY)/fx/backend
