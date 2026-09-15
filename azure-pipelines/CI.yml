@@ -217,6 +217,50 @@ stages:
           }
 
           # Extract work item IDs from PR commits (REST) and link them to the PR
+          # extract_work_item_ids_from_pr() {
+          #   local project_api_url="$1"
+          #   local repo_id="$2"
+          #   local pr_id="$3"
+          #   local repo_id_clean
+          #   local pr_id_clean
+          #   local commits_url
+          #   local commits_json
+          #   local commit_count
+          #   local tmp_ids
+          #   local commit_id
+          #   local wi_url
+          #   local wi_json
+            
+          #   repo_id_clean=$(clean_repo_id "$repo_id")
+          #   pr_id_clean=$(echo "$pr_id" | tr -d '\n\r ')
+          #   tmp_ids=$(mktemp)
+            
+          #   echo "  🔗 Extracting work items from PR $pr_id_clean commits..." >&2
+          #   commits_url="${project_api_url}/git/repositories/${repo_id_clean}/pullrequests/${pr_id_clean}/commits?api-version=7.0&\$top=500"
+          #   commits_json=$(call_api "$commits_url") || {
+          #     echo "  ⚠️ Failed to list PR commits" >&2
+          #     rm -f "$tmp_ids"
+          #     return 0
+          #   }
+            
+          #   commit_count=$(echo "$commits_json" | jq '.value | length')
+          #   echo "  📋 PR commits found: $commit_count" >&2
+            
+          #   # Parse #123 / AB#123 from commit messages
+          #   echo "$commits_json" | jq -r '.value[].comment // empty' \
+          #     | grep -oE '(AB#|#)[0-9]+' | sed 's/AB#//;s/#//' >> "$tmp_ids" 2>/dev/null || true
+            
+          #   # Work items already associated with commits in Azure DevOps
+          #   while IFS= read -r commit_id; do
+          #     [ -z "$commit_id" ] && continue
+          #     wi_url="${project_api_url}/git/repositories/${repo_id_clean}/commits/${commit_id}/workItems?api-version=7.0"
+          #     wi_json=$(call_api "$wi_url") || continue
+          #     echo "$wi_json" | jq -r '.value[]?.id // empty' >> "$tmp_ids" 2>/dev/null || true
+          #   done < <(echo "$commits_json" | jq -r '.value[].commitId')
+            
+          #   sort -u "$tmp_ids" | grep -E '^[0-9]+$' || true
+          #   rm -f "$tmp_ids"
+          # }
           extract_work_item_ids_from_pr() {
             local project_api_url="$1"
             local repo_id="$2"
@@ -246,17 +290,28 @@ stages:
             commit_count=$(echo "$commits_json" | jq '.value | length')
             echo "  📋 PR commits found: $commit_count" >&2
             
-            # Parse #123 / AB#123 from commit messages
-            echo "$commits_json" | jq -r '.value[].comment // empty' \
-              | grep -oE '(AB#|#)[0-9]+' | sed 's/AB#//;s/#//' >> "$tmp_ids" 2>/dev/null || true
-            
-            # Work items already associated with commits in Azure DevOps
-            while IFS= read -r commit_id; do
+            # Process each commit; skip auto-generated merge commits (e.g. "Merged PR 35972: ...").
+            # They duplicate feature commits and can yield wrong work item IDs from long/truncated
+            # messages or stale ADO commit associations.
+            while IFS= read -r commit_obj; do
+              local commit_id comment
+              commit_id=$(echo "$commit_obj" | jq -r '.commitId // empty')
+              comment=$(echo "$commit_obj" | jq -r '.comment // ""')
               [ -z "$commit_id" ] && continue
+              
+              if [[ "$comment" == "Merged PR"* ]] || [[ "$comment" == "Merge pull request"* ]] || [[ "$comment" == "Merge branch"* ]]; then
+                echo "  ⏭️ Skipping merge commit: $(echo "$comment" | cut -c1-80)" >&2
+                continue
+              fi
+              
+              # Parse #123 / AB#123 from commit message
+              echo "$comment" | grep -oE '(AB#|#)[0-9]+' | sed 's/AB#//;s/#//' >> "$tmp_ids" 2>/dev/null || true
+              
+              # Work items already associated with commits in Azure DevOps
               wi_url="${project_api_url}/git/repositories/${repo_id_clean}/commits/${commit_id}/workItems?api-version=7.0"
               wi_json=$(call_api "$wi_url") || continue
               echo "$wi_json" | jq -r '.value[]?.id // empty' >> "$tmp_ids" 2>/dev/null || true
-            done < <(echo "$commits_json" | jq -r '.value[].commitId')
+            done < <(echo "$commits_json" | jq -c '.value[]?')
             
             sort -u "$tmp_ids" | grep -E '^[0-9]+$' || true
             rm -f "$tmp_ids"
