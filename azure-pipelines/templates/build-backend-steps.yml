@@ -191,13 +191,15 @@ steps:
   displayName: "Override appsettings.json (Backend)"
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
 
-# Create global NuGet.Config
+# Per-job NuGet.Config (avoid shared /usr/share race when multiple agents build in parallel)
 - bash: |
     # Nuget SSL
-    echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"    
+    echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"
 
-    sudo mkdir -p /usr/share
-    echo '<?xml version="1.0" encoding="utf-8"?>
+    NUGET_CONFIG="$(Agent.TempDirectory)/NuGet.Config"
+    mkdir -p "$(Agent.TempDirectory)"
+    cat > "$NUGET_CONFIG" <<EOF
+    <?xml version="1.0" encoding="utf-8"?>
     <configuration>
       <packageSources>
         <clear />
@@ -210,14 +212,16 @@ steps:
           <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
         </NupkgWeb2>
       </packageSourceCredentials>
-    </configuration>' | sudo tee /usr/share/NuGet.Config > /dev/null
+    </configuration>
+    EOF
 
     # Remove project-specific NuGet.Config files
     find $(Build.SourcesDirectory) -name "NuGet.Config" -type f -delete
 
-    ls -l /usr/share/NuGet.Config
-    cat /usr/share/NuGet.Config
-  displayName: 'Create global NuGet.Config (Backend)'
+    echo "##vso[task.setvariable variable=NUGET_CONFIG_PATH]$NUGET_CONFIG"
+    ls -l "$NUGET_CONFIG"
+    cat "$NUGET_CONFIG"
+  displayName: 'Create NuGet.Config (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
   env:
     BOT_TOKEN: $(BOT_TOKEN)
@@ -226,8 +230,9 @@ steps:
 # .Net Restore
 - bash: |
     export PATH="/opt/net_sdk_10:$PATH"
+    export MSBUILDDISABLENODEREUSE=1
     dotnet --info
-    dotnet restore "$(solution)" --configfile /usr/share/NuGet.Config
+    dotnet restore "$(solution)" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
   displayName: 'Dotnet Restore (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
             
@@ -240,11 +245,25 @@ steps:
     
 
 - bash: |
+    set -e
     export PATH="/opt/net_sdk_10:$PATH"
-    dotnet publish "$(solution)" --no-restore --configuration $(buildConfiguration) -p:Optimize=false --output $(Build.ArtifactStagingDirectory)/publish
-    cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json $(Build.ArtifactStagingDirectory)/publish/
+    export MSBUILDDISABLENODEREUSE=1
+    export DOTNET_CLI_TELEMETRY_OPTOUT=1
+    mkdir -p "$(Build.ArtifactStagingDirectory)/publish"
+    dotnet publish "$(solution)" \
+      --no-restore \
+      --configuration $(buildConfiguration) \
+      -p:Optimize=false \
+      --output "$(Build.ArtifactStagingDirectory)/publish" \
+      --disable-parallel \
+      -p:BuildInParallel=false \
+      -p:NodeReuse=false \
+      -m:1
+    cp "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json" "$(Build.ArtifactStagingDirectory)/publish/"
   displayName: 'Publish Solution (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  env:
+    MSBUILDDISABLENODEREUSE: '1'
     
 
 - bash: |
