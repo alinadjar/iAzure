@@ -1,0 +1,75 @@
+# Removes stale AI preview stacks from the preview host.
+trigger: none
+
+schedules:
+  - cron: '0 2 * * *'
+    displayName: 'Nightly preview cleanup'
+    branches:
+      include:
+        - cicd
+    always: true
+
+pool:
+  name: 'WEB-1'
+
+parameters:
+  - name: PREVIEW_HOST
+    type: string
+    default: '192.168.10.220'
+  - name: PREVIEW_BASE_PATH
+    type: string
+    default: '/usr/local/apps/fx/preview'
+  - name: PREVIEW_SSH_USER
+    type: string
+    default: 'azurebot'
+  - name: MAX_AGE_DAYS
+    type: string
+    default: '7'
+
+steps:
+  - checkout: none
+
+  - bash: |
+      set -euo pipefail
+
+      PREVIEW_HOST='${{ parameters.PREVIEW_HOST }}'
+      PREVIEW_BASE_PATH='${{ parameters.PREVIEW_BASE_PATH }}'
+      PREVIEW_SSH_USER='${{ parameters.PREVIEW_SSH_USER }}'
+      MAX_AGE_DAYS='${{ parameters.MAX_AGE_DAYS }}'
+
+      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+      REMOTE="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
+
+      if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
+        KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key"
+        printf '%s\n' "$PREVIEW_SSH_PRIVATE_KEY" > "$KEY_FILE"
+        chmod 600 "$KEY_FILE"
+        SSH_OPTS="$SSH_OPTS -i $KEY_FILE"
+      fi
+
+      ssh $SSH_OPTS "$REMOTE" bash -s <<EOF
+      set -euo pipefail
+      BASE='${PREVIEW_BASE_PATH}'
+      MAX_AGE='${MAX_AGE_DAYS}'
+
+      if [ ! -d "\$BASE" ]; then
+        echo "Nothing to clean under \$BASE"
+        exit 0
+      fi
+
+      find "\$BASE" -mindepth 1 -maxdepth 1 -type d -mtime +\${MAX_AGE} | while read -r dir; do
+        task_id=\$(basename "\$dir")
+        if ! [[ "\$task_id" =~ ^[0-9]+$ ]]; then
+          echo "Skipping non-task folder: \$dir"
+          continue
+        fi
+        echo "Removing stale preview task \$task_id (\$dir)"
+        cd "\$dir"
+        export COMPOSE_PROJECT_NAME="preview-\${task_id}"
+        docker compose down -v --remove-orphans || true
+        rm -rf "\$dir"
+      done
+      EOF
+    displayName: 'Remove preview stacks older than ${{ parameters.MAX_AGE_DAYS }} days'
+    env:
+      PREVIEW_SSH_PRIVATE_KEY: $(PREVIEW_SSH_PRIVATE_KEY)
