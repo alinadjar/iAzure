@@ -7,7 +7,7 @@
 trigger:
   branches:
     include:
-      - task/*
+      - wi/*
 
 pool:
   name: 'WEB-1'
@@ -39,7 +39,7 @@ parameters:
   - name: PREVIEW_HOST
     type: string
     displayName: 'Preview server IP/hostname'
-    default: '192.168.10.220'
+    default: '192.168.10.160'
   - name: PREVIEW_BASE_PATH
     type: string
     displayName: 'Base deploy path on preview server'
@@ -47,7 +47,7 @@ parameters:
   - name: PREVIEW_SSH_USER
     type: string
     displayName: 'SSH user on preview server'
-    default: 'azurebot'
+    default: 'devops'
   - name: ADD_WI_COMMENT
     type: string
     displayName: 'Comment preview URL on work item?'
@@ -105,8 +105,8 @@ stages:
 
               PREVIEW_BASE_PATH='${{ parameters.PREVIEW_BASE_PATH }}'
               DEPLOY_PATH="${PREVIEW_BASE_PATH}/${TASK_ID}"
-              FRONT_HOST="${TASK_ID}.fx.local.sadgan.int"
-              API_HOST="${TASK_ID}.api.fx.local.sadgan.int"
+              FRONT_HOST="${TASK_ID}.local.sadgan.int"
+              API_HOST="${TASK_ID}-api.local.sadgan.int"
 
               echo "TASK_ID      : $TASK_ID"
               echo "BRANCH       : $BRANCH"
