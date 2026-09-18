@@ -13,10 +13,10 @@ parameters:
     type: string
   - name: PREVIEW_HOST
     type: string
-    default: '192.168.10.220'
+    default: '192.168.10.160'
   - name: PREVIEW_SSH_USER
     type: string
-    default: 'azurebot'
+    default: 'devops'
   - name: ADD_WI_COMMENT
     type: string
     default: 'YES'
@@ -50,7 +50,7 @@ steps:
       BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
       git clone --branch cicd --depth 1 "$BASE_URL/SadganErp/_git/CICD" "$WORK_DIR/cicd-src"
 
-      PREVIEW_SRC="$WORK_DIR/cicd-src/preview"
+      PREVIEW_SRC="$WORK_DIR/cicd-src/azure-pipelines/preview/release"
       if [ ! -f "$PREVIEW_SRC/compose.yaml" ]; then
         echo "preview/compose.yaml not found in CICD repo (branch: cicd)"
         ls -la "$WORK_DIR/cicd-src" || true
