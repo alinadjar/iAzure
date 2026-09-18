@@ -1,0 +1,458 @@
+# AI agent preview pipeline
+# - Requires TASK_ID (parameter or parsed from branch task/{id}-*)
+# - Builds front/back images tagged task-{TASK_ID}_{timestamp}
+# - Deploys to {PREVIEW_BASE_PATH}/{TASK_ID} on the preview host
+# - Routes via Traefik: {TASK_ID}.fx.local.sadgan.int / {TASK_ID}.api.fx.local.sadgan.int
+
+trigger:
+  branches:
+    include:
+      - task/*
+
+pool:
+  name: 'WEB-1'
+
+parameters:
+  - name: TASK_ID
+    type: string
+    displayName: 'Azure Board Task ID (required if branch does not contain it)'
+    default: ''
+  - name: BRANCH
+    type: string
+    displayName: 'Source branch (empty = triggering branch)'
+    default: ''
+  - name: BUILD_COMPONENTS
+    type: string
+    displayName: 'Components to build'
+    default: 'both'
+    values:
+      - front
+      - back
+      - both
+  - name: SHOULD_DEPLOY
+    type: string
+    displayName: 'Deploy preview after successful build?'
+    default: 'true'
+    values:
+      - 'true'
+      - 'false'
+  - name: PREVIEW_HOST
+    type: string
+    displayName: 'Preview server IP/hostname'
+    default: '192.168.10.220'
+  - name: PREVIEW_BASE_PATH
+    type: string
+    displayName: 'Base deploy path on preview server'
+    default: '/usr/local/apps/fx/preview'
+  - name: PREVIEW_SSH_USER
+    type: string
+    displayName: 'SSH user on preview server'
+    default: 'azurebot'
+  - name: ADD_WI_COMMENT
+    type: string
+    displayName: 'Comment preview URL on work item?'
+    default: 'YES'
+    values:
+      - YES
+      - NO
+
+variables:
+  - name: buildConfiguration
+    value: 'Release'
+  - name: orgUrl
+    value: 'http://azure.sadgan.int/WebApp'
+  - name: project
+    value: 'SadganErp'
+  - name: shouldDeploy
+    value: ${{ eq(parameters.SHOULD_DEPLOY, 'true') }}
+  - name: System.Diagnostics.DefaultLogDirectory
+    value: '$(Agent.TempDirectory)/diag'
+
+stages:
+  - stage: INIT
+    displayName: 'Init'
+    jobs:
+      - job: InitJob
+        displayName: 'Resolve TASK_ID and preview targets'
+        steps:
+          - checkout: none
+          - bash: |
+              set -euo pipefail
+
+              TASK_ID='${{ parameters.TASK_ID }}'
+              BRANCH='${{ parameters.BRANCH }}'
+              SOURCE_BRANCH="$(Build.SourceBranch)"
+
+              if [ -z "$BRANCH" ]; then
+                BRANCH="${SOURCE_BRANCH#refs/heads/}"
+              fi
+
+              if [ -z "$TASK_ID" ]; then
+                if echo "$BRANCH" | grep -Eq '(^|/)task/[0-9]+'; then
+                  TASK_ID=$(echo "$BRANCH" | sed -E 's|.*/task/([0-9]+).*|\1|')
+                elif echo "$BRANCH" | grep -Eq '^[0-9]+'; then
+                  TASK_ID=$(echo "$BRANCH" | sed -E 's|^([0-9]+).*|\1|')
+                fi
+              fi
+
+              if ! [[ "$TASK_ID" =~ ^[0-9]+$ ]]; then
+                echo "ERROR: TASK_ID must be a numeric Azure work item ID."
+                echo "  Parameter TASK_ID : '${{ parameters.TASK_ID }}'"
+                echo "  Branch            : $BRANCH"
+                echo "  Expected branch   : task/12345-description"
+                exit 1
+              fi
+
+              PREVIEW_BASE_PATH='${{ parameters.PREVIEW_BASE_PATH }}'
+              DEPLOY_PATH="${PREVIEW_BASE_PATH}/${TASK_ID}"
+              FRONT_HOST="${TASK_ID}.fx.local.sadgan.int"
+              API_HOST="${TASK_ID}.api.fx.local.sadgan.int"
+
+              echo "TASK_ID      : $TASK_ID"
+              echo "BRANCH       : $BRANCH"
+              echo "DEPLOY_PATH  : $DEPLOY_PATH"
+              echo "FRONT_HOST   : $FRONT_HOST"
+              echo "API_HOST     : $API_HOST"
+
+              IMAGE_TAG="task-${TASK_ID}_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
+
+              echo "##vso[task.setvariable variable=TASK_ID;isOutput=true]$TASK_ID"
+              echo "##vso[task.setvariable variable=CURRENT_BRANCH;isOutput=true]$BRANCH"
+              echo "##vso[task.setvariable variable=DEPLOY_PATH;isOutput=true]$DEPLOY_PATH"
+              echo "##vso[task.setvariable variable=FRONT_HOST;isOutput=true]$FRONT_HOST"
+              echo "##vso[task.setvariable variable=API_HOST;isOutput=true]$API_HOST"
+              echo "##vso[task.setvariable variable=IMAGE_TAG;isOutput=true]$IMAGE_TAG"
+              echo "IMAGE_TAG    : $IMAGE_TAG"
+            displayName: 'Resolve task preview settings'
+            name: init
+
+  - stage: Build
+    displayName: 'Build'
+    dependsOn: INIT
+    variables:
+      TASK_ID: $[ stageDependencies.INIT.InitJob.outputs['init.TASK_ID'] ]
+      CURRENT_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.CURRENT_BRANCH'] ]
+      API_HOST: $[ stageDependencies.INIT.InitJob.outputs['init.API_HOST'] ]
+      IMAGE_TAG: $[ stageDependencies.INIT.InitJob.outputs['init.IMAGE_TAG'] ]
+    jobs:
+      - job: Build_Frontend
+        displayName: 'Build Frontend'
+        condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'front'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
+        pool: 'WEB-1'
+        variables:
+          solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
+          DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
+          GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_frontend
+          GIT_HOME: $(Agent.TempDirectory)/home_$(Build.BuildId)_frontend
+        steps:
+          - checkout: none
+
+          - bash: |
+              set -e
+              mkdir -p "$GIT_HOME"
+              export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
+
+              git config --file "$GIT_CONFIG_GLOBAL" user.email "S_Bot_Azure@sadgan.int"
+              git config --file "$GIT_CONFIG_GLOBAL" user.name "S_Bot_Azure"
+              git config --file "$GIT_CONFIG_GLOBAL" http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+              git config --file "$GIT_CONFIG_GLOBAL" http.sslVerify false
+              git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory '*'
+
+              BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+              CURRENT_BRANCH="$(CURRENT_BRANCH)"
+              echo "Cloning branch: $CURRENT_BRANCH"
+
+              clone_or_pull() {
+                local branch_name="$1"
+                local repo_url="$2"
+                local target_dir="$3"
+                rm -rf "$target_dir"
+                git clone --branch "$branch_name" "$repo_url" "$target_dir"
+              }
+
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/1_Configs"           "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/2_SharedLibrary"     "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/4_ServerLibrary"     "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/3_ClientLibrary"     "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary"
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"       "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core" "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"
+              clone_or_pull cicd              "$BASE_URL/SadganErp/_git/CICD"                   "$(System.DefaultWorkingDirectory)/CICD"
+
+              cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+              FRONTEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+              echo "##vso[task.setvariable variable=FRONTEND_COMMIT;isOutput=true]$FRONTEND_COMMIT"
+              echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$FRONTEND_COMMIT"
+            displayName: 'Git Checkout'
+            name: gitPull
+            env:
+              GIT_PAT: $(GIT_PAT)
+              GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
+              GIT_HOME: $(GIT_HOME)
+
+          - bash: |
+              NEW_TAG="$(IMAGE_TAG)"
+              echo "Using tag: $NEW_TAG"
+              echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+              echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+              echo "##vso[task.setvariable variable=FRONTEND_TAG;isOutput=true]$NEW_TAG"
+            displayName: 'Version Assign (Frontend)'
+            name: tagSetting
+
+          - bash: |
+              configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
+              sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>0.0.0.0</AssemblyVersion>|" "$configPropsFile"
+            displayName: 'Assembly Version Set'
+
+          - bash: |
+              sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.pipe.json"
+              destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json"
+              cp -f "$sourceFile" "$destinationFile"
+            displayName: 'Override appsettings.json (Frontend)'
+
+          - bash: |
+              NUGET_CONFIG="$(Agent.TempDirectory)/NuGet.Config"
+              cat > "$NUGET_CONFIG" <<EOF
+              <?xml version="1.0" encoding="utf-8"?>
+              <configuration>
+                <packageSources>
+                  <clear />
+                  <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+                  <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
+                </packageSources>
+                <packageSourceCredentials>
+                  <NupkgWeb2>
+                    <add key="Username" value="S_Bot_Azure" />
+                    <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
+                  </NupkgWeb2>
+                </packageSourceCredentials>
+              </configuration>
+              EOF
+              find $(Build.SourcesDirectory) -name "NuGet.Config" -type f -delete
+              echo "##vso[task.setvariable variable=NUGET_CONFIG_PATH]$NUGET_CONFIG"
+            displayName: 'Create NuGet.Config (Frontend)'
+            env:
+              BOT_TOKEN: $(BOT_TOKEN)
+
+          - bash: |
+              export PATH="/opt/net_sdk_10:$PATH"
+              export MSBUILDDISABLENODEREUSE=1
+              dotnet restore "$(solution)" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
+            displayName: 'Dotnet Restore (Frontend)'
+
+          - bash: |
+              export PATH="/opt/net_sdk_10:$PATH"
+              cd $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp
+              rm global.json 2>/dev/null || true
+              cp -r /opt/node_modules .
+              chmod -R +x node_modules/.bin
+              rm $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/global.json 2>/dev/null || true
+            displayName: 'Build TailWind'
+
+          - bash: |
+              set -e
+              export PATH="/opt/net_sdk_10:$PATH"
+              export MSBUILDDISABLENODEREUSE=1
+              mkdir -p "$(Build.ArtifactStagingDirectory)/publish"
+              dotnet publish "$(solution)" \
+                --no-restore \
+                --configuration $(buildConfiguration) \
+                --output "$(Build.ArtifactStagingDirectory)/publish" \
+                --disable-parallel \
+                -p:BuildInParallel=false \
+                -p:NodeReuse=false \
+                -m:1
+              cp "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json" "$(Build.ArtifactStagingDirectory)/publish/wwwroot/"
+            displayName: 'Publish Solution (Frontend)'
+
+          - bash: |
+              COMMIT_HASH="$(gitPull.COMMIT_HASH)"
+              NEW_VALUE="fx-pwa-cache-v$COMMIT_HASH"
+              cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+              sed -i "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = '$NEW_VALUE'/" assets/js/service-worker.js
+            displayName: 'Cache Busting'
+
+          - bash: |
+              API_HOST="$(API_HOST)"
+              mkdir -p $(Build.ArtifactStagingDirectory)/docker
+              cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Dockerfile.pipe $(Build.ArtifactStagingDirectory)/docker/
+              cp $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/nginx.conf $(Build.ArtifactStagingDirectory)/docker/
+
+              echo "$(NEXUS_DOCKER_PASSWORD)" | docker login $(DOCKER_REGISTRY) \
+                -u $(NEXUS_DOCKER_USERNAME) \
+                --password-stdin
+
+              cd $(Build.ArtifactStagingDirectory)
+              APPSETTINGS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/appsettings.json
+              sed -i 's/"IsDeveloperMode": false/"IsDeveloperMode": true/' "$APPSETTINGS_FILE"
+              sed -i 's|"BaseUrl": "[^"]*"|"BaseUrl": "https://'"${API_HOST}"'"|' "$APPSETTINGS_FILE"
+
+              docker build -t $(tagSetting.FQIN) -f docker/Dockerfile.pipe .
+              docker push $(tagSetting.FQIN)
+            displayName: 'Build & Push Image (Frontend)'
+            env:
+              NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+              NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
+
+      - job: Build_Backend
+        displayName: 'Build Backend'
+        condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
+        pool: 'WEB-1'
+        variables:
+          solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
+          DOCKER_IMG: $(DOCKER_REGISTRY)/fx/backend
+          GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_backend
+          GIT_HOME: $(Agent.TempDirectory)/home_$(Build.BuildId)_backend
+        steps:
+          - checkout: none
+
+          - bash: |
+              set -e
+              mkdir -p "$GIT_HOME"
+              export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
+
+              git config --file "$GIT_CONFIG_GLOBAL" user.email "S_Bot_Azure@sadgan.int"
+              git config --file "$GIT_CONFIG_GLOBAL" user.name "S_Bot_Azure"
+              git config --file "$GIT_CONFIG_GLOBAL" http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+              git config --file "$GIT_CONFIG_GLOBAL" http.sslVerify false
+              git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory '*'
+
+              BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+              CURRENT_BRANCH="$(CURRENT_BRANCH)"
+
+              clone_or_pull() {
+                local branch_name="$1"
+                local repo_url="$2"
+                local target_dir="$3"
+                rm -rf "$target_dir"
+                git clone --branch "$branch_name" "$repo_url" "$target_dir"
+              }
+
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/1_Configs"       "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/2_SharedLibrary" "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/4_ServerLibrary" "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
+              clone_or_pull "$CURRENT_BRANCH" "$BASE_URL/SadganErp/_git/SadganErpApi"       "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+              clone_or_pull cicd              "$BASE_URL/SadganErp/_git/CICD"               "$(System.DefaultWorkingDirectory)/CICD"
+
+              cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+              BACKEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+              echo "##vso[task.setvariable variable=BACKEND_COMMIT;isOutput=true]$BACKEND_COMMIT"
+              echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$BACKEND_COMMIT"
+            displayName: 'Git Checkout'
+            name: gitPull
+            env:
+              GIT_PAT: $(GIT_PAT)
+              GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
+              GIT_HOME: $(GIT_HOME)
+
+          - bash: |
+              NEW_TAG="$(IMAGE_TAG)"
+              echo "Using tag: $NEW_TAG"
+              echo "##vso[task.setvariable variable=FQIN;isOutput=true]$(DOCKER_IMG):$NEW_TAG"
+              echo "##vso[task.setvariable variable=DOCKER_TAG;isOutput=true]$NEW_TAG"
+              echo "##vso[task.setvariable variable=BACKEND_TAG;isOutput=true]$NEW_TAG"
+            displayName: 'Version Assign (Backend)'
+            name: tagSetting
+
+          - bash: |
+              configPropsFile="$(System.DefaultWorkingDirectory)/SadganShared/1_Configs/Directory.Packages.props"
+              sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>0.0.0.0</AssemblyVersion>|" "$configPropsFile"
+            displayName: 'Assembly Version Set'
+
+          - bash: |
+              sourceFile="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.pipe.json"
+              destinationFile="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json"
+              cp -f "$sourceFile" "$destinationFile"
+            displayName: 'Override appsettings.json (Backend)'
+
+          - bash: |
+              NUGET_CONFIG="$(Agent.TempDirectory)/NuGet.Config"
+              cat > "$NUGET_CONFIG" <<EOF
+              <?xml version="1.0" encoding="utf-8"?>
+              <configuration>
+                <packageSources>
+                  <clear />
+                  <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+                  <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
+                </packageSources>
+                <packageSourceCredentials>
+                  <NupkgWeb2>
+                    <add key="Username" value="S_Bot_Azure" />
+                    <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
+                  </NupkgWeb2>
+                </packageSourceCredentials>
+              </configuration>
+              EOF
+              find $(Build.SourcesDirectory) -name "NuGet.Config" -type f -delete
+              echo "##vso[task.setvariable variable=NUGET_CONFIG_PATH]$NUGET_CONFIG"
+            displayName: 'Create NuGet.Config (Backend)'
+            env:
+              BOT_TOKEN: $(BOT_TOKEN)
+
+          - bash: |
+              export PATH="/opt/net_sdk_10:$PATH"
+              export MSBUILDDISABLENODEREUSE=1
+              dotnet restore "$(solution)" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
+            displayName: 'Dotnet Restore (Backend)'
+
+          - bash: |
+              set -e
+              export PATH="/opt/net_sdk_10:$PATH"
+              export MSBUILDDISABLENODEREUSE=1
+              mkdir -p "$(Build.ArtifactStagingDirectory)/publish"
+              dotnet publish "$(solution)" \
+                --no-restore \
+                --configuration $(buildConfiguration) \
+                -p:Optimize=false \
+                --output "$(Build.ArtifactStagingDirectory)/publish" \
+                --disable-parallel \
+                -p:BuildInParallel=false \
+                -p:NodeReuse=false \
+                -m:1
+              cp "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json" "$(Build.ArtifactStagingDirectory)/publish/"
+            displayName: 'Publish Solution (Backend)'
+
+          - bash: |
+              echo "$(NEXUS_DOCKER_PASSWORD)" | docker login $(DOCKER_REGISTRY) \
+                -u $(NEXUS_DOCKER_USERNAME) \
+                --password-stdin
+
+              mkdir -p $(Build.ArtifactStagingDirectory)/docker
+              cp $(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/Dockerfile.pipe $(Build.ArtifactStagingDirectory)/docker/
+
+              cd $(Build.ArtifactStagingDirectory)
+              docker build -t "$(tagSetting.FQIN)" -f docker/Dockerfile.pipe .
+              docker push "$(tagSetting.FQIN)"
+            displayName: 'Build & Push Image (Backend)'
+            env:
+              NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+              NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
+
+  - stage: Deploy
+    displayName: 'Deploy Preview'
+    dependsOn:
+      - INIT
+      - Build
+    condition: and(succeeded(), eq(variables['shouldDeploy'], 'True'))
+    variables:
+      TASK_ID: $[ stageDependencies.INIT.InitJob.outputs['init.TASK_ID'] ]
+      DEPLOY_PATH: $[ stageDependencies.INIT.InitJob.outputs['init.DEPLOY_PATH'] ]
+      FRONT_HOST: $[ stageDependencies.INIT.InitJob.outputs['init.FRONT_HOST'] ]
+      API_HOST: $[ stageDependencies.INIT.InitJob.outputs['init.API_HOST'] ]
+      FRONTEND_TAG: $[ coalesce(stageDependencies.Build.Build_Frontend.outputs['tagSetting.DOCKER_TAG'], stageDependencies.Build.Build_Backend.outputs['tagSetting.DOCKER_TAG'], '') ]
+      BACKEND_TAG: $[ coalesce(stageDependencies.Build.Build_Backend.outputs['tagSetting.DOCKER_TAG'], stageDependencies.Build.Build_Frontend.outputs['tagSetting.DOCKER_TAG'], '') ]
+    jobs:
+      - job: DeployPreview
+        displayName: 'Deploy task preview'
+        pool: 'WEB-1'
+        steps:
+          - template: templates/deploy-preview-steps.yml
+            parameters:
+              TASK_ID: $(TASK_ID)
+              DEPLOY_PATH: $(DEPLOY_PATH)
+              FRONT_HOST: $(FRONT_HOST)
+              API_HOST: $(API_HOST)
+              FRONTEND_TAG: $(FRONTEND_TAG)
+              BACKEND_TAG: $(BACKEND_TAG)
+              PREVIEW_HOST: ${{ parameters.PREVIEW_HOST }}
+              PREVIEW_SSH_USER: ${{ parameters.PREVIEW_SSH_USER }}
+              ADD_WI_COMMENT: ${{ parameters.ADD_WI_COMMENT }}
