@@ -1,0 +1,217 @@
+parameters:
+  - name: TASK_ID
+    type: string
+  - name: DEPLOY_PATH
+    type: string
+  - name: FRONT_HOST
+    type: string
+  - name: API_HOST
+    type: string
+  - name: FRONTEND_TAG
+    type: string
+  - name: BACKEND_TAG
+    type: string
+  - name: PREVIEW_HOST
+    type: string
+    default: '192.168.10.160'
+  - name: PREVIEW_SSH_USER
+    type: string
+    default: 'devops'
+  - name: ADD_WI_COMMENT
+    type: string
+    default: 'YES'
+
+steps:
+  - checkout: none
+
+  - bash: |
+      set -euo pipefail
+
+      TASK_ID="${{ parameters.TASK_ID }}"
+      DEPLOY_PATH="${{ parameters.DEPLOY_PATH }}"
+      FRONT_HOST="${{ parameters.FRONT_HOST }}"
+      API_HOST="${{ parameters.API_HOST }}"
+      FRONTEND_TAG="${{ parameters.FRONTEND_TAG }}"
+      BACKEND_TAG="${{ parameters.BACKEND_TAG }}"
+      PREVIEW_HOST="${{ parameters.PREVIEW_HOST }}"
+      PREVIEW_SSH_USER="${{ parameters.PREVIEW_SSH_USER }}"
+
+      echo "Deploying preview for task ${TASK_ID}"
+      echo "  Front URL : https://${FRONT_HOST}"
+      echo "  API URL   : https://${API_HOST}"
+      echo "  Path      : ${DEPLOY_PATH}"
+      echo "  Host      : ${PREVIEW_HOST}"
+      echo "  Images    : front=${FRONTEND_TAG} back=${BACKEND_TAG}"
+
+      WORK_DIR="$(Agent.TempDirectory)/preview-${TASK_ID}"
+      rm -rf "$WORK_DIR"
+      mkdir -p "$WORK_DIR"
+
+      BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+      git clone --branch cicd --depth 1 "$BASE_URL/SadganErp/_git/CICD" "$WORK_DIR/cicd-src"
+
+      PREVIEW_SRC="$WORK_DIR/cicd-src/azure-pipelines/preview/release"
+      if [ ! -f "$PREVIEW_SRC/compose.yaml" ]; then
+        echo "preview/compose.yaml not found in CICD repo (branch: cicd)"
+        ls -la "$WORK_DIR/cicd-src" || true
+        exit 1
+      fi
+
+      STAGING="$WORK_DIR/stack"
+      mkdir -p "$STAGING/config" "$STAGING/init" "$STAGING/metadata" "$STAGING/backups"
+      cp "$PREVIEW_SRC/compose.yaml" "$STAGING/"
+      cp "$PREVIEW_SRC/init/"*.sql "$STAGING/init/" 2>/dev/null || true
+
+      ERP_VERSION="${FRONTEND_TAG}"
+      if [ "$BACKEND_TAG" != "$FRONTEND_TAG" ]; then
+        echo "Warning: frontend and backend tags differ; using frontend tag for ERP_VERSION"
+      fi
+
+      PG_HOST_PORT=$((10000 + TASK_ID))
+      if [ "$PG_HOST_PORT" -gt 65535 ]; then
+        echo "ERROR: PG_HOST_PORT ${PG_HOST_PORT} exceeds max port (TASK_ID too large)"
+        exit 1
+      fi
+      echo "PG host port: ${PG_HOST_PORT}"
+
+      render_file() {
+        local src="$1"
+        local dst="$2"
+        sed \
+          -e "s|__TASK_ID__|${TASK_ID}|g" \
+          -e "s|__FRONT_HOST__|${FRONT_HOST}|g" \
+          -e "s|__API_HOST__|${API_HOST}|g" \
+          -e "s|__DEPLOY_PATH__|${DEPLOY_PATH}|g" \
+          -e "s|__ERP_VERSION__|${ERP_VERSION}|g" \
+          -e "s|__POSTGRES_PASSWORD__|${PREVIEW_POSTGRES_PASSWORD}|g" \
+          -e "s|__POSTGRES_RO_PASSWORD__|${PREVIEW_POSTGRES_RO_PASSWORD}|g" \
+          -e "s|__PG_REPLICA_PASSWORD__|${PREVIEW_PG_REPLICA_PASSWORD}|g" \
+          -e "s|__POSTGRES_BI_PASSWORD__|${PREVIEW_POSTGRES_BI_PASSWORD}|g" \
+          -e "s|__REDIS_PASSWORD__|${PREVIEW_REDIS_PASSWORD}|g" \
+          -e "s|__PG_MAX_CONNECTIONS__|${PG_MAX_CONNECTIONS}|g" \
+          -e "s|__PG_SHARED_BUFFERS__|${PG_SHARED_BUFFERS}|g" \
+          -e "s|__PG_EFFECTIVE_CACHE_SIZE__|${PG_EFFECTIVE_CACHE_SIZE}|g" \
+          -e "s|__PG_MAX_WAL_SIZE__|${PG_MAX_WAL_SIZE}|g" \
+          -e "s|__PG_CHECKPOINT_TIMEOUT__|${PG_CHECKPOINT_TIMEOUT}|g" \
+          -e "s|__PG_LOG_MIN_DURATION_MS__|${PG_LOG_MIN_DURATION_MS}|g" \
+          -e "s|__PG_HOST_PORT__|${PG_HOST_PORT}|g" \
+          "$src" > "$dst"
+      }
+
+      # Defaults for PG tuning — override via Azure DevOps variable group if needed
+      PG_MAX_CONNECTIONS="${PG_MAX_CONNECTIONS:-100}"
+      PG_SHARED_BUFFERS="${PG_SHARED_BUFFERS:-256MB}"
+      PG_EFFECTIVE_CACHE_SIZE="${PG_EFFECTIVE_CACHE_SIZE:-1GB}"
+      PG_MAX_WAL_SIZE="${PG_MAX_WAL_SIZE:-2GB}"
+      PG_CHECKPOINT_TIMEOUT="${PG_CHECKPOINT_TIMEOUT:-15min}"
+      PG_LOG_MIN_DURATION_MS="${PG_LOG_MIN_DURATION_MS:-300}"
+
+      for required in \
+        "$PREVIEW_SRC/env.template" \
+        "$PREVIEW_SRC/config/appsettings.front.json.template" \
+        "$PREVIEW_SRC/config/postgresql.conf.template" \
+        "$PREVIEW_SRC/config/pg_hba.conf"
+      do
+        if [ ! -f "$required" ]; then
+          echo "Missing required preview file: $required"
+          exit 1
+        fi
+      done
+
+      render_file "$PREVIEW_SRC/env.template" "$STAGING/.env"
+      render_file "$PREVIEW_SRC/config/appsettings.front.json.template" "$STAGING/config/appsettings.front.json"
+      render_file "$PREVIEW_SRC/config/postgresql.conf.template" "$STAGING/config/postgresql.conf"
+      cp "$PREVIEW_SRC/config/pg_hba.conf" "$STAGING/config/pg_hba.conf"
+      render_file "$STAGING/compose.yaml" "$STAGING/compose.yaml.rendered"
+      mv "$STAGING/compose.yaml.rendered" "$STAGING/compose.yaml"
+
+      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+      REMOTE="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
+
+      if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
+        KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key"
+        printf '%s\n' "$PREVIEW_SSH_PRIVATE_KEY" > "$KEY_FILE"
+        chmod 600 "$KEY_FILE"
+        SSH_OPTS="$SSH_OPTS -i $KEY_FILE"
+      fi
+
+      ssh $SSH_OPTS "$REMOTE" "mkdir -p '${DEPLOY_PATH}'"
+      rsync -avz --delete \
+        -e "ssh $SSH_OPTS" \
+        "$STAGING/" \
+        "${REMOTE}:${DEPLOY_PATH}/"
+
+      ssh $SSH_OPTS "$REMOTE" \
+        "set -euo pipefail && \
+         cd '${DEPLOY_PATH}' && \
+         echo '${NEXUS_DOCKER_PASSWORD}' | docker login '${DOCKER_REGISTRY}' -u '${NEXUS_DOCKER_USERNAME}' --password-stdin && \
+         export COMPOSE_PROJECT_NAME='preview-${TASK_ID}' && \
+         docker compose pull && \
+         docker compose up -d --remove-orphans && \
+         docker compose ps"
+
+      echo "##vso[task.setvariable variable=PREVIEW_FRONT_URL;isOutput=true]https://${FRONT_HOST}"
+      echo "##vso[task.setvariable variable=PREVIEW_API_URL;isOutput=true]https://${API_HOST}"
+      echo "Preview deployed successfully"
+    displayName: 'Deploy preview stack to $(parameters.PREVIEW_HOST)'
+    name: deployPreview
+    env:
+      GIT_PAT: $(GIT_PAT)
+      PREVIEW_SSH_PRIVATE_KEY: $(PREVIEW_SSH_PRIVATE_KEY)
+      PREVIEW_POSTGRES_PASSWORD: $(PREVIEW_POSTGRES_PASSWORD)
+      PREVIEW_POSTGRES_RO_PASSWORD: $(PREVIEW_POSTGRES_RO_PASSWORD)
+      PREVIEW_PG_REPLICA_PASSWORD: $(PREVIEW_PG_REPLICA_PASSWORD)
+      PREVIEW_POSTGRES_BI_PASSWORD: $(PREVIEW_POSTGRES_BI_PASSWORD)
+      PREVIEW_REDIS_PASSWORD: $(PREVIEW_REDIS_PASSWORD)
+      PG_MAX_CONNECTIONS: $(PG_MAX_CONNECTIONS)
+      PG_SHARED_BUFFERS: $(PG_SHARED_BUFFERS)
+      PG_EFFECTIVE_CACHE_SIZE: $(PG_EFFECTIVE_CACHE_SIZE)
+      PG_MAX_WAL_SIZE: $(PG_MAX_WAL_SIZE)
+      PG_CHECKPOINT_TIMEOUT: $(PG_CHECKPOINT_TIMEOUT)
+      PG_LOG_MIN_DURATION_MS: $(PG_LOG_MIN_DURATION_MS)
+      NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+      NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
+      DOCKER_REGISTRY: $(DOCKER_REGISTRY)
+
+  - bash: |
+      set -euo pipefail
+
+      if [ "${{ parameters.ADD_WI_COMMENT }}" != "YES" ]; then
+        echo "Skipping work item comment (ADD_WI_COMMENT != YES)"
+        exit 0
+      fi
+
+      TASK_ID="${{ parameters.TASK_ID }}"
+      FRONT_URL="$(deployPreview.PREVIEW_FRONT_URL)"
+      API_URL="$(deployPreview.PREVIEW_API_URL)"
+      BUILD_URL="$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+
+      PROJECT_API_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis"
+      AUTH_HEADER="Authorization: Basic $(echo -n ":${GIT_PAT}" | base64 | tr -d '\n')"
+
+      FRONTEND_TAG="${{ parameters.FRONTEND_TAG }}"
+      BACKEND_TAG="${{ parameters.BACKEND_TAG }}"
+      PG_HOST_PORT=$((10000 + TASK_ID))
+      COMMENT="AI preview deployed for task **${TASK_ID}**.\n\n- Front: ${FRONT_URL}\n- API: ${API_URL}\n- PG host port: ${PG_HOST_PORT}\n- Build: ${BUILD_URL}\n- Images: front=${FRONTEND_TAG} / back=${BACKEND_TAG}"
+
+      BODY=$(jq -n \
+        --arg text "$COMMENT" \
+        '[{"op":"add","path":"/fields/System.History","value":$text}]')
+
+      HTTP_CODE=$(curl -sS -o /tmp/wi_comment.json -w "%{http_code}" \
+        -X PATCH \
+        -H "$AUTH_HEADER" \
+        -H "Content-Type: application/json-patch+json" \
+        -d "$BODY" \
+        "${PROJECT_API_URL}/wit/workitems/${TASK_ID}?api-version=7.0")
+
+      if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+        echo "Comment added to work item ${TASK_ID}"
+      else
+        echo "Warning: could not comment on work item ${TASK_ID} (HTTP ${HTTP_CODE})"
+        cat /tmp/wi_comment.json || true
+      fi
+    displayName: 'Comment preview URL on Azure work item'
+    condition: succeeded()
+    env:
+      GIT_PAT: $(GIT_PAT)
