@@ -1,0 +1,13 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "BaseUrl": "https://__API_HOST__",
+  "Application": {
+    "Version": "0.0.0.0",
+    "IsDeveloperMode": true
+  }
+}

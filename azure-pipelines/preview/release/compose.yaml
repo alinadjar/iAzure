@@ -1,0 +1,191 @@
+# Per-task AI preview stack — routed by Traefik on the preview host.
+# Placeholders __TASK_ID__, __FRONT_HOST__, __API_HOST__ are replaced at deploy time.
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-environment: &default-environment
+  ASPNETCORE_ENVIRONMENT: Production
+
+services:
+  backend:
+    image: ${REGISTRY_URL}/fx/backend:${ERP_VERSION}
+    env_file:
+      - .env
+    environment:
+      <<: *default-environment
+      TZ: Asia/Tehran
+      App__DisableCors: false
+      App__CorsOrigins: ${CorsOrigins}
+      App__SelfUrl: ${SelfUrl}
+      App__Version: ${ERP_VERSION}
+      App__IsDeveloperMode: true
+      LiteTableSync__IsEnabled: true
+      TaxPayer_IsEnabled: false
+      License__LicenseServerUrl: ${LicenseServer}/api/licensemanagement/activation
+      License__FingerprintAgentUrl: "http://192.168.10.244:4000"
+      Redis__Configuration: "redis-preview"
+      Redis__Port: 6379
+      Redis__Password: "${REDIS_PASSWORD}"
+      JWT__AccessTokenExpirationSeconds: 600
+      JWT__RefreshTokenExpirationSeconds: 86400
+      DocumentDbConnectionStrings__Default: 'mongodb://admin:admin@mongo:27017'
+    command: >
+      sh -c '
+        sed -i "
+          s|__PG_RW_HOST__|$PG_RW_HOST|g;
+          s|__PG_RW_USER__|$PG_RW_USER|g;
+          s|__POSTGRES_PASSWORD__|$POSTGRES_PASSWORD|g;
+          s|__PG_MaxPoolSize__|$PG_MaxPoolSize|g;
+          s|__PG_RO_HOST__|$PG_RO_HOST|g;
+          s|__PG_RO_PORT__|$PG_RO_PORT|g;
+          s|__PG_RO_USER__|$PG_RO_USER|g;
+          s|__POSTGRES_RO_PASSWORD__|$POSTGRES_RO_PASSWORD|g;
+          s|__PG_MaxPoolSize_RO__|$PG_MaxPoolSize_RO|g;
+          s|__REPLICA_IP_LB__|$REPLICA_IP_LB|g;
+          s|__REPLICA_PORT_LB__|$REPLICA_PORT_LB|g;
+          s|__PG_REPLICA_USER__|$PG_REPLICA_USER|g;
+          s|__PG_REPLICA_PASSWORD__|$PG_REPLICA_PASSWORD|g;
+          s|__PG_MaxPoolSize_REPLICA__|$PG_MaxPoolSize_REPLICA|g;
+          s|__PG_BI_USER__|$PG_BI_USER|g;
+          s|__POSTGRES_BI_PASSWORD__|$POSTGRES_BI_PASSWORD|g;
+        " /app/appsettings.json &&
+        exec dotnet SadganErp.Api.Gateway.HttpApi.Host.dll
+      '
+    volumes:
+      - ./metadata:/app/metadata
+      - ./backups:/app/backups
+    restart: unless-stopped
+    networks:
+      - preview_net
+    depends_on:
+      pg:
+        condition: service_healthy
+      redis-preview:
+        condition: service_healthy
+    logging:
+      <<: *default-logging
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=preview_net
+      - traefik.http.routers.__TASK_ID__-api.rule=Host(`__API_HOST__`)
+      - traefik.http.routers.__TASK_ID__-api.entrypoints=web
+      - traefik.http.services.__TASK_ID__-api.loadbalancer.server.port=8080
+
+  front:
+    image: ${REGISTRY_URL}/fx/front:${ERP_VERSION}
+    environment:
+      <<: *default-environment
+      TZ: Asia/Tehran
+    restart: unless-stopped
+    networks:
+      - preview_net
+    volumes:
+      - ./config/appsettings.front.json:/usr/share/nginx/html/appsettings.json
+    logging:
+      <<: *default-logging
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=preview_net
+      - traefik.http.routers.__TASK_ID__-front.rule=Host(`__FRONT_HOST__`)
+      - traefik.http.routers.__TASK_ID__-front.entrypoints=web
+      - traefik.http.services.__TASK_ID__-front.loadbalancer.server.port=80
+
+  pg:
+    image: nexus.sadgan.int/postgres:18.0
+    user: "999:999"
+    environment:
+      POSTGRES_USER: ${PG_RW_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123}
+      POSTGRES_DB: ${POSTGRES_DB:-SADGAN}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - pg-csv-exports:/tmp/monitoring_exports
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./init:/docker-entrypoint-initdb.d:ro
+    command: >
+      sh -c "
+        mkdir -p /tmp/monitoring_exports &&
+        exec docker-entrypoint.sh postgres
+          -c config_file=/etc/postgresql/postgresql.conf
+          -c hba_file=/etc/postgresql/pg_hba.conf
+      "
+    # ports:
+    #   - "${PG_HOST_PORT}:5432"
+    networks:
+      - preview_net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_RW_USER:-postgres} -d ${POSTGRES_DB:-SADGAN}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "1"
+
+  mongo:
+    image: mongo:8.3.2-noble
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: admin
+    command:
+      - mongod
+      - --auth
+      - --bind_ip_all
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - preview_net
+    healthcheck:
+      test: >
+        mongosh --quiet
+        -u admin -p admin
+        --authenticationDatabase admin
+        --eval "db.adminCommand('ping').ok"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    logging:
+      <<: *default-logging
+
+  redis-preview:
+    image: registry.sadgan.int/common/redis-stack-server:latest
+    restart: unless-stopped
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD}
+      - --appendonly
+      - "yes"
+    networks:
+      - preview_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      <<: *default-logging
+
+networks:
+  preview_net:
+    external: true
+
+volumes:
+  redis-data:
+  postgres-data:
+  pg-csv-exports:
+  mongodb_data:
