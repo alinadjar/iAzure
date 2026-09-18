@@ -445,7 +445,7 @@ stages:
         displayName: 'Deploy task preview'
         pool: 'WEB-1'
         steps:
-          - template: templates/deploy-preview-steps.yml
+          - template: templates/deploy-preview.yaml
             parameters:
               TASK_ID: $(TASK_ID)
               DEPLOY_PATH: $(DEPLOY_PATH)
