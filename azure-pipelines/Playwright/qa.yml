@@ -374,114 +374,9 @@ steps:
       API_ADMIN_PASSWORD: $(API_ADMIN_PASSWORD)
       API_REF_COMPANY_BRANCH_NAME: ${{ parameters.API_REF_COMPANY_BRANCH_NAME }}
 
-  # ── 4. Evaluation summary from JUnit (artifact + optional Redis) ──
-  # Later job: DownloadBuildArtifacts artifactName=evaluation-result
-  # Redis: GET qa:api:eval:latest → buildId ; GET qa:api:eval:{buildId}
-  # - script: |
-  #     set -euo pipefail
-  #     # shellcheck disable=SC1091
-  #     source "$(VENV_ACTIVATE)"
-  #     cd "$(apiDir)"
 
-  #     mkdir -p evaluation-result
-  #     python -m integrations.evaluation_summary \
-  #       --junit test-results.xml \
-  #       --out evaluation-result/evaluation-result.json --skip-redis
 
-  #     cp -f test-results.xml evaluation-result/test-results.xml
-  #     echo "evaluation-result contents:"
-  #     ls -la evaluation-result
-  #     # cat evaluation-result/evaluation-result.json
-
-  #     # ── Redis: Read JSON and store selected fields ──
-  #     if [ -n "${REDIS_URL:-}" ] && [ -f "evaluation-result/evaluation-result.json" ]; then
-  #       echo "📦 Processing evaluation-result.json for Redis..."
-
-  #       # Extract required fields using jq
-  #       BASE_URL=$(jq -r '.run.baseUrl' evaluation-result/evaluation-result.json)
-  #       TESTS=$(jq -r '.results.tests' evaluation-result/evaluation-result.json)
-  #       PASSED=$(jq -r '.results.passed' evaluation-result/evaluation-result.json)
-  #       FAILURES=$(jq -r '.results.failures' evaluation-result/evaluation-result.json)
-  #       ERRORS=$(jq -r '.results.errors' evaluation-result/evaluation-result.json)
-  #       SKIPPED=$(jq -r '.results.skipped' evaluation-result/evaluation-result.json)
-  #       TIME_SECONDS=$(jq -r '.results.timeSeconds' evaluation-result/evaluation-result.json)
-  #       PASS_RATE=$(jq -r '.results.passRate * 100 | floor' evaluation-result/evaluation-result.json)
-
-  #       # Build Redis key (using fx:xxxx:qa format)
-  #       REDIS_KEY="fx:${ASSEMBLY:-latest}:qa"
-
-  #       # Create JSON string with only the fields we want
-  #       JSON_DATA=$(jq -n \
-  #         --arg baseUrl "$BASE_URL" \
-  #         --arg tests "$TESTS" \
-  #         --arg passed "$PASSED" \
-  #         --arg failures "$FAILURES" \
-  #         --arg errors "$ERRORS" \
-  #         --arg skipped "$SKIPPED" \
-  #         --arg timeSeconds "$TIME_SECONDS" \
-  #         --arg passRate "$PASS_RATE" \
-  #         '{
-  #           baseUrl: $baseUrl,
-  #           tests: $tests,
-  #           passed: $passed,
-  #           failures: $failures,
-  #           errors: $errors,
-  #           skipped: $skipped,
-  #           timeSeconds: $timeSeconds,
-  #           passRate: $passRate
-  #         }')
-
-  #       echo "🔑 Redis Key: $REDIS_KEY"
-  #       echo "📊 Data to store:"
-  #       echo "$JSON_DATA" | jq '.'
-
-  #       # Store as string using SET (simple and works everywhere)
-  #       redis-cli -u "$REDIS_URL" SET "$REDIS_KEY" "$JSON_DATA"
-  #       echo "✅ Stored data in Redis key: $REDIS_KEY"
-
-  #       # Also store latest reference (just the key name)
-  #       LATEST_KEY="fx:latest:qa"
-  #       redis-cli -u "$REDIS_URL" SET "$LATEST_KEY" "$REDIS_KEY"
-  #       echo "✅ Updated latest reference: $LATEST_KEY → $REDIS_KEY"
-
-  #       # Verify stored data
-  #       echo "🔍 Verifying stored data:"
-  #       redis-cli -u "$REDIS_URL" GET "$REDIS_KEY" | jq '.'
-
-  #       # Set TTL if needed (optional - 86400 seconds = 24 hours)
-  #       # redis-cli -u "$REDIS_URL" EXPIRE "$REDIS_KEY" 86400
-        
-  #       echo "✅ Redis update completed successfully"
-  #     else
-  #       echo "⚠️  Skipping Redis update (REDIS_URL not set or JSON file missing)"
-  #     fi
-  #   displayName: 'Write evaluation-result (JSON + Redis)'
-  #   condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
-  #   env:
-  #     AZURE_DEVOPS_PAT: $(AZURE_DEVOPS_PAT)
-  #     REDIS_URL: $(REDIS_URL)
-  #     EVAL_REDIS_PREFIX: 'qa:api:eval'
-  #     EVAL_REDIS_TTL_SECONDS: '86400'
-  #     EVAL_RUN_MODE: ${{ parameters.runMode }}
-  #     EVAL_FEATURE_MARKER: ${{ parameters.featureMarker }}
-  #     EVAL_TAG_MARKER: ${{ parameters.tagMarker }}
-  #     EVAL_MARKER_EXPRESSION: ${{ parameters.markerExpression }}
-  #     EVAL_TEST_PATH: ${{ parameters.testPath }}
-  #     EVAL_KEYWORD: ${{ parameters.keyword }}
-  #     API_BASE_URL: ${{ parameters.baseUrl }}
-  #     AZURE_TEST_PLAN_ID: ${{ parameters.testPlanId }}
-  #     AZURE_TEST_PLAN_TARGET: ${{ parameters.testPlanTarget }}
-  #     ASSEMBLY: ${{ parameters.assembly }}
-
-  # - task: PublishBuildArtifacts@1
-  #   condition: and(succeededOrFailed(), eq('${{ parameters.publishEvaluation }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
-  #   inputs:
-  #     PathtoPublish: '$(apiDir)/evaluation-result'
-  #     ArtifactName: 'evaluation-result'
-  #     publishLocation: 'Container'
-  #   displayName: 'Publish evaluation-result artifact'
-
-  # ── 5. Publish JUnit (Tests tab) ─────────────────────────────
+  # ── 4. Publish JUnit (Tests tab) ─────────────────────────────
   - task: PublishTestResults@2
     condition: and(always(), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     inputs:
@@ -493,7 +388,7 @@ steps:
       mergeTestResults: false
     displayName: 'Publish JUnit results'
 
-  # ── 6. Publish Allure raw results (on-prem: Build Artifact) ───
+  # ── 5. Publish Allure raw results (on-prem: Build Artifact) ───
   - task: PublishBuildArtifacts@1
     condition: and(succeededOrFailed(), eq('${{ parameters.publishAllure }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     inputs:
@@ -503,10 +398,10 @@ steps:
     displayName: 'Publish Allure results artifact'
 
 
-  # ── 7. Allure Report tab (requires Allure Report extension on server) ──
+  # ── 6. Allure Report tab (requires Allure Report extension on server) ──
   - task: PublishAllureReport@2
     displayName: 'publish allure report'
     condition: and(succeededOrFailed(), eq('${{ parameters.publishAllure }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     inputs:
       testResultsDir: '$(apiDir)/allure-results'
-      reportName: 'API Allure Report'    
+      reportName: 'API Allure Report'
