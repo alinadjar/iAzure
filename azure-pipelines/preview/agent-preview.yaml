@@ -295,7 +295,9 @@ stages:
 
       - job: Build_Backend
         displayName: 'Build Backend'
-        condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
+        dependsOn: Build_Frontend
+        condition: and(in('${{ parameters.BUILD_COMPONENTS }}', 'back', 'both'), in(dependencies.Build_Frontend.result, 'Succeeded', 'Skipped'))
+        # condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
         pool: 'WEB-1'
         variables:
           solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
