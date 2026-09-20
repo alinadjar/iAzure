@@ -3,7 +3,6 @@
 # Required pipeline variables (secret where noted):
 #   GIT_PAT              — clone SadganAIDeveloper + SadganShared repos
 #   BOT_TOKEN            — NupkgWeb2 feed (secret)
-#   ABP_FEED_URL         — licensed Volo.ABP feed URL (secret)
 #   DOCKER_REGISTRY      — Nexus registry host (e.g. nexus.sadgan.int:8082)
 #   NEXUS_DOCKER_USERNAME
 #   NEXUS_DOCKER_PASSWORD (secret)
@@ -27,6 +26,7 @@ parameters:
   values:
     - 'dev'
     - 'main'
+    - 'pipe'
 - name: BUILD_COMPONENTS
   type: string
   displayName: 'Components to build'
@@ -86,7 +86,7 @@ stages:
     - bash: |
         echo "Branch: ${{ parameters.BRANCH }}"
         echo "Components: ${{ parameters.BUILD_COMPONENTS }}"
-      displayName: 'Echo parameters'
+      displayName: 'Init ${{ parameters.BRANCH }}'
 
 - stage: Build
   displayName: 'Build & Publish'
@@ -173,7 +173,6 @@ stages:
             <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
             <add key="SadganNuget" value="https://nuget.sadgan.int/nuget" />
             <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
-            <add key="nuget.abp.io" value="$(ABP_FEED_URL)" />
           </packageSources>
           <packageSourceCredentials>
             <NupkgWeb2>
@@ -191,7 +190,6 @@ stages:
       displayName: 'Create NuGet.Config'
       env:
         BOT_TOKEN: $(BOT_TOKEN)
-        ABP_FEED_URL: $(ABP_FEED_URL)
 
     - bash: |
         set -e
@@ -280,46 +278,46 @@ stages:
         NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
         NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
 
-    - bash: |
-        set -e
-        STAGING="$(Build.ArtifactStagingDirectory)"
-        ARCHIVE="$STAGING/aiorchestrator-$(tagSetting.BUILD_TAG).tar.gz"
-        BUILD_COMPONENTS="${{ parameters.BUILD_COMPONENTS }}"
+    # - bash: |
+    #     set -e
+    #     STAGING="$(Build.ArtifactStagingDirectory)"
+    #     ARCHIVE="$STAGING/aiorchestrator-$(tagSetting.BUILD_TAG).tar.gz"
+    #     BUILD_COMPONENTS="${{ parameters.BUILD_COMPONENTS }}"
 
-        mkdir -p "$STAGING/deploy"
-        cp "$(repoRoot)/AiOrchestrator/deploy/compose.yaml" "$STAGING/deploy/"
-        cp "$(repoRoot)/AiOrchestrator/deploy/.env.example" "$STAGING/deploy/"
+    #     mkdir -p "$STAGING/deploy"
+    #     cp "$(repoRoot)/AiOrchestrator/deploy/compose.yaml" "$STAGING/deploy/"
+    #     cp "$(repoRoot)/AiOrchestrator/deploy/.env.example" "$STAGING/deploy/"
 
-        cat <<EOF > "$STAGING/vars.json"
-        {
-          "BUILD_TAG": "$(tagSetting.BUILD_TAG)",
-          "COMMIT_HASH": "$(gitPull.COMMIT_HASH)",
-          "BRANCH": "${{ parameters.BRANCH }}",
-          "BUILD_COMPONENTS": "$BUILD_COMPONENTS",
-          "CREATE_RELEASE": ${{ parameters.SHOULD_RELEASE }},
-          "API_FQIN": "$(tagSetting.API_FQIN)",
-          "PANEL_FQIN": "$(tagSetting.PANEL_FQIN)"
-        }
-        EOF
+    #     cat <<EOF > "$STAGING/vars.json"
+    #     {
+    #       "BUILD_TAG": "$(tagSetting.BUILD_TAG)",
+    #       "COMMIT_HASH": "$(gitPull.COMMIT_HASH)",
+    #       "BRANCH": "${{ parameters.BRANCH }}",
+    #       "BUILD_COMPONENTS": "$BUILD_COMPONENTS",
+    #       "CREATE_RELEASE": ${{ parameters.SHOULD_RELEASE }},
+    #       "API_FQIN": "$(tagSetting.API_FQIN)",
+    #       "PANEL_FQIN": "$(tagSetting.PANEL_FQIN)"
+    #     }
+    #     EOF
 
-        PACK_ITEMS=(vars.json deploy)
-        if [ "$BUILD_COMPONENTS" = "back" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
-          PACK_ITEMS+=(api)
-        fi
-        if [ "$BUILD_COMPONENTS" = "front" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
-          PACK_ITEMS+=(panel)
-        fi
+    #     PACK_ITEMS=(vars.json deploy)
+    #     if [ "$BUILD_COMPONENTS" = "back" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
+    #       PACK_ITEMS+=(api)
+    #     fi
+    #     if [ "$BUILD_COMPONENTS" = "front" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
+    #       PACK_ITEMS+=(panel)
+    #     fi
 
-        tar -czf "$ARCHIVE" -C "$STAGING" "${PACK_ITEMS[@]}"
-        ls -lh "$ARCHIVE"
-      displayName: 'Create deployment archive'
+    #     tar -czf "$ARCHIVE" -C "$STAGING" "${PACK_ITEMS[@]}"
+    #     ls -lh "$ARCHIVE"
+    #   displayName: 'Create deployment archive'
 
-    - task: PublishBuildArtifacts@1
-      displayName: 'Publish build artifacts'
-      inputs:
-        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-        ArtifactName: 'aiorchestrator-$(tagSetting.BUILD_TAG)'
-        publishLocation: 'Container'
+    # - task: PublishBuildArtifacts@1
+    #   displayName: 'Publish build artifacts'
+    #   inputs:
+    #     PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    #     ArtifactName: 'aiorchestrator-$(tagSetting.BUILD_TAG)'
+    #     publishLocation: 'Container'
 
 - stage: Deploy
   displayName: 'Deploy'
@@ -333,32 +331,33 @@ stages:
     ARTIFACT_NAME: 'aiorchestrator-$(BUILD_TAG)'
     RELEASE_DIR: '$(deployReleaseRoot)/${{ parameters.BRANCH }}__release'
   jobs:
-  - job: Deploy_Linux
+  - job: Deployment
     displayName: 'Deploy to Linux host'
     pool: 'WEB-1'
     steps:
     - checkout: none
 
-    - task: DownloadBuildArtifacts@1
-      displayName: 'Download build artifact'
-      inputs:
-        buildType: 'current'
-        downloadType: 'single'
-        artifactName: 'aiorchestrator-$(BUILD_TAG)'
-        downloadPath: '$(Pipeline.Workspace)'
+    # - task: DownloadBuildArtifacts@1
+    #   displayName: 'Download build artifact'
+    #   inputs:
+    #     buildType: 'current'
+    #     downloadType: 'single'
+    #     artifactName: 'aiorchestrator-$(BUILD_TAG)'
+    #     downloadPath: '$(Pipeline.Workspace)'
 
-    - task: CopyFilesOverSSH@0
-      displayName: 'Sync deploy files to target'
-      inputs:
-        sshEndpoint: 'AiOrchestrator-Deploy'
-        sourceFolder: '$(Pipeline.Workspace)/aiorchestrator-$(BUILD_TAG)/deploy'
-        contents: |
-          compose.yaml
-          .env.example
-        targetFolder: '$(RELEASE_DIR)'
-        cleanTargetFolder: false
-        overwrite: true
+    # - task: CopyFilesOverSSH@0
+    #   displayName: 'Sync deploy files to target'
+    #   inputs:
+    #     sshEndpoint: 'AiOrchestrator-Deploy'
+    #     sourceFolder: '$(Pipeline.Workspace)/aiorchestrator-$(BUILD_TAG)/deploy'
+    #     contents: |
+    #       compose.yaml
+    #       .env.example
+    #     targetFolder: '$(RELEASE_DIR)'
+    #     cleanTargetFolder: false
+    #     overwrite: true
 
+    # fully expanded before SSH establishment
     - task: SSH@0
       displayName: 'Pull images and restart services'
       inputs:
