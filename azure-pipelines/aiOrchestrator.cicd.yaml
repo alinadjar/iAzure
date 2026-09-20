@@ -270,7 +270,7 @@ stages:
 
         docker push "$(tagSetting.PANEL_FQIN)"
       displayName: 'Build & push Panel image'
-      condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'front'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
+      condition: and(succeeded(), or(eq('${{ parameters.BUILD_COMPONENTS }}', 'front'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both')))
       env:
         NEXUS_USER: $(NEXUS_USER)
         NEXUS_PASS: $(NEXUS_PASS)
