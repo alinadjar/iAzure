@@ -1,0 +1,417 @@
+# Azure DevOps Server — self-hosted build, publish, and Docker push for AiOrchestrator.
+#
+# Required pipeline variables (secret where noted):
+#   GIT_PAT              — clone SadganAIDeveloper + SadganShared repos
+#   BOT_TOKEN            — NupkgWeb2 feed (secret)
+#   ABP_FEED_URL         — licensed Volo.ABP feed URL (secret)
+#   DOCKER_REGISTRY      — Nexus registry host (e.g. nexus.sadgan.int:8082)
+#   NEXUS_DOCKER_USERNAME
+#   NEXUS_DOCKER_PASSWORD (secret)
+#
+# Optional:
+#   DOTNET_SDK_PATH      — default /opt/net_sdk_10 (builds net9.0 targets)
+#   DEPLOY_RELEASE_ROOT  — default /usr/local/apps/aiorchestrator
+#
+
+
+trigger: none
+
+pool:
+  name: 'WEB-1'
+
+parameters:
+- name: BRANCH
+  type: string
+  displayName: 'Source branch'
+  default: 'dev'
+  values:
+    - 'dev'
+    - 'main'
+- name: BUILD_COMPONENTS
+  type: string
+  displayName: 'Components to build'
+  default: 'both'
+  values:
+    - 'front'
+    - 'back'
+    - 'both'
+- name: SHOULD_RELEASE
+  type: string
+  displayName: 'Deploy release ?'
+  default: 'true'
+  values:
+    - 'true'
+    - 'false'
+
+variables:
+  - name: buildConfiguration
+    value: 'Release'
+  - name: orgUrl
+    value: 'http://azure.sadgan.int/WebApp'
+  - name: adoProject
+    value: 'SadganAI'
+  - name: repoRoot
+    value: '$(System.DefaultWorkingDirectory)/SadganAIDeveloper'
+  - name: sharedRoot
+    value: '$(System.DefaultWorkingDirectory)/ProjectFx/SadganShared'
+  - name: solution
+    value: '$(repoRoot)/AiOrchestrator/AiOrchestrator.sln'
+  - name: apiProject
+    value: '$(repoRoot)/AiOrchestrator/src/AiOrchestrator.HttpApi.Host/AiOrchestrator.HttpApi.Host.csproj'
+  - name: panelProject
+    value: '$(repoRoot)/AiOrchestrator/src/AiOrchestrator.Panel.Web/AiOrchestrator.Panel.Web.csproj'
+  - name: apiDockerfile
+    value: '$(repoRoot)/AiOrchestrator/src/AiOrchestrator.HttpApi.Host/Dockerfile.pipe'
+  - name: panelDockerfile
+    value: '$(repoRoot)/AiOrchestrator/src/AiOrchestrator.Panel.Web/Dockerfile.pipe'
+  - name: apiDockerImage
+    value: '$(DOCKER_REGISTRY)/aiorchestrator/api'
+  - name: panelDockerImage
+    value: '$(DOCKER_REGISTRY)/aiorchestrator/panel'
+  - name: dotnetSdkPath
+    value: '/opt/net_sdk_10'
+  - name: CURRENT_BRANCH
+    value: ${{ parameters.BRANCH }}
+  - name: deployReleaseRoot
+    value: '/usr/local/apps/aiorchestrator'
+
+stages:
+- stage: INIT
+  displayName: 'Init'
+  jobs:
+  - job: InitJob
+    displayName: 'Init'
+    steps:
+    - checkout: none
+    - bash: |
+        echo "Branch: ${{ parameters.BRANCH }}"
+        echo "Components: ${{ parameters.BUILD_COMPONENTS }}"
+      displayName: 'Echo parameters'
+
+- stage: Build
+  displayName: 'Build & Publish'
+  jobs:
+  - job: Build_Orchestrator
+    displayName: 'Build AiOrchestrator'
+    pool: 'WEB-1'
+    variables:
+      GIT_CONFIG_GLOBAL: $(Agent.TempDirectory)/gitconfig_$(Build.BuildId)_ao
+      GIT_HOME: $(Agent.TempDirectory)/home_$(Build.BuildId)_ao
+      CURRENT_BRANCH: ${{ parameters.BRANCH }}
+    steps:
+    - checkout: none
+
+    - bash: |
+        set -e
+        mkdir -p "$GIT_HOME"
+        export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
+
+        git config --file "$GIT_CONFIG_GLOBAL" user.email "S_Bot_Azure@sadgan.int"
+        git config --file "$GIT_CONFIG_GLOBAL" user.name "S_Bot_Azure"
+        git config --file "$GIT_CONFIG_GLOBAL" http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+        git config --file "$GIT_CONFIG_GLOBAL" http.sslVerify false
+        git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory '*'
+
+        BASE_URL="http://$(GIT_PAT)@$(orgUrl)"
+
+        clone_repo() {
+          local branch_name="$1"
+          local repo_url="$2"
+          local target_dir="$3"
+
+          echo "Cloning $repo_url (branch: $branch_name) -> $target_dir"
+          rm -rf "$target_dir"
+          git clone --branch "$branch_name" "$repo_url" "$target_dir"
+          test -d "$target_dir/.git"
+        }
+
+        clone_repo "$CURRENT_BRANCH" "$BASE_URL/$(adoProject)/_git/SadganAIDeveloper" "$(repoRoot)"
+        mkdir -p "$(sharedRoot)"
+
+        clone_repo "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/1_Configs"       "$(sharedRoot)/1_Configs"
+        clone_repo "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/2_SharedLibrary" "$(sharedRoot)/2_SharedLibrary"
+        clone_repo "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/3_ClientLibrary" "$(sharedRoot)/3_ClientLibrary"
+        clone_repo "$CURRENT_BRANCH" "$BASE_URL/SadganShared/_git/4_ServerLibrary" "$(sharedRoot)/4_ServerLibrary"
+
+        cd "$(repoRoot)"
+        COMMIT_HASH="$(git rev-parse HEAD | cut -c1-12)"
+        echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$COMMIT_HASH"
+        echo "SadganAIDeveloper commit: $COMMIT_HASH"
+        ls -la "$(sharedRoot)"
+      displayName: 'Git checkout'
+      name: gitPull
+      env:
+        GIT_PAT: $(GIT_PAT)
+        GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
+        GIT_HOME: $(GIT_HOME)
+        CURRENT_BRANCH: ${{ parameters.BRANCH }}
+
+    - bash: |
+        BUILD_TAG="ao_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
+        echo "Build tag: $BUILD_TAG"
+        echo "##vso[task.setvariable variable=BUILD_TAG;isOutput=true]$BUILD_TAG"
+        echo "##vso[task.setvariable variable=API_FQIN;isOutput=true]$(apiDockerImage):$BUILD_TAG"
+        echo "##vso[task.setvariable variable=PANEL_FQIN;isOutput=true]$(panelDockerImage):$BUILD_TAG"
+      displayName: 'Assign build tag'
+      name: tagSetting
+
+    - bash: |
+        configPropsFile="$(sharedRoot)/1_Configs/Directory.Packages.props"
+        test -f "$configPropsFile"
+        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>0.0.0.0</AssemblyVersion>|" "$configPropsFile"
+      displayName: 'Assembly version set'
+
+    - bash: |
+        echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"
+
+        NUGET_CONFIG="$(Agent.TempDirectory)/NuGet.Config"
+        cat > "$NUGET_CONFIG" <<EOF
+        <?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <packageSources>
+            <clear />
+            <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+            <add key="SadganNuget" value="https://nuget.sadgan.int/nuget" />
+            <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
+            <add key="nuget.abp.io" value="$(ABP_FEED_URL)" />
+          </packageSources>
+          <packageSourceCredentials>
+            <NupkgWeb2>
+              <add key="Username" value="S_Bot_Azure" />
+              <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
+            </NupkgWeb2>
+          </packageSourceCredentials>
+        </configuration>
+        EOF
+
+        find "$(Build.SourcesDirectory)" -name "NuGet.Config" -type f -delete 2>/dev/null || true
+        find "$(repoRoot)" -name "NuGet.Config" -type f -delete 2>/dev/null || true
+
+        echo "##vso[task.setvariable variable=NUGET_CONFIG_PATH]$NUGET_CONFIG"
+      displayName: 'Create NuGet.Config'
+      env:
+        BOT_TOKEN: $(BOT_TOKEN)
+        ABP_FEED_URL: $(ABP_FEED_URL)
+
+    - bash: |
+        set -e
+        export PATH="$(dotnetSdkPath):$PATH"
+        export MSBUILDDISABLENODEREUSE=1
+        export DOTNET_CLI_TELEMETRY_OPTOUT=1
+        dotnet --info
+        dotnet restore "$(solution)" \
+          --configfile "$(NUGET_CONFIG_PATH)" \
+          --disable-parallel
+      displayName: 'Dotnet restore'
+
+    - bash: |
+        set -e
+        export PATH="$(dotnetSdkPath):$PATH"
+        export MSBUILDDISABLENODEREUSE=1
+        export DOTNET_CLI_TELEMETRY_OPTOUT=1
+        mkdir -p "$(Build.ArtifactStagingDirectory)/api/publish"
+        dotnet publish "$(apiProject)" \
+          --no-restore \
+          --configuration $(buildConfiguration) \
+          --output "$(Build.ArtifactStagingDirectory)/api/publish" \
+          --disable-parallel \
+          -p:BuildInParallel=false \
+          -p:NodeReuse=false \
+          -m:1
+      displayName: 'Publish API (HttpApi.Host)'
+      condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
+
+    - bash: |
+        set -e
+        export PATH="$(dotnetSdkPath):$PATH"
+        export MSBUILDDISABLENODEREUSE=1
+        export DOTNET_CLI_TELEMETRY_OPTOUT=1
+        mkdir -p "$(Build.ArtifactStagingDirectory)/panel/publish"
+        dotnet publish "$(panelProject)" \
+          --no-restore \
+          --configuration $(buildConfiguration) \
+          --output "$(Build.ArtifactStagingDirectory)/panel/publish" \
+          --disable-parallel \
+          -p:BuildInParallel=false \
+          -p:NodeReuse=false \
+          -m:1
+      displayName: 'Publish Panel (Panel.Web)'
+      condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'front'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
+
+    - bash: |
+        set -e
+        STAGING="$(Build.ArtifactStagingDirectory)/api"
+        cp "$(apiDockerfile)" "$STAGING/Dockerfile.pipe"
+
+        echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" \
+          -u "$(NEXUS_DOCKER_USERNAME)" \
+          --password-stdin
+
+        docker build \
+          -t "$(tagSetting.API_FQIN)" \
+          -f "$STAGING/Dockerfile.pipe" \
+          "$STAGING"
+
+        docker push "$(tagSetting.API_FQIN)"
+      displayName: 'Build & push API image'
+      condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
+      env:
+        NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+        NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
+
+    - bash: |
+        set -e
+        STAGING="$(Build.ArtifactStagingDirectory)/panel"
+        cp "$(panelDockerfile)" "$STAGING/Dockerfile.pipe"
+
+        echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" \
+          -u "$(NEXUS_DOCKER_USERNAME)" \
+          --password-stdin
+
+        docker build \
+          -t "$(tagSetting.PANEL_FQIN)" \
+          -f "$STAGING/Dockerfile.pipe" \
+          "$STAGING"
+
+        docker push "$(tagSetting.PANEL_FQIN)"
+      displayName: 'Build & push Panel image'
+      condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'front'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
+      env:
+        NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
+        NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
+
+    - bash: |
+        set -e
+        STAGING="$(Build.ArtifactStagingDirectory)"
+        ARCHIVE="$STAGING/aiorchestrator-$(tagSetting.BUILD_TAG).tar.gz"
+        BUILD_COMPONENTS="${{ parameters.BUILD_COMPONENTS }}"
+
+        mkdir -p "$STAGING/deploy"
+        cp "$(repoRoot)/AiOrchestrator/deploy/compose.yaml" "$STAGING/deploy/"
+        cp "$(repoRoot)/AiOrchestrator/deploy/.env.example" "$STAGING/deploy/"
+
+        cat <<EOF > "$STAGING/vars.json"
+        {
+          "BUILD_TAG": "$(tagSetting.BUILD_TAG)",
+          "COMMIT_HASH": "$(gitPull.COMMIT_HASH)",
+          "BRANCH": "${{ parameters.BRANCH }}",
+          "BUILD_COMPONENTS": "$BUILD_COMPONENTS",
+          "CREATE_RELEASE": ${{ parameters.SHOULD_RELEASE }},
+          "API_FQIN": "$(tagSetting.API_FQIN)",
+          "PANEL_FQIN": "$(tagSetting.PANEL_FQIN)"
+        }
+        EOF
+
+        PACK_ITEMS=(vars.json deploy)
+        if [ "$BUILD_COMPONENTS" = "back" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
+          PACK_ITEMS+=(api)
+        fi
+        if [ "$BUILD_COMPONENTS" = "front" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
+          PACK_ITEMS+=(panel)
+        fi
+
+        tar -czf "$ARCHIVE" -C "$STAGING" "${PACK_ITEMS[@]}"
+        ls -lh "$ARCHIVE"
+      displayName: 'Create deployment archive'
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish build artifacts'
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'aiorchestrator-$(tagSetting.BUILD_TAG)'
+        publishLocation: 'Container'
+
+- stage: Deploy
+  displayName: 'Deploy'
+  dependsOn: Build
+  condition: and(succeeded(), eq('${{ parameters.SHOULD_RELEASE }}', 'true'))
+  variables:
+    BUILD_TAG: $[ stageDependencies.Build.Build_Orchestrator.outputs['tagSetting.BUILD_TAG'] ]
+    API_FQIN: $[ stageDependencies.Build.Build_Orchestrator.outputs['tagSetting.API_FQIN'] ]
+    PANEL_FQIN: $[ stageDependencies.Build.Build_Orchestrator.outputs['tagSetting.PANEL_FQIN'] ]
+    COMMIT_HASH: $[ stageDependencies.Build.Build_Orchestrator.outputs['gitPull.COMMIT_HASH'] ]
+    ARTIFACT_NAME: 'aiorchestrator-$(BUILD_TAG)'
+    RELEASE_DIR: '$(deployReleaseRoot)/${{ parameters.BRANCH }}__release'
+  jobs:
+  - job: Deploy_Linux
+    displayName: 'Deploy to Linux host'
+    pool: 'WEB-1'
+    steps:
+    - checkout: none
+
+    - task: DownloadBuildArtifacts@1
+      displayName: 'Download build artifact'
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'aiorchestrator-$(BUILD_TAG)'
+        downloadPath: '$(Pipeline.Workspace)'
+
+    - task: CopyFilesOverSSH@0
+      displayName: 'Sync deploy files to target'
+      inputs:
+        sshEndpoint: 'AiOrchestrator-Deploy'
+        sourceFolder: '$(Pipeline.Workspace)/aiorchestrator-$(BUILD_TAG)/deploy'
+        contents: |
+          compose.yaml
+          .env.example
+        targetFolder: '$(RELEASE_DIR)'
+        cleanTargetFolder: false
+        overwrite: true
+
+    - task: SSH@0
+      displayName: 'Pull images and restart services'
+      inputs:
+        sshEndpoint: 'AiOrchestrator-Deploy'
+        runOptions: 'inline'
+        failOnStdErr: false
+        inline: |
+          set -e
+          echo "=== BUILD_TAG: $(BUILD_TAG)"
+          echo "BRANCH: ${{ parameters.BRANCH }}"
+          echo "BUILD_COMPONENTS: ${{ parameters.BUILD_COMPONENTS }}"
+          echo "API_FQIN: $(API_FQIN)"
+          echo "PANEL_FQIN: $(PANEL_FQIN)"
+
+          echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" \
+            -u "$(NEXUS_DOCKER_USERNAME)" --password-stdin 2>/dev/null
+
+          RELEASE_DIR="$(RELEASE_DIR)"
+          mkdir -p "$RELEASE_DIR"
+          cd "$RELEASE_DIR"
+          ls -alh
+
+          if [ ! -f .env ]; then
+            if [ -f .env.example ]; then
+              cp .env.example .env
+              echo "Created .env from .env.example — edit secrets on the host before relying on this deploy."
+            else
+              echo ".env is missing on $RELEASE_DIR"
+              exit 1
+            fi
+          fi
+
+          BUILD_COMPONENTS="${{ parameters.BUILD_COMPONENTS }}"
+
+          sed -i "s/^BUILD_TAG=.*/BUILD_TAG=$(BUILD_TAG)/" .env
+          if [ "$BUILD_COMPONENTS" = "back" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
+            sed -i "s|^API_FQIN=.*|API_FQIN=$(API_FQIN)|" .env
+          fi
+          if [ "$BUILD_COMPONENTS" = "front" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
+            sed -i "s|^PANEL_FQIN=.*|PANEL_FQIN=$(PANEL_FQIN)|" .env
+          fi
+
+          if [ "$BUILD_COMPONENTS" = "back" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
+            echo "Pulling API image: $(API_FQIN)"
+            docker pull "$(API_FQIN)" || { echo "docker pull failed for API. Exiting."; exit 1; }
+            docker compose --env-file .env -f compose.yaml up -d postgres
+            docker compose --env-file .env -f compose.yaml up -d --no-deps api
+          fi
+
+          if [ "$BUILD_COMPONENTS" = "front" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
+            echo "Pulling Panel image: $(PANEL_FQIN)"
+            docker pull "$(PANEL_FQIN)" || { echo "docker pull failed for Panel. Exiting."; exit 1; }
+            docker compose --env-file .env -f compose.yaml up -d --no-deps panel
+          fi
+
+          docker compose --env-file .env -f compose.yaml ps
