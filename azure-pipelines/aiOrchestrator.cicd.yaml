@@ -399,7 +399,6 @@ stages:
           if [ "$BUILD_COMPONENTS" = "back" ] || [ "$BUILD_COMPONENTS" = "both" ]; then
             echo "Pulling API image: $(API_FQIN)"
             docker pull "$(API_FQIN)" || { echo "docker pull failed for API. Exiting."; exit 1; }
-            docker compose --env-file .env -f compose.yaml up -d postgres
             docker compose --env-file .env -f compose.yaml up -d --no-deps api
           fi
 
