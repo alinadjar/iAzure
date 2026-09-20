@@ -329,7 +329,7 @@ stages:
     PANEL_FQIN: $[ stageDependencies.Build.Build_Orchestrator.outputs['tagSetting.PANEL_FQIN'] ]
     COMMIT_HASH: $[ stageDependencies.Build.Build_Orchestrator.outputs['gitPull.COMMIT_HASH'] ]
     ARTIFACT_NAME: 'aiorchestrator-$(BUILD_TAG)'
-    RELEASE_DIR: '$(deployReleaseRoot)/${{ parameters.BRANCH }}__release'
+    RELEASE_DIR: '$(deployReleaseRoot)'
   jobs:
   - job: Deployment
     displayName: 'Deploy to Linux host'
@@ -376,7 +376,7 @@ stages:
             -u "$(NEXUS_DOCKER_USERNAME)" --password-stdin 2>/dev/null
 
           RELEASE_DIR="$(RELEASE_DIR)"
-          mkdir -p "$RELEASE_DIR"
+          # mkdir -p "$RELEASE_DIR"
           cd "$RELEASE_DIR"
           ls -alh
 
