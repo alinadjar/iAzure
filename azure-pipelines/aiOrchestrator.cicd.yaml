@@ -26,7 +26,6 @@ parameters:
   values:
     - 'dev'
     - 'main'
-    - 'pipe'
 - name: BUILD_COMPONENTS
   type: string
   displayName: 'Components to build'
