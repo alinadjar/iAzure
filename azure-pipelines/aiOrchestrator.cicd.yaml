@@ -3,9 +3,9 @@
 # Required pipeline variables (secret where noted):
 #   GIT_PAT              — clone SadganAIDeveloper + SadganShared repos
 #   BOT_TOKEN            — NupkgWeb2 feed (secret)
-#   DOCKER_REGISTRY      — Nexus registry host (e.g. nexus.sadgan.int:8082)
-#   NEXUS_DOCKER_USERNAME
-#   NEXUS_DOCKER_PASSWORD (secret)
+#   DOCKER_REGISTRY      — Nexus registry host
+#   NEXUS_USER
+#   NEXUS_PASS (secret)
 #
 # Optional:
 #   DOTNET_SDK_PATH      — default /opt/net_sdk_10 (builds net9.0 targets)
@@ -241,8 +241,8 @@ stages:
         STAGING="$(Build.ArtifactStagingDirectory)/api"
         cp "$(apiDockerfile)" "$STAGING/Dockerfile.pipe"
 
-        echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" \
-          -u "$(NEXUS_DOCKER_USERNAME)" \
+        echo "$(NEXUS_PASS)" | docker login "$(DOCKER_REGISTRY)" \
+          -u "$(NEXUS_USER)" \
           --password-stdin
 
         docker build \
@@ -254,16 +254,16 @@ stages:
       displayName: 'Build & push API image'
       condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
       env:
-        NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
-        NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
+        NEXUS_USER: $(NEXUS_USER)
+        NEXUS_PASS: $(NEXUS_PASS)
 
     - bash: |
         set -e
         STAGING="$(Build.ArtifactStagingDirectory)/panel"
         cp "$(panelDockerfile)" "$STAGING/Dockerfile.pipe"
 
-        echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" \
-          -u "$(NEXUS_DOCKER_USERNAME)" \
+        echo "$(NEXUS_PASS)" | docker login "$(DOCKER_REGISTRY)" \
+          -u "$(NEXUS_USER)" \
           --password-stdin
 
         docker build \
@@ -275,8 +275,8 @@ stages:
       displayName: 'Build & push Panel image'
       condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'front'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
       env:
-        NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
-        NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
+        NEXUS_USER: $(NEXUS_USER)
+        NEXUS_PASS: $(NEXUS_PASS)
 
     # - bash: |
     #     set -e
@@ -372,8 +372,8 @@ stages:
           echo "API_FQIN: $(API_FQIN)"
           echo "PANEL_FQIN: $(PANEL_FQIN)"
 
-          echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" \
-            -u "$(NEXUS_DOCKER_USERNAME)" --password-stdin 2>/dev/null
+          echo "$(NEXUS_PASS)" | docker login "$(DOCKER_REGISTRY)" \
+            -u "$(NEXUS_USER)" --password-stdin 2>/dev/null
 
           RELEASE_DIR="$(RELEASE_DIR)"
           # mkdir -p "$RELEASE_DIR"
