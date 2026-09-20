@@ -46,8 +46,6 @@ parameters:
 variables:
   - name: buildConfiguration
     value: 'Release'
-  - name: orgUrl
-    value: 'http://azure.sadgan.int/WebApp'
   - name: adoProject
     value: 'SadganAI'
   - name: repoRoot
@@ -112,7 +110,7 @@ stages:
         git config --file "$GIT_CONFIG_GLOBAL" http.sslVerify false
         git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory '*'
 
-        BASE_URL="http://$(GIT_PAT)@$(orgUrl)"
+        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
 
         clone_repo() {
           local branch_name="$1"
