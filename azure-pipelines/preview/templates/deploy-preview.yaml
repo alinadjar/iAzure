@@ -1,5 +1,5 @@
 parameters:
-  - name: TASK_ID
+  - name: WIT_ID
     type: string
   - name: DEPLOY_PATH
     type: string
@@ -27,7 +27,7 @@ steps:
   - bash: |
       set -euo pipefail
 
-      TASK_ID="${{ parameters.TASK_ID }}"
+      WIT_ID="${{ parameters.WIT_ID }}"
       DEPLOY_PATH="${{ parameters.DEPLOY_PATH }}"
       FRONT_HOST="${{ parameters.FRONT_HOST }}"
       API_HOST="${{ parameters.API_HOST }}"
@@ -36,14 +36,14 @@ steps:
       PREVIEW_HOST="${{ parameters.PREVIEW_HOST }}"
       PREVIEW_SSH_USER="${{ parameters.PREVIEW_SSH_USER }}"
 
-      echo "Deploying preview for task ${TASK_ID}"
+      echo "Deploying preview for task ${WIT_ID}"
       echo "  Front URL : https://${FRONT_HOST}"
       echo "  API URL   : https://${API_HOST}"
       echo "  Path      : ${DEPLOY_PATH}"
       echo "  Host      : ${PREVIEW_HOST}"
       echo "  Images    : front=${FRONTEND_TAG} back=${BACKEND_TAG}"
 
-      WORK_DIR="$(Agent.TempDirectory)/preview-${TASK_ID}"
+      WORK_DIR="$(Agent.TempDirectory)/preview-${WIT_ID}"
       rm -rf "$WORK_DIR"
       mkdir -p "$WORK_DIR"
 
@@ -67,9 +67,9 @@ steps:
         echo "Warning: frontend and backend tags differ; using frontend tag for ERP_VERSION"
       fi
 
-      PG_HOST_PORT=$((10000 + TASK_ID))
+      PG_HOST_PORT=$((10000 + WIT_ID))
       if [ "$PG_HOST_PORT" -gt 65535 ]; then
-        echo "ERROR: PG_HOST_PORT ${PG_HOST_PORT} exceeds max port (TASK_ID too large)"
+        echo "ERROR: PG_HOST_PORT ${PG_HOST_PORT} exceeds max port (WIT_ID too large)"
         exit 1
       fi
       echo "PG host port: ${PG_HOST_PORT}"
@@ -78,7 +78,7 @@ steps:
         local src="$1"
         local dst="$2"
         sed \
-          -e "s|__TASK_ID__|${TASK_ID}|g" \
+          -e "s|__WIT_ID__|${WIT_ID}|g" \
           -e "s|__FRONT_HOST__|${FRONT_HOST}|g" \
           -e "s|__API_HOST__|${API_HOST}|g" \
           -e "s|__DEPLOY_PATH__|${DEPLOY_PATH}|g" \
@@ -145,7 +145,7 @@ steps:
         "set -euo pipefail && \
          cd '${DEPLOY_PATH}' && \
          echo '${NEXUS_DOCKER_PASSWORD}' | docker login '${DOCKER_REGISTRY}' -u '${NEXUS_DOCKER_USERNAME}' --password-stdin && \
-         export COMPOSE_PROJECT_NAME='preview-${TASK_ID}' && \
+         export COMPOSE_PROJECT_NAME='preview-${WIT_ID}' && \
          docker compose pull && \
          docker compose up -d --remove-orphans && \
          docker compose ps"
@@ -181,7 +181,7 @@ steps:
         exit 0
       fi
 
-      TASK_ID="${{ parameters.TASK_ID }}"
+      WIT_ID="${{ parameters.WIT_ID }}"
       FRONT_URL="$(deployPreview.PREVIEW_FRONT_URL)"
       API_URL="$(deployPreview.PREVIEW_API_URL)"
       BUILD_URL="$(System.CollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
@@ -191,8 +191,8 @@ steps:
 
       FRONTEND_TAG="${{ parameters.FRONTEND_TAG }}"
       BACKEND_TAG="${{ parameters.BACKEND_TAG }}"
-      PG_HOST_PORT=$((10000 + TASK_ID))
-      COMMENT="AI preview deployed for task **${TASK_ID}**.\n\n- Front: ${FRONT_URL}\n- API: ${API_URL}\n- PG host port: ${PG_HOST_PORT}\n- Build: ${BUILD_URL}\n- Images: front=${FRONTEND_TAG} / back=${BACKEND_TAG}"
+      PG_HOST_PORT=$((10000 + WIT_ID))
+      COMMENT="AI preview deployed for task **${WIT_ID}**.\n\n- Front: ${FRONT_URL}\n- API: ${API_URL}\n- PG host port: ${PG_HOST_PORT}\n- Build: ${BUILD_URL}\n- Images: front=${FRONTEND_TAG} / back=${BACKEND_TAG}"
 
       BODY=$(jq -n \
         --arg text "$COMMENT" \
@@ -203,12 +203,12 @@ steps:
         -H "$AUTH_HEADER" \
         -H "Content-Type: application/json-patch+json" \
         -d "$BODY" \
-        "${PROJECT_API_URL}/wit/workitems/${TASK_ID}?api-version=7.0")
+        "${PROJECT_API_URL}/wit/workitems/${WIT_ID}?api-version=7.0")
 
       if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-        echo "Comment added to work item ${TASK_ID}"
+        echo "Comment added to work item ${WIT_ID}"
       else
-        echo "Warning: could not comment on work item ${TASK_ID} (HTTP ${HTTP_CODE})"
+        echo "Warning: could not comment on work item ${WIT_ID} (HTTP ${HTTP_CODE})"
         cat /tmp/wi_comment.json || true
       fi
     displayName: 'Comment preview URL on Azure work item'
