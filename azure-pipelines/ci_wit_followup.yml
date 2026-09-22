@@ -1,242 +1,8 @@
 # WorkItem follow-up pipeline — queued by CI.yml after PR creation / merge
-trigger: none
-
-pool:
-  name: 'FX_FOLLOWUP'
-
-parameters:
-  - name: WORK_ITEM_IDS
-    displayName: 'Work item IDs (comma-separated)'
-    type: string
-    default: ''
-  - name: TARGET_BRANCH
-    displayName: 'Promotion target branch'
-    type: string
-    default: ''
-  - name: SOURCE_BRANCH
-    displayName: 'Promotion source branch'
-    type: string
-    default: ''
-  - name: PROMOTION_BUILD_ID
-    displayName: 'CI build ID that triggered this run'
-    type: string
-    default: '-'
-  - name: PROMOTION_BUILD_NUMBER
-    displayName: 'CI build number that triggered this run'
-    type: string
-    default: '-'
-  - name: ADD_WI_COMMENT
-    displayName: 'Add promotion comment to each work item?'
-    type: string
-    default: 'NO'
-    values:
-      - YES
-      - NO
-  - name: ADD_WI_TAG
-    displayName: 'Add tag to each work item?'
-    type: string
-    default: 'YES'
-    values:
-      - YES
-      - NO
-  - name: WI_TAG
-    displayName: 'Tag to add (empty = promoted-{TARGET_BRANCH})'
-    type: string
-    default: ''
-
-variables:
-  - name: orgUrl
-    value: 'http://azure.sadgan.int/WebApp'
-  - name: project
-    value: 'SadganErp'
-
-steps:
-  - checkout: none
-
-  - task: Bash@3
-    displayName: 'Work item follow-up activities'
-    env:
-      GIT_PAT: $(GIT_PAT)
-      WORK_ITEM_IDS: ${{ parameters.WORK_ITEM_IDS }}
-      TARGET_BRANCH: ${{ parameters.TARGET_BRANCH }}
-      SOURCE_BRANCH: ${{ parameters.SOURCE_BRANCH }}
-      PROMOTION_BUILD_ID: ${{ parameters.PROMOTION_BUILD_ID }}
-      PROMOTION_BUILD_NUMBER: ${{ parameters.PROMOTION_BUILD_NUMBER }}
-      ADD_WI_COMMENT: ${{ parameters.ADD_WI_COMMENT }}
-      ADD_WI_TAG: ${{ parameters.ADD_WI_TAG }}
-      WI_TAG: ${{ parameters.WI_TAG }}
-      ORG_URL: $(orgUrl)
-      PROJECT: $(project)
-    inputs:
-      targetType: 'inline'
-      script: |
-        set -euo pipefail
-
-        PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
-        AUTH_HEADER="Authorization: Basic $(echo -n ":${GIT_PAT}" | base64 | tr -d '\n')"
-
-        call_api() {
-          local url="$1"
-          local method="${2:-GET}"
-          local body="${3:-}"
-          local content_type="${4:-application/json}"
-          local tmp
-          tmp=$(mktemp)
-          local http_code
-
-          if [ -n "$body" ]; then
-            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
-              -H "$AUTH_HEADER" -H "Content-Type: ${content_type}" \
-              -d "$body" "$url")
-          else
-            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
-              -H "$AUTH_HEADER" "$url")
-          fi
-
-          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-            cat "$tmp"
-            rm -f "$tmp"
-            return 0
-          fi
-
-          echo "API $method $url failed (HTTP $http_code):" >&2
-          cat "$tmp" >&2
-          rm -f "$tmp"
-          return 1
-        }
-
-        # WIT updates must use PATCH + JSON Patch (RFC 6902), not POST/PUT
-        patch_work_item() {
-          local wi_id="$1"
-          local patch_body="$2"
-          call_api \
-            "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0" \
-            "PATCH" \
-            "$patch_body" \
-            "application/json-patch+json"
-        }
-
-        tag_already_present() {
-          local existing_tags="$1"
-          local new_tag="$2"
-          echo "$existing_tags" | tr ';' '\n' \
-            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-            | grep -Fxqi "$new_tag"
-        }
-
-        build_work_item_patch() {
-          local existing_tags="$1"
-          local tag_to_add="$2"
-          local patch='[]'
-
-          if [ "$ADD_WI_COMMENT" = "YES" ]; then
-            patch=$(jq -n --argjson ops "$patch" --arg text "$COMMENT_TEXT" \
-              '$ops + [{ "op": "add", "path": "/fields/System.History", "value": $text }]')
-          fi
-
-          if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$tag_to_add" ] && ! tag_already_present "$existing_tags" "$tag_to_add"; then
-            if [ -z "$existing_tags" ]; then
-              patch=$(jq -n --argjson ops "$patch" --arg tag "$tag_to_add" \
-                '$ops + [{ "op": "add", "path": "/fields/System.Tags", "value": $tag }]')
-            else
-              patch=$(jq -n --argjson ops "$patch" --arg existing "$existing_tags" --arg tag "$tag_to_add" \
-                '$ops + [{ "op": "replace", "path": "/fields/System.Tags", "value": ($existing + "; " + $tag) }]')
-            fi
-          fi
-
-          echo "$patch"
-        }
-
-        echo "========================================="
-        echo "WORK ITEM FOLLOW-UP"
-        echo "========================================="
-        echo "Promotion: ${SOURCE_BRANCH:-?} -> ${TARGET_BRANCH:-?}"
-        echo "CI build: ${PROMOTION_BUILD_NUMBER:-?} (ID ${PROMOTION_BUILD_ID:-?})"
-        echo ""
-
-        if [ -z "$WORK_ITEM_IDS" ]; then
-          echo "No WORK_ITEM_IDS parameter — nothing to do."
-          exit 0
-        fi
-
-        mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
-        echo "Processing ${#WI_IDS[@]} work item(s): ${WI_IDS[*]}"
-        echo ""
-
-        COMMENT_TEXT="Branch promotion completed via CI: ${SOURCE_BRANCH} -> ${TARGET_BRANCH}. Build ${PROMOTION_BUILD_NUMBER} (ID ${PROMOTION_BUILD_ID})."
-
-        if [ -n "$WI_TAG" ]; then
-          TAG_TO_ADD="$WI_TAG"
-        elif [ -n "$TARGET_BRANCH" ]; then
-          TAG_TO_ADD="promoted-${TARGET_BRANCH}"
-        else
-          TAG_TO_ADD=""
-        fi
-
-        echo "Tag to add: ${TAG_TO_ADD:-<none>}"
-        echo ""
-
-        for wi_id in "${WI_IDS[@]}"; do
-          echo "-----------------------------------------"
-          echo "Work item #$wi_id"
-          echo "-----------------------------------------"
-
-          wi_json=$(call_api "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0") || {
-            echo "  ⚠️ Could not fetch work item #$wi_id — skipping"
-            continue
-          }
-
-          wi_type=$(echo "$wi_json" | jq -r '.fields["System.WorkItemType"] // "Unknown"')
-          wi_title=$(echo "$wi_json" | jq -r '.fields["System.Title"] // ""')
-          wi_state=$(echo "$wi_json" | jq -r '.fields["System.State"] // ""')
-          wi_tags=$(echo "$wi_json" | jq -r '.fields["System.Tags"] // ""')
-          wi_url=$(echo "$wi_json" | jq -r '._links.html.href // empty')
-
-          echo "  Type:   $wi_type"
-          echo "  State:  $wi_state"
-          echo "  Title:  $wi_title"
-          [ -n "$wi_tags" ] && echo "  Tags:   $wi_tags"
-          [ -n "$wi_url" ] && echo "  URL:    $wi_url"
-
-          patch_body=$(build_work_item_patch "$wi_tags" "$TAG_TO_ADD")
-
-          if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$TAG_TO_ADD" ] && tag_already_present "$wi_tags" "$TAG_TO_ADD"; then
-            echo "  ℹ️ Tag already present: $TAG_TO_ADD"
-          fi
-
-          if [ "$patch_body" != "[]" ] && [ -n "$patch_body" ]; then
-            if patch_work_item "$wi_id" "$patch_body" > /dev/null; then
-              [ "$ADD_WI_COMMENT" = "YES" ] && echo "  ✅ Added promotion comment"
-              if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$TAG_TO_ADD" ] && ! tag_already_present "$wi_tags" "$TAG_TO_ADD"; then
-                echo "  ✅ Added tag: $TAG_TO_ADD"
-              fi
-            else
-              echo "  ⚠️ Failed to update work item (check PAT scope: Work Items Read & Write)"
-            fi
-          else
-            echo "  ℹ️ No updates needed for this work item"
-          fi
-
-          # Extend here: state transitions, link to release, notify Teams, etc.
-          # Example (disabled):
-          # if [ "$TARGET_BRANCH" = "master" ] && [ "$wi_state" = "Resolved" ]; then
-          #   state_patch='[{ "op": "replace", "path": "/fields/System.State", "value": "Closed" }]'
-          #   patch_work_item "$wi_id" "$state_patch"
-          # fi
-
-          echo ""
-        done
-
-        echo "========================================="
-        echo "Follow-up complete for ${#WI_IDS[@]} work item(s)"
-        echo "========================================="
-
-
-# # WorkItem follow-up pipeline — queued by CI.yml after PR creation / merge
 # trigger: none
 
 # pool:
-#   name: 'CI176'
+#   name: 'FX_FOLLOWUP'
 
 # parameters:
 #   - name: WORK_ITEM_IDS
@@ -262,7 +28,7 @@ steps:
 #   - name: ADD_WI_COMMENT
 #     displayName: 'Add promotion comment to each work item?'
 #     type: string
-#     default: 'YES'
+#     default: 'NO'
 #     values:
 #       - YES
 #       - NO
@@ -277,13 +43,6 @@ steps:
 #     displayName: 'Tag to add (empty = promoted-{TARGET_BRANCH})'
 #     type: string
 #     default: ''
-#   - name: NOTIFY_MATTERMOST
-#     displayName: 'Post work-item summary to Mattermost?'
-#     type: string
-#     default: 'YES'
-#     values:
-#       - YES
-#       - NO
 
 # variables:
 #   - name: orgUrl
@@ -472,428 +231,669 @@ steps:
 #         echo "Follow-up complete for ${#WI_IDS[@]} work item(s)"
 #         echo "========================================="
 
-#   - task: Bash@3
-#     name: notify_mattermost
-#     displayName: 'Notify Mattermost — work item summary'
-#     condition: and(succeeded(), eq('${{ parameters.NOTIFY_MATTERMOST }}', 'YES'))
-#     env:
-#       GIT_PAT: $(GIT_PAT)
-#       WORK_ITEM_IDS: ${{ parameters.WORK_ITEM_IDS }}
-#       BACKEND_TAG: ${{ parameters.WI_TAG }}
-#       SOURCE_BRANCH: ${{ parameters.SOURCE_BRANCH }}
-#       TARGET_BRANCH: ${{ parameters.TARGET_BRANCH }}
-#       BUILD_ID: ${{ parameters.PROMOTION_BUILD_ID }}
-#       BUILD_NUMBER: ${{ parameters.PROMOTION_BUILD_NUMBER }}
-#       BUILD_BUILDID: $(Build.BuildId)
-#       BUILD_BUILDNUMBER: $(Build.BuildNumber)
-#       ORG_URL: $(orgUrl)
-#       PROJECT: $(project)
-#       MM_WEBHOOK_URL: https://chat.sadgan.int/api/v4/posts
-#       MM_JWT_TOKEN: ''
-#       MM_BOT_TOKEN: $(MM_BOT_TOKEN)
-#       MATTERMOST_BOT_TOKEN: $(MATTERMOST_BOT_TOKEN)
-#       MM_WI_TAG_JWT: $(JWT_TOKEN_WFN8N___WI-Tag-Notif)
-#       MM_CHANNEL: 7rj46o9qwjfpxfgwzw4fjpjaph
-#       MM_USERNAME: 'p.akhlaghpour'
-#     inputs:
-#       targetType: 'inline'
-#       script: |
-#         set -euo pipefail
 
-#         if [ -z "${MM_WEBHOOK_URL:-}" ]; then
-#           echo "MATTERMOST_WI_NOTIFY_WEBHOOK is not set — skipping Mattermost notification."
-#           exit 0
-#         fi
+# WorkItem follow-up pipeline — queued by CI.yml after PR creation / merge
+trigger: none
 
-#         if [ -z "${WORK_ITEM_IDS:-}" ]; then
-#           echo "No WORK_ITEM_IDS to notify — skipping."
-#           exit 0
-#         fi
+pool:
+  name: 'CI176'
 
-#         if [ -z "${BACKEND_TAG:-}" ] && [ -n "${TARGET_BRANCH:-}" ]; then
-#           BACKEND_TAG="promoted-${TARGET_BRANCH}"
-#         fi
-#         if [ -z "${BUILD_ID:-}" ] || [ "${BUILD_ID}" = "-" ]; then
-#           BUILD_ID="${BUILD_BUILDID:-}"
-#         fi
-#         if [ -z "${BUILD_NUMBER:-}" ] || [ "${BUILD_NUMBER}" = "-" ]; then
-#           BUILD_NUMBER="${BUILD_BUILDNUMBER:-}"
-#         fi
+parameters:
+  - name: WORK_ITEM_IDS
+    displayName: 'Work item IDs (comma-separated)'
+    type: string
+    default: ''
+  - name: TARGET_BRANCH
+    displayName: 'Promotion target branch'
+    type: string
+    default: ''
+  - name: SOURCE_BRANCH
+    displayName: 'Promotion source branch'
+    type: string
+    default: ''
+  - name: PROMOTION_BUILD_ID
+    displayName: 'CI build ID that triggered this run'
+    type: string
+    default: '-'
+  - name: PROMOTION_BUILD_NUMBER
+    displayName: 'CI build number that triggered this run'
+    type: string
+    default: '-'
+  - name: ADD_WI_COMMENT
+    displayName: 'Add promotion comment to each work item?'
+    type: string
+    default: 'YES'
+    values:
+      - YES
+      - NO
+  - name: ADD_WI_TAG
+    displayName: 'Add tag to each work item?'
+    type: string
+    default: 'YES'
+    values:
+      - YES
+      - NO
+  - name: WI_TAG
+    displayName: 'Tag to add (empty = promoted-{TARGET_BRANCH})'
+    type: string
+    default: ''
+  - name: NOTIFY_MATTERMOST
+    displayName: 'Post work-item summary to Mattermost?'
+    type: string
+    default: 'YES'
+    values:
+      - YES
+      - NO
 
-#         PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
-#         BUILD_URL="${ORG_URL}/${PROJECT}/_build/results?buildId=${BUILD_ID}"
-#         NOTIFY_DT="$(TZ='Asia/Tehran' date '+%Y-%m-%d %a %H:%M:%S')"
-#         MM_USER="${MM_USERNAME#@}"
+variables:
+  - name: orgUrl
+    value: 'http://azure.sadgan.int/WebApp'
+  - name: project
+    value: 'SadganErp'
 
-#         wi_state_badge() {
-#           local state="$1"
-#           if [ -n "$state" ]; then
-#             printf '%s%s%s' '`' "$state" '`'
-#           fi
-#         }
+steps:
+  - checkout: none
 
-#         rtl_text() {
-#           # RLM only — full RLE wrapping breaks markdown tables and links
-#           printf '%s%s' $'\u200F' "$1"
-#         }
+  - task: Bash@3
+    displayName: 'Work item follow-up activities'
+    env:
+      GIT_PAT: $(GIT_PAT)
+      WORK_ITEM_IDS: ${{ parameters.WORK_ITEM_IDS }}
+      TARGET_BRANCH: ${{ parameters.TARGET_BRANCH }}
+      SOURCE_BRANCH: ${{ parameters.SOURCE_BRANCH }}
+      PROMOTION_BUILD_ID: ${{ parameters.PROMOTION_BUILD_ID }}
+      PROMOTION_BUILD_NUMBER: ${{ parameters.PROMOTION_BUILD_NUMBER }}
+      ADD_WI_COMMENT: ${{ parameters.ADD_WI_COMMENT }}
+      ADD_WI_TAG: ${{ parameters.ADD_WI_TAG }}
+      WI_TAG: ${{ parameters.WI_TAG }}
+      ORG_URL: $(orgUrl)
+      PROJECT: $(project)
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -euo pipefail
 
-#         escape_md_cell() {
-#           printf '%s' "$1" | sed 's/|/\\|/g' | tr '\n\r' '  '
-#         }
+        PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
+        AUTH_HEADER="Authorization: Basic $(echo -n ":${GIT_PAT}" | base64 | tr -d '\n')"
 
-#         extract_reporter_tags() {
-#           local tags="$1"
-#           local matched
-#           matched=$(printf '%s' "$tags" | tr ';' '\n' \
-#             | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-#             | grep -v '^$' \
-#             | grep -iE 'holding|ceo|qa|internal|رمزی' || true)
-#           if [ -z "$matched" ]; then
-#             printf ''
-#             return 0
-#           fi
-#           printf '%s\n' "$matched" | awk 'NF{if(n++)printf ", "; printf "%s", $0}'
-#         }
+        call_api() {
+          local url="$1"
+          local method="${2:-GET}"
+          local body="${3:-}"
+          local content_type="${4:-application/json}"
+          local tmp
+          tmp=$(mktemp)
+          local http_code
 
-#         extract_portal_code() {
-#           local wi_json="$1"
-#           local field_ref="${2:-}"
-#           local value=""
-#           if [ -n "$field_ref" ]; then
-#             value=$(echo "$wi_json" | jq -r --arg f "$field_ref" '
-#               .fields[$f] // empty | if . == null then "" else tostring end
-#             ')
-#           fi
-#           if [ -z "$value" ] || [ "$value" = "null" ]; then
-#             value=$(echo "$wi_json" | jq -r '
-#               [
-#                 .fields
-#                 | to_entries[]
-#                 | select(.key | test("portal.?code"; "i"))
-#                 | .value
-#                 | if . == null then empty else tostring end
-#               ]
-#               | map(select(length > 0))
-#               | first // empty
-#             ')
-#           fi
-#           if [ "$value" = "null" ]; then
-#             value=""
-#           fi
-#           printf '%s' "$value"
-#         }
+          if [ -n "$body" ]; then
+            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+              -H "$AUTH_HEADER" -H "Content-Type: ${content_type}" \
+              -d "$body" "$url")
+          else
+            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+              -H "$AUTH_HEADER" "$url")
+          fi
 
-#         maybe_rtl_cell() {
-#           local text="$1"
-#           if [ -z "$text" ]; then
-#             printf ''
-#             return 0
-#           fi
-#           if printf '%s' "$text" | grep -q $'[^\x00-\x7F]'; then
-#             rtl_text "$text"
-#           else
-#             printf '%s' "$text"
-#           fi
-#         }
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            cat "$tmp"
+            rm -f "$tmp"
+            return 0
+          fi
 
-#         wi_type_icon() {
-#           local t
-#           t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-#           case "$t" in
-#             *bug*)                   printf '%s' ':bug:' ;;
-#             *task*)                  printf '%s' ':clipboard:' ;;
-#             *product*backlog*|*pbi*) printf '%s' ':bookmark:' ;;
-#             *user*stor*|*story*)     printf '%s' ':notebook:' ;;
-#             *feature*)               printf '%s' ':star:' ;;
-#             *epic*)                  printf '%s' ':crown:' ;;
-#             *impediment*)            printf '%s' ':construction:' ;;
-#             *issue*)                 printf '%s' ':exclamation:' ;;
-#             *test*)                  printf '%s' ':white_check_mark:' ;;
-#             *)                       printf '%s' ':label:' ;;
-#           esac
-#         }
+          echo "API $method $url failed (HTTP $http_code):" >&2
+          cat "$tmp" >&2
+          rm -f "$tmp"
+          return 1
+        }
 
-#         wi_type_short() {
-#           local t
-#           t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-#           case "$t" in
-#             *bug*)                   printf '%s' 'Bug' ;;
-#             *task*)                  printf '%s' 'Task' ;;
-#             *product*backlog*|*pbi*) printf '%s' 'PBI' ;;
-#             *user*stor*|*story*)     printf '%s' 'Story' ;;
-#             *feature*)               printf '%s' 'Feature' ;;
-#             *epic*)                  printf '%s' 'Epic' ;;
-#             *impediment*)            printf '%s' 'Imped.' ;;
-#             *issue*)                 printf '%s' 'Issue' ;;
-#             *test*)                  printf '%s' 'Test' ;;
-#             *)                       printf '%s' "$1" ;;
-#           esac
-#         }
+        # WIT updates must use PATCH + JSON Patch (RFC 6902), not POST/PUT
+        patch_work_item() {
+          local wi_id="$1"
+          local patch_body="$2"
+          call_api \
+            "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0" \
+            "PATCH" \
+            "$patch_body" \
+            "application/json-patch+json"
+        }
 
-#         format_work_item_row() {
-#           local wi_id="$1"
-#           local wi_type="$2"
-#           local wi_title="$3"
-#           local wi_url="$4"
-#           local wi_state="${5:-}"
-#           local wi_reporter="${6:-}"
-#           local wi_portal="${7:-}"
-#           local icon type_cell title_cell state_label="" reporter_cell portal_cell
-#           icon=$(wi_type_icon "$wi_type")
-#           type_cell=$(printf '%s %s' "$icon" "$(wi_type_short "$wi_type")")
-#           title_cell=$(escape_md_cell "$wi_title")
-#           if [ -n "$title_cell" ]; then
-#             title_cell=$(rtl_text "$title_cell")
-#             if [ -n "$wi_url" ]; then
-#               title_cell=$(printf '[%s](%s)' "$title_cell" "$wi_url")
-#             fi
-#           else
-#             title_cell=$(printf '#%s' "$wi_id")
-#           fi
-#           if [ -n "$wi_state" ]; then
-#             state_label=$(wi_state_badge "$wi_state")
-#           fi
-#           reporter_cell=$(maybe_rtl_cell "$(escape_md_cell "$wi_reporter")")
-#           portal_cell=$(escape_md_cell "$wi_portal")
-#           printf '| %s | %s | %s | #%s | %s | %s |' \
-#             "$type_cell" "$title_cell" "$state_label" "$wi_id" "$reporter_cell" "$portal_cell"
-#         }
+        tag_already_present() {
+          local existing_tags="$1"
+          local new_tag="$2"
+          echo "$existing_tags" | tr ';' '\n' \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+            | grep -Fxqi "$new_tag"
+        }
 
-#         fetch_work_item() {
-#           local wi_id="$1"
-#           curl -sS -u ":$GIT_PAT" \
-#             "${PROJECT_API_URL}/wit/workitems/${wi_id}?\$expand=all&api-version=7.0" 2>/dev/null || echo '{}'
-#         }
+        build_work_item_patch() {
+          local existing_tags="$1"
+          local tag_to_add="$2"
+          local patch='[]'
 
-#         resolve_portal_code_field() {
-#           local fields_json ref=""
-#           for url in \
-#             "${PROJECT_API_URL}/wit/fields?api-version=7.0" \
-#             "${ORG_URL}/_apis/wit/fields?api-version=7.0"
-#           do
-#             fields_json=$(curl -sS -u ":$GIT_PAT" "$url" 2>/dev/null || echo '{}')
-#             ref=$(echo "$fields_json" | jq -r '
-#               [.value[]? | select((.name // "") | test("^\\s*portal\\s*code\\s*$"; "i")) | .referenceName]
-#               | first // empty
-#             ')
-#             if [ -n "$ref" ] && [ "$ref" != "null" ]; then
-#               printf '%s' "$ref"
-#               return 0
-#             fi
-#           done
-#           printf ''
-#         }
+          if [ "$ADD_WI_COMMENT" = "YES" ]; then
+            patch=$(jq -n --argjson ops "$patch" --arg text "$COMMENT_TEXT" \
+              '$ops + [{ "op": "add", "path": "/fields/System.History", "value": $text }]')
+          fi
 
-#         PORTAL_CODE_FIELD="$(resolve_portal_code_field)"
-#         if [ -n "$PORTAL_CODE_FIELD" ]; then
-#           echo "Resolved Portal Code field: ${PORTAL_CODE_FIELD}"
-#         else
-#           echo "Portal Code field name not in WIT catalog — will match work-item fields by key."
-#         fi
+          if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$tag_to_add" ] && ! tag_already_present "$existing_tags" "$tag_to_add"; then
+            if [ -z "$existing_tags" ]; then
+              patch=$(jq -n --argjson ops "$patch" --arg tag "$tag_to_add" \
+                '$ops + [{ "op": "add", "path": "/fields/System.Tags", "value": $tag }]')
+            else
+              patch=$(jq -n --argjson ops "$patch" --arg existing "$existing_tags" --arg tag "$tag_to_add" \
+                '$ops + [{ "op": "replace", "path": "/fields/System.Tags", "value": ($existing + "; " + $tag) }]')
+            fi
+          fi
 
-#         wi_table=$(printf '%s\n%s' '| | Title | State | ID | reporter | portalCode |' '|:--:|:--|:-:|:-:|:--|:-:|')
-#         wi_json_array='[]'
-#         WI_NOTIFY_JSON='[]'
-#         WI_IDS=()
+          echo "$patch"
+        }
 
-#         echo "Fetching work item details from API..."
-#         mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' \
-#           | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
-#         if [ "${#WI_IDS[@]}" -gt 0 ]; then
-#           for wi_id in "${WI_IDS[@]}"; do
-#             wi_resp=$(fetch_work_item "$wi_id")
-#             wi_tags=$(echo "$wi_resp" | jq -r '.fields["System.Tags"] // ""')
-#             WI_NOTIFY_JSON=$(echo "$WI_NOTIFY_JSON" | jq \
-#               --arg id "$wi_id" \
-#               --arg type "$(echo "$wi_resp" | jq -r '.fields["System.WorkItemType"] // "Work Item"')" \
-#               --arg title "$(echo "$wi_resp" | jq -r '.fields["System.Title"] // ""')" \
-#               --arg url "$(echo "$wi_resp" | jq -r '._links.html.href // empty')" \
-#               --arg state "$(echo "$wi_resp" | jq -r '.fields["System.State"] // ""')" \
-#               --arg reporter "$(extract_reporter_tags "$wi_tags")" \
-#               --arg portalCode "$(extract_portal_code "$wi_resp" "$PORTAL_CODE_FIELD")" \
-#               '. + [{ id: $id, type: $type, title: $title, url: $url, state: $state, reporter: $reporter, portalCode: $portalCode }]')
-#           done
-#         fi
+        echo "========================================="
+        echo "WORK ITEM FOLLOW-UP"
+        echo "========================================="
+        echo "Promotion: ${SOURCE_BRANCH:-?} -> ${TARGET_BRANCH:-?}"
+        echo "CI build: ${PROMOTION_BUILD_NUMBER:-?} (ID ${PROMOTION_BUILD_ID:-?})"
+        echo ""
 
-#         while IFS= read -r wi_row; do
-#           wi_id=$(echo "$wi_row" | jq -r '.id')
-#           wi_type=$(echo "$wi_row" | jq -r '.type')
-#           wi_title=$(echo "$wi_row" | jq -r '.title')
-#           wi_state=$(echo "$wi_row" | jq -r '.state')
-#           wi_url=$(echo "$wi_row" | jq -r '.url')
-#           wi_reporter=$(echo "$wi_row" | jq -r '.reporter // empty')
-#           wi_portal=$(echo "$wi_row" | jq -r '.portalCode // empty')
-#           if [ -z "$wi_url" ] || [ "$wi_url" = "null" ]; then
-#             wi_url="${ORG_URL}/${PROJECT}/_workitems/edit/${wi_id}"
-#           fi
-#           if [ "$wi_reporter" = "null" ]; then wi_reporter=""; fi
-#           if [ "$wi_portal" = "null" ]; then wi_portal=""; fi
-#           wi_icon=$(wi_type_icon "$wi_type")
-#           wi_line=$(format_work_item_row "$wi_id" "$wi_type" "$wi_title" "$wi_url" "$wi_state" "$wi_reporter" "$wi_portal")
-#           echo "  Notify row: $wi_line"
-#           wi_table="${wi_table}"$'\n'"${wi_line}"
-#           wi_json_array=$(echo "$wi_json_array" | jq \
-#             --arg id "$wi_id" --arg type "$wi_type" --arg state "$wi_state" \
-#             --arg title "$wi_title" --arg url "$wi_url" --arg icon "$wi_icon" \
-#             --arg reporter "$wi_reporter" --arg portalCode "$wi_portal" \
-#             --arg line "$wi_line" \
-#             '. + [{ id: $id, type: $type, state: $state, title: $title, url: $url, icon: $icon, reporter: $reporter, portalCode: $portalCode, line: $line }]')
-#         done < <(echo "$WI_NOTIFY_JSON" | jq -c '.[]')
+        if [ -z "$WORK_ITEM_IDS" ]; then
+          echo "No WORK_ITEM_IDS parameter — nothing to do."
+          exit 0
+        fi
 
-#         # Do not wrap the table in RLE — that reverses columns. RTL is applied to titles only.
-#         MM_TEXT=$(printf '%b' "**Branch promotion:** \`${SOURCE_BRANCH}\` → \`${TARGET_BRANCH}\`  ·  **Tag:** \`${BACKEND_TAG}\`  ·  [Build #${BUILD_NUMBER}](${BUILD_URL})\n_${NOTIFY_DT}_\n\n${wi_table}")
+        mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
+        echo "Processing ${#WI_IDS[@]} work item(s): ${WI_IDS[*]}"
+        echo ""
 
-#         if [ -n "$MM_USER" ] && echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
-#           MM_TEXT="${MM_TEXT}"$'\n\n'"@${MM_USER}"
-#         fi
+        COMMENT_TEXT="Branch promotion completed via CI: ${SOURCE_BRANCH} -> ${TARGET_BRANCH}. Build ${PROMOTION_BUILD_NUMBER} (ID ${PROMOTION_BUILD_ID})."
 
-#         # Route target for incoming webhooks (channel name or @username)
-#         MM_TARGET=""
-#         if [ -n "$MM_USER" ] && ! echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
-#           MM_TARGET="@${MM_USER}"
-#         elif [ -n "$MM_CHANNEL" ]; then
-#           MM_TARGET="$MM_CHANNEL"
-#         fi
+        if [ -n "$WI_TAG" ]; then
+          TAG_TO_ADD="$WI_TAG"
+        elif [ -n "$TARGET_BRANCH" ]; then
+          TAG_TO_ADD="promoted-${TARGET_BRANCH}"
+        else
+          TAG_TO_ADD=""
+        fi
 
-#         MM_API_TOKEN="${MM_BOT_TOKEN:-${MATTERMOST_BOT_TOKEN:-${MM_WI_TAG_JWT:-${MM_JWT_TOKEN:-}}}}"
-#         MM_API_TOKEN="$(printf '%s' "$MM_API_TOKEN" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^[Bb]earer[[:space:]]*//')"
+        echo "Tag to add: ${TAG_TO_ADD:-<none>}"
+        echo ""
 
-#         send_notification() {
-#           local payload="$1"
-#           shift
-#           # --location-trusted keeps Authorization on redirects (plain -L drops it → 401)
-#           curl -k -sS -w "\n%{http_code}" --location --location-trusted "$MM_WEBHOOK_URL" \
-#             --header 'Content-Type: application/json' \
-#             "$@" \
-#             --data "$payload" 2>&1 || true
-#         }
+        for wi_id in "${WI_IDS[@]}"; do
+          echo "-----------------------------------------"
+          echo "Work item #$wi_id"
+          echo "-----------------------------------------"
 
-#         mm_api_base() {
-#           echo "$MM_WEBHOOK_URL" | sed -E 's|/api/v4/.*||'
-#         }
+          wi_json=$(call_api "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0") || {
+            echo "  ⚠️ Could not fetch work item #$wi_id — skipping"
+            continue
+          }
 
-#         resolve_dm_channel_id() {
-#           local base user_id me_id dm_json
-#           base="$(mm_api_base)"
-#           user_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
-#             "${base}/api/v4/users/username/${MM_USER}" 2>/dev/null || echo '{}')
-#           user_id=$(echo "$user_json" | jq -r '.id // empty')
-#           if [ -z "$user_id" ]; then
-#             echo "  ⚠️ Mattermost user not found: ${MM_USER}" >&2
-#             return 1
-#           fi
-#           me_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
-#             "${base}/api/v4/users/me" 2>/dev/null || echo '{}')
-#           me_id=$(echo "$me_json" | jq -r '.id // empty')
-#           if [ -z "$me_id" ]; then
-#             echo "  ⚠️ Could not resolve Mattermost bot user (/users/me)" >&2
-#             return 1
-#           fi
-#           dm_json=$(curl -k -sS -X POST \
-#             -H "Authorization: Bearer ${MM_API_TOKEN}" \
-#             -H "Content-Type: application/json" \
-#             -d "[\"${me_id}\", \"${user_id}\"]" \
-#             "${base}/api/v4/channels/direct" 2>/dev/null || echo '{}')
-#           echo "$dm_json" | jq -r '.id // empty'
-#         }
+          wi_type=$(echo "$wi_json" | jq -r '.fields["System.WorkItemType"] // "Unknown"')
+          wi_title=$(echo "$wi_json" | jq -r '.fields["System.Title"] // ""')
+          wi_state=$(echo "$wi_json" | jq -r '.fields["System.State"] // ""')
+          wi_tags=$(echo "$wi_json" | jq -r '.fields["System.Tags"] // ""')
+          wi_url=$(echo "$wi_json" | jq -r '._links.html.href // empty')
 
-#         echo "Sending Mattermost notification (${#WI_IDS[@]} work item(s))..."
+          echo "  Type:   $wi_type"
+          echo "  State:  $wi_state"
+          echo "  Title:  $wi_title"
+          [ -n "$wi_tags" ] && echo "  Tags:   $wi_tags"
+          [ -n "$wi_url" ] && echo "  URL:    $wi_url"
 
-#         if echo "$MM_WEBHOOK_URL" | grep -qiE '/hooks/'; then
-#           # Mattermost incoming webhook — token is in URL; do NOT send Bearer auth
-#           echo "Mode: Mattermost incoming webhook (/hooks/)" >&2
-#           JSON_PAYLOAD=$(jq -n \
-#             --arg text "$MM_TEXT" \
-#             --arg channel "$MM_TARGET" \
-#             --arg username "Azure CI" \
-#             '{
-#               text: $text,
-#               username: $username,
-#               icon_emoji: ":label:"
-#             } + (if ($channel | length) > 0 then { channel: $channel } else {} end)')
-#           response=$(send_notification "$JSON_PAYLOAD")
-#         elif echo "$MM_WEBHOOK_URL" | grep -qiE 'n8n\.|/webhook'; then
-#           # n8n webhook — full payload + optional JWT (same pattern as QA_Gate / PM_GATE)
-#           echo "Mode: n8n webhook" >&2
-#           JSON_PAYLOAD=$(jq -n \
-#             --arg erp "DevOps" \
-#             --arg channel "$MM_CHANNEL" \
-#             --arg username "$MM_USER" \
-#             --arg text "$MM_TEXT" \
-#             --arg source "$SOURCE_BRANCH" \
-#             --arg target "$TARGET_BRANCH" \
-#             --arg release_tag "$BACKEND_TAG" \
-#             --arg work_item_ids "$WORK_ITEM_IDS" \
-#             --arg build_id "$BUILD_ID" \
-#             --arg build_number "$BUILD_NUMBER" \
-#             --arg build_url "$BUILD_URL" \
-#             --arg notify_dt "$NOTIFY_DT" \
-#             --argjson work_items "$wi_json_array" \
-#             '{
-#               ERP: $erp,
-#               channel: $channel,
-#               username: $username,
-#               text: $text,
-#               promotion: ($source + " -> " + $target),
-#               source_branch: $source,
-#               target_branch: $target,
-#               release_tag: $release_tag,
-#               work_item_ids: $work_item_ids,
-#               work_items: $work_items,
-#               build_id: $build_id,
-#               build_number: $build_number,
-#               build_url: $build_url,
-#               notify_dt: $notify_dt
-#             }')
-#           if [ -n "${MM_JWT_TOKEN:-}" ]; then
-#             response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_JWT_TOKEN}")
-#           else
-#             response=$(send_notification "$JSON_PAYLOAD")
-#           fi
-#         elif echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
-#           # Mattermost REST API POST /api/v4/posts — requires channel_id + Bearer token
-#           echo "Mode: Mattermost REST API (/api/v4/posts)" >&2
-#           if [ -z "${MM_API_TOKEN:-}" ]; then
-#             echo "⚠️ Mattermost API token not set — use MATTERMOST_BOT_TOKEN or JWT_TOKEN_WFN8N___WI-Tag-Notif in variable group."
-#             exit 0
-#           fi
+          patch_body=$(build_work_item_patch "$wi_tags" "$TAG_TO_ADD")
 
-#           CHANNEL_ID=""
-#           if [ -n "$MM_CHANNEL" ]; then
-#             CHANNEL_ID="$MM_CHANNEL"
-#             echo "  Target: channel_id=${CHANNEL_ID}" >&2
-#           elif [ -n "$MM_USER" ]; then
-#             echo "  Target: DM @${MM_USER}" >&2
-#             CHANNEL_ID=$(resolve_dm_channel_id) || CHANNEL_ID=""
-#           fi
+          if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$TAG_TO_ADD" ] && tag_already_present "$wi_tags" "$TAG_TO_ADD"; then
+            echo "  ℹ️ Tag already present: $TAG_TO_ADD"
+          fi
 
-#           if [ -z "$CHANNEL_ID" ]; then
-#             echo "⚠️ No Mattermost channel_id — set MM_CHANNEL to a channel ID, or MM_USERNAME for DM."
-#             exit 0
-#           fi
+          if [ "$patch_body" != "[]" ] && [ -n "$patch_body" ]; then
+            if patch_work_item "$wi_id" "$patch_body" > /dev/null; then
+              [ "$ADD_WI_COMMENT" = "YES" ] && echo "  ✅ Added promotion comment"
+              if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$TAG_TO_ADD" ] && ! tag_already_present "$wi_tags" "$TAG_TO_ADD"; then
+                echo "  ✅ Added tag: $TAG_TO_ADD"
+              fi
+            else
+              echo "  ⚠️ Failed to update work item (check PAT scope: Work Items Read & Write)"
+            fi
+          else
+            echo "  ℹ️ No updates needed for this work item"
+          fi
 
-#           JSON_PAYLOAD=$(jq -n \
-#             --arg channel_id "$CHANNEL_ID" \
-#             --arg message "$MM_TEXT" \
-#             '{ channel_id: $channel_id, message: $message }')
-#           response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_API_TOKEN}")
-#         else
-#           echo "⚠️ Unknown webhook URL pattern — using plain JSON POST without auth." >&2
-#           JSON_PAYLOAD=$(jq -n --arg text "$MM_TEXT" '{ text: $text }')
-#           response=$(send_notification "$JSON_PAYLOAD")
-#         fi
+          # Extend here: state transitions, link to release, notify Teams, etc.
+          # Example (disabled):
+          # if [ "$TARGET_BRANCH" = "master" ] && [ "$wi_state" = "Resolved" ]; then
+          #   state_patch='[{ "op": "replace", "path": "/fields/System.State", "value": "Closed" }]'
+          #   patch_work_item "$wi_id" "$state_patch"
+          # fi
 
-#         http_code=$(echo "$response" | tail -n1)
-#         response_body=$(echo "$response" | sed '$d')
+          echo ""
+        done
 
-#         if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "204" ]; then
-#           echo "✅ Mattermost notification sent (HTTP $http_code)"
-#         else
-#           echo "⚠️ Mattermost notification failed (HTTP $http_code)"
-#           echo "$response_body"
-#           if [ "$http_code" = "401" ]; then
-#             echo "  Token rejected (expired session or wrong token)."
-#             echo "  Use a Mattermost bot Access Token in MM_BOT_TOKEN — not Token ID, not a user login session."
-#           fi
-#           echo "Continuing pipeline..."
-#         fi
+        echo "========================================="
+        echo "Follow-up complete for ${#WI_IDS[@]} work item(s)"
+        echo "========================================="
+
+  - task: Bash@3
+    name: notify_mattermost
+    displayName: 'Notify Mattermost — work item summary'
+    condition: and(succeeded(), eq('${{ parameters.NOTIFY_MATTERMOST }}', 'YES'))
+    env:
+      GIT_PAT: $(GIT_PAT)
+      WORK_ITEM_IDS: ${{ parameters.WORK_ITEM_IDS }}
+      BACKEND_TAG: ${{ parameters.WI_TAG }}
+      SOURCE_BRANCH: ${{ parameters.SOURCE_BRANCH }}
+      TARGET_BRANCH: ${{ parameters.TARGET_BRANCH }}
+      BUILD_ID: ${{ parameters.PROMOTION_BUILD_ID }}
+      BUILD_NUMBER: ${{ parameters.PROMOTION_BUILD_NUMBER }}
+      BUILD_BUILDID: $(Build.BuildId)
+      BUILD_BUILDNUMBER: $(Build.BuildNumber)
+      ORG_URL: $(orgUrl)
+      PROJECT: $(project)
+      MM_WEBHOOK_URL: https://chat.sadgan.int/api/v4/posts
+      MM_JWT_TOKEN: ''
+      MM_BOT_TOKEN: $(MM_BOT_TOKEN)
+      MATTERMOST_BOT_TOKEN: $(MATTERMOST_BOT_TOKEN)
+      MM_WI_TAG_JWT: $(JWT_TOKEN_WFN8N___WI-Tag-Notif)
+      MM_CHANNEL: 7rj46o9qwjfpxfgwzw4fjpjaph
+      MM_USERNAME: 'p.akhlaghpour'
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -euo pipefail
+
+        if [ -z "${MM_WEBHOOK_URL:-}" ]; then
+          echo "MATTERMOST_WI_NOTIFY_WEBHOOK is not set — skipping Mattermost notification."
+          exit 0
+        fi
+
+        if [ -z "${WORK_ITEM_IDS:-}" ]; then
+          echo "No WORK_ITEM_IDS to notify — skipping."
+          exit 0
+        fi
+
+        if [ -z "${BACKEND_TAG:-}" ] && [ -n "${TARGET_BRANCH:-}" ]; then
+          BACKEND_TAG="promoted-${TARGET_BRANCH}"
+        fi
+        if [ -z "${BUILD_ID:-}" ] || [ "${BUILD_ID}" = "-" ]; then
+          BUILD_ID="${BUILD_BUILDID:-}"
+        fi
+        if [ -z "${BUILD_NUMBER:-}" ] || [ "${BUILD_NUMBER}" = "-" ]; then
+          BUILD_NUMBER="${BUILD_BUILDNUMBER:-}"
+        fi
+
+        PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
+        BUILD_URL="${ORG_URL}/${PROJECT}/_build/results?buildId=${BUILD_ID}"
+        NOTIFY_DT="$(TZ='Asia/Tehran' date '+%Y-%m-%d %a %H:%M:%S')"
+        MM_USER="${MM_USERNAME#@}"
+
+        wi_state_badge() {
+          local state="$1"
+          if [ -n "$state" ]; then
+            printf '%s%s%s' '`' "$state" '`'
+          fi
+        }
+
+        rtl_text() {
+          # RLM only — full RLE wrapping breaks markdown tables and links
+          printf '%s%s' $'\u200F' "$1"
+        }
+
+        escape_md_cell() {
+          printf '%s' "$1" | sed 's/|/\\|/g' | tr '\n\r' '  '
+        }
+
+        extract_reporter_tags() {
+          local tags="$1"
+          local matched
+          matched=$(printf '%s' "$tags" | tr ';' '\n' \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+            | grep -v '^$' \
+            | grep -iE 'holding|ceo|qa|internal|رمزی' || true)
+          if [ -z "$matched" ]; then
+            printf ''
+            return 0
+          fi
+          printf '%s\n' "$matched" | awk 'NF{if(n++)printf ", "; printf "%s", $0}'
+        }
+
+        extract_portal_code() {
+          local wi_json="$1"
+          local field_ref="${2:-}"
+          local value=""
+          if [ -n "$field_ref" ]; then
+            value=$(echo "$wi_json" | jq -r --arg f "$field_ref" '
+              .fields[$f] // empty | if . == null then "" else tostring end
+            ')
+          fi
+          if [ -z "$value" ] || [ "$value" = "null" ]; then
+            value=$(echo "$wi_json" | jq -r '
+              [
+                .fields
+                | to_entries[]
+                | select(.key | test("portal.?code"; "i"))
+                | .value
+                | if . == null then empty else tostring end
+              ]
+              | map(select(length > 0))
+              | first // empty
+            ')
+          fi
+          if [ "$value" = "null" ]; then
+            value=""
+          fi
+          printf '%s' "$value"
+        }
+
+        maybe_rtl_cell() {
+          local text="$1"
+          if [ -z "$text" ]; then
+            printf ''
+            return 0
+          fi
+          if printf '%s' "$text" | grep -q $'[^\x00-\x7F]'; then
+            rtl_text "$text"
+          else
+            printf '%s' "$text"
+          fi
+        }
+
+        wi_type_icon() {
+          local t
+          t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+          case "$t" in
+            *bug*)                   printf '%s' ':bug:' ;;
+            *task*)                  printf '%s' ':clipboard:' ;;
+            *product*backlog*|*pbi*) printf '%s' ':bookmark:' ;;
+            *user*stor*|*story*)     printf '%s' ':notebook:' ;;
+            *feature*)               printf '%s' ':star:' ;;
+            *epic*)                  printf '%s' ':crown:' ;;
+            *impediment*)            printf '%s' ':construction:' ;;
+            *issue*)                 printf '%s' ':exclamation:' ;;
+            *test*)                  printf '%s' ':white_check_mark:' ;;
+            *)                       printf '%s' ':label:' ;;
+          esac
+        }
+
+        wi_type_short() {
+          local t
+          t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+          case "$t" in
+            *bug*)                   printf '%s' 'Bug' ;;
+            *task*)                  printf '%s' 'Task' ;;
+            *product*backlog*|*pbi*) printf '%s' 'PBI' ;;
+            *user*stor*|*story*)     printf '%s' 'Story' ;;
+            *feature*)               printf '%s' 'Feature' ;;
+            *epic*)                  printf '%s' 'Epic' ;;
+            *impediment*)            printf '%s' 'Imped.' ;;
+            *issue*)                 printf '%s' 'Issue' ;;
+            *test*)                  printf '%s' 'Test' ;;
+            *)                       printf '%s' "$1" ;;
+          esac
+        }
+
+        format_work_item_row() {
+          local wi_id="$1"
+          local wi_type="$2"
+          local wi_title="$3"
+          local wi_url="$4"
+          local wi_state="${5:-}"
+          local wi_reporter="${6:-}"
+          local wi_portal="${7:-}"
+          local icon type_cell title_cell state_label="" reporter_cell portal_cell
+          icon=$(wi_type_icon "$wi_type")
+          type_cell=$(printf '%s %s' "$icon" "$(wi_type_short "$wi_type")")
+          title_cell=$(escape_md_cell "$wi_title")
+          if [ -n "$title_cell" ]; then
+            title_cell=$(rtl_text "$title_cell")
+            if [ -n "$wi_url" ]; then
+              title_cell=$(printf '[%s](%s)' "$title_cell" "$wi_url")
+            fi
+          else
+            title_cell=$(printf '#%s' "$wi_id")
+          fi
+          if [ -n "$wi_state" ]; then
+            state_label=$(wi_state_badge "$wi_state")
+          fi
+          reporter_cell=$(maybe_rtl_cell "$(escape_md_cell "$wi_reporter")")
+          portal_cell=$(escape_md_cell "$wi_portal")
+          printf '| %s | %s | %s | #%s | %s | %s |' \
+            "$type_cell" "$title_cell" "$state_label" "$wi_id" "$reporter_cell" "$portal_cell"
+        }
+
+        fetch_work_item() {
+          local wi_id="$1"
+          curl -sS -u ":$GIT_PAT" \
+            "${PROJECT_API_URL}/wit/workitems/${wi_id}?\$expand=all&api-version=7.0" 2>/dev/null || echo '{}'
+        }
+
+        resolve_portal_code_field() {
+          local fields_json ref=""
+          for url in \
+            "${PROJECT_API_URL}/wit/fields?api-version=7.0" \
+            "${ORG_URL}/_apis/wit/fields?api-version=7.0"
+          do
+            fields_json=$(curl -sS -u ":$GIT_PAT" "$url" 2>/dev/null || echo '{}')
+            ref=$(echo "$fields_json" | jq -r '
+              [.value[]? | select((.name // "") | test("^\\s*portal\\s*code\\s*$"; "i")) | .referenceName]
+              | first // empty
+            ')
+            if [ -n "$ref" ] && [ "$ref" != "null" ]; then
+              printf '%s' "$ref"
+              return 0
+            fi
+          done
+          printf ''
+        }
+
+        PORTAL_CODE_FIELD="$(resolve_portal_code_field)"
+        if [ -n "$PORTAL_CODE_FIELD" ]; then
+          echo "Resolved Portal Code field: ${PORTAL_CODE_FIELD}"
+        else
+          echo "Portal Code field name not in WIT catalog — will match work-item fields by key."
+        fi
+
+        wi_table=$(printf '%s\n%s' '| | Title | State | ID | reporter | portalCode |' '|:--:|:--|:-:|:-:|:--|:-:|')
+        wi_json_array='[]'
+        WI_NOTIFY_JSON='[]'
+        WI_IDS=()
+
+        echo "Fetching work item details from API..."
+        mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' \
+          | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
+        if [ "${#WI_IDS[@]}" -gt 0 ]; then
+          for wi_id in "${WI_IDS[@]}"; do
+            wi_resp=$(fetch_work_item "$wi_id")
+            wi_tags=$(echo "$wi_resp" | jq -r '.fields["System.Tags"] // ""')
+            WI_NOTIFY_JSON=$(echo "$WI_NOTIFY_JSON" | jq \
+              --arg id "$wi_id" \
+              --arg type "$(echo "$wi_resp" | jq -r '.fields["System.WorkItemType"] // "Work Item"')" \
+              --arg title "$(echo "$wi_resp" | jq -r '.fields["System.Title"] // ""')" \
+              --arg url "$(echo "$wi_resp" | jq -r '._links.html.href // empty')" \
+              --arg state "$(echo "$wi_resp" | jq -r '.fields["System.State"] // ""')" \
+              --arg reporter "$(extract_reporter_tags "$wi_tags")" \
+              --arg portalCode "$(extract_portal_code "$wi_resp" "$PORTAL_CODE_FIELD")" \
+              '. + [{ id: $id, type: $type, title: $title, url: $url, state: $state, reporter: $reporter, portalCode: $portalCode }]')
+          done
+        fi
+
+        while IFS= read -r wi_row; do
+          wi_id=$(echo "$wi_row" | jq -r '.id')
+          wi_type=$(echo "$wi_row" | jq -r '.type')
+          wi_title=$(echo "$wi_row" | jq -r '.title')
+          wi_state=$(echo "$wi_row" | jq -r '.state')
+          wi_url=$(echo "$wi_row" | jq -r '.url')
+          wi_reporter=$(echo "$wi_row" | jq -r '.reporter // empty')
+          wi_portal=$(echo "$wi_row" | jq -r '.portalCode // empty')
+          if [ -z "$wi_url" ] || [ "$wi_url" = "null" ]; then
+            wi_url="${ORG_URL}/${PROJECT}/_workitems/edit/${wi_id}"
+          fi
+          if [ "$wi_reporter" = "null" ]; then wi_reporter=""; fi
+          if [ "$wi_portal" = "null" ]; then wi_portal=""; fi
+          wi_icon=$(wi_type_icon "$wi_type")
+          wi_line=$(format_work_item_row "$wi_id" "$wi_type" "$wi_title" "$wi_url" "$wi_state" "$wi_reporter" "$wi_portal")
+          echo "  Notify row: $wi_line"
+          wi_table="${wi_table}"$'\n'"${wi_line}"
+          wi_json_array=$(echo "$wi_json_array" | jq \
+            --arg id "$wi_id" --arg type "$wi_type" --arg state "$wi_state" \
+            --arg title "$wi_title" --arg url "$wi_url" --arg icon "$wi_icon" \
+            --arg reporter "$wi_reporter" --arg portalCode "$wi_portal" \
+            --arg line "$wi_line" \
+            '. + [{ id: $id, type: $type, state: $state, title: $title, url: $url, icon: $icon, reporter: $reporter, portalCode: $portalCode, line: $line }]')
+        done < <(echo "$WI_NOTIFY_JSON" | jq -c '.[]')
+
+        # Do not wrap the table in RLE — that reverses columns. RTL is applied to titles only.
+        MM_TEXT=$(printf '%b' "**Branch promotion:** \`${SOURCE_BRANCH}\` → \`${TARGET_BRANCH}\`  ·  **Tag:** \`${BACKEND_TAG}\`  ·  [Build #${BUILD_NUMBER}](${BUILD_URL})\n_${NOTIFY_DT}_\n\n${wi_table}")
+
+        if [ -n "$MM_USER" ] && echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
+          MM_TEXT="${MM_TEXT}"$'\n\n'"@${MM_USER}"
+        fi
+
+        # Route target for incoming webhooks (channel name or @username)
+        MM_TARGET=""
+        if [ -n "$MM_USER" ] && ! echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
+          MM_TARGET="@${MM_USER}"
+        elif [ -n "$MM_CHANNEL" ]; then
+          MM_TARGET="$MM_CHANNEL"
+        fi
+
+        MM_API_TOKEN="${MM_BOT_TOKEN:-${MATTERMOST_BOT_TOKEN:-${MM_WI_TAG_JWT:-${MM_JWT_TOKEN:-}}}}"
+        MM_API_TOKEN="$(printf '%s' "$MM_API_TOKEN" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^[Bb]earer[[:space:]]*//')"
+
+        send_notification() {
+          local payload="$1"
+          shift
+          # --location-trusted keeps Authorization on redirects (plain -L drops it → 401)
+          curl -k -sS -w "\n%{http_code}" --location --location-trusted "$MM_WEBHOOK_URL" \
+            --header 'Content-Type: application/json' \
+            "$@" \
+            --data "$payload" 2>&1 || true
+        }
+
+        mm_api_base() {
+          echo "$MM_WEBHOOK_URL" | sed -E 's|/api/v4/.*||'
+        }
+
+        resolve_dm_channel_id() {
+          local base user_id me_id dm_json
+          base="$(mm_api_base)"
+          user_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
+            "${base}/api/v4/users/username/${MM_USER}" 2>/dev/null || echo '{}')
+          user_id=$(echo "$user_json" | jq -r '.id // empty')
+          if [ -z "$user_id" ]; then
+            echo "  ⚠️ Mattermost user not found: ${MM_USER}" >&2
+            return 1
+          fi
+          me_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
+            "${base}/api/v4/users/me" 2>/dev/null || echo '{}')
+          me_id=$(echo "$me_json" | jq -r '.id // empty')
+          if [ -z "$me_id" ]; then
+            echo "  ⚠️ Could not resolve Mattermost bot user (/users/me)" >&2
+            return 1
+          fi
+          dm_json=$(curl -k -sS -X POST \
+            -H "Authorization: Bearer ${MM_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "[\"${me_id}\", \"${user_id}\"]" \
+            "${base}/api/v4/channels/direct" 2>/dev/null || echo '{}')
+          echo "$dm_json" | jq -r '.id // empty'
+        }
+
+        echo "Sending Mattermost notification (${#WI_IDS[@]} work item(s))..."
+
+        if echo "$MM_WEBHOOK_URL" | grep -qiE '/hooks/'; then
+          # Mattermost incoming webhook — token is in URL; do NOT send Bearer auth
+          echo "Mode: Mattermost incoming webhook (/hooks/)" >&2
+          JSON_PAYLOAD=$(jq -n \
+            --arg text "$MM_TEXT" \
+            --arg channel "$MM_TARGET" \
+            --arg username "Azure CI" \
+            '{
+              text: $text,
+              username: $username,
+              icon_emoji: ":label:"
+            } + (if ($channel | length) > 0 then { channel: $channel } else {} end)')
+          response=$(send_notification "$JSON_PAYLOAD")
+        elif echo "$MM_WEBHOOK_URL" | grep -qiE 'n8n\.|/webhook'; then
+          # n8n webhook — full payload + optional JWT (same pattern as QA_Gate / PM_GATE)
+          echo "Mode: n8n webhook" >&2
+          JSON_PAYLOAD=$(jq -n \
+            --arg erp "DevOps" \
+            --arg channel "$MM_CHANNEL" \
+            --arg username "$MM_USER" \
+            --arg text "$MM_TEXT" \
+            --arg source "$SOURCE_BRANCH" \
+            --arg target "$TARGET_BRANCH" \
+            --arg release_tag "$BACKEND_TAG" \
+            --arg work_item_ids "$WORK_ITEM_IDS" \
+            --arg build_id "$BUILD_ID" \
+            --arg build_number "$BUILD_NUMBER" \
+            --arg build_url "$BUILD_URL" \
+            --arg notify_dt "$NOTIFY_DT" \
+            --argjson work_items "$wi_json_array" \
+            '{
+              ERP: $erp,
+              channel: $channel,
+              username: $username,
+              text: $text,
+              promotion: ($source + " -> " + $target),
+              source_branch: $source,
+              target_branch: $target,
+              release_tag: $release_tag,
+              work_item_ids: $work_item_ids,
+              work_items: $work_items,
+              build_id: $build_id,
+              build_number: $build_number,
+              build_url: $build_url,
+              notify_dt: $notify_dt
+            }')
+          if [ -n "${MM_JWT_TOKEN:-}" ]; then
+            response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_JWT_TOKEN}")
+          else
+            response=$(send_notification "$JSON_PAYLOAD")
+          fi
+        elif echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
+          # Mattermost REST API POST /api/v4/posts — requires channel_id + Bearer token
+          echo "Mode: Mattermost REST API (/api/v4/posts)" >&2
+          if [ -z "${MM_API_TOKEN:-}" ]; then
+            echo "⚠️ Mattermost API token not set — use MATTERMOST_BOT_TOKEN or JWT_TOKEN_WFN8N___WI-Tag-Notif in variable group."
+            exit 0
+          fi
+
+          CHANNEL_ID=""
+          if [ -n "$MM_CHANNEL" ]; then
+            CHANNEL_ID="$MM_CHANNEL"
+            echo "  Target: channel_id=${CHANNEL_ID}" >&2
+          elif [ -n "$MM_USER" ]; then
+            echo "  Target: DM @${MM_USER}" >&2
+            CHANNEL_ID=$(resolve_dm_channel_id) || CHANNEL_ID=""
+          fi
+
+          if [ -z "$CHANNEL_ID" ]; then
+            echo "⚠️ No Mattermost channel_id — set MM_CHANNEL to a channel ID, or MM_USERNAME for DM."
+            exit 0
+          fi
+
+          JSON_PAYLOAD=$(jq -n \
+            --arg channel_id "$CHANNEL_ID" \
+            --arg message "$MM_TEXT" \
+            '{ channel_id: $channel_id, message: $message }')
+          response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_API_TOKEN}")
+        else
+          echo "⚠️ Unknown webhook URL pattern — using plain JSON POST without auth." >&2
+          JSON_PAYLOAD=$(jq -n --arg text "$MM_TEXT" '{ text: $text }')
+          response=$(send_notification "$JSON_PAYLOAD")
+        fi
+
+        http_code=$(echo "$response" | tail -n1)
+        response_body=$(echo "$response" | sed '$d')
+
+        if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "204" ]; then
+          echo "✅ Mattermost notification sent (HTTP $http_code)"
+        else
+          echo "⚠️ Mattermost notification failed (HTTP $http_code)"
+          echo "$response_body"
+          if [ "$http_code" = "401" ]; then
+            echo "  Token rejected (expired session or wrong token)."
+            echo "  Use a Mattermost bot Access Token in MM_BOT_TOKEN — not Token ID, not a user login session."
+          fi
+          echo "Continuing pipeline..."
+        fi
