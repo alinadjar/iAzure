@@ -1,8 +1,8 @@
 # AI agent preview pipeline
-# - Requires TASK_ID (parameter or parsed from branch task/{id}-*)
-# - Builds front/back images tagged task-{TASK_ID}_{timestamp}
-# - Deploys to {PREVIEW_BASE_PATH}/{TASK_ID} on the preview host
-# - Routes via Traefik: {TASK_ID}.fx.local.sadgan.int / {TASK_ID}.api.fx.local.sadgan.int
+# - Requires WIT_ID (parameter or parsed from branch task/{id}-*)
+# - Builds front/back images tagged task-{WIT_ID}_{timestamp}
+# - Deploys to {PREVIEW_BASE_PATH}/{WIT_ID} on the preview host
+# - Routes via Traefik: {WIT_ID}.fx.local.sadgan.int / {WIT_ID}.api.fx.local.sadgan.int
 
 trigger:
   branches:
@@ -13,7 +13,7 @@ pool:
   name: 'WEB-1'
 
 parameters:
-  - name: TASK_ID
+  - name: WIT_ID
     type: string
     displayName: 'Azure Board Task ID (required if branch does not contain it)'
     default: ''
@@ -73,13 +73,13 @@ stages:
     displayName: 'Init'
     jobs:
       - job: InitJob
-        displayName: 'Resolve TASK_ID and preview targets'
+        displayName: 'Resolve WIT_ID and preview targets'
         steps:
           - checkout: none
           - bash: |
               set -euo pipefail
 
-              TASK_ID='${{ parameters.TASK_ID }}'
+              WIT_ID='${{ parameters.WIT_ID }}'
               BRANCH='${{ parameters.BRANCH }}'
               SOURCE_BRANCH="$(Build.SourceBranch)"
 
@@ -87,36 +87,36 @@ stages:
                 BRANCH="${SOURCE_BRANCH#refs/heads/}"
               fi
 
-              if [ -z "$TASK_ID" ]; then
+              if [ -z "$WIT_ID" ]; then
                 if echo "$BRANCH" | grep -Eq '(^|/)task/[0-9]+'; then
-                  TASK_ID=$(echo "$BRANCH" | sed -E 's|.*/task/([0-9]+).*|\1|')
+                  WIT_ID=$(echo "$BRANCH" | sed -E 's|.*/task/([0-9]+).*|\1|')
                 elif echo "$BRANCH" | grep -Eq '^[0-9]+'; then
-                  TASK_ID=$(echo "$BRANCH" | sed -E 's|^([0-9]+).*|\1|')
+                  WIT_ID=$(echo "$BRANCH" | sed -E 's|^([0-9]+).*|\1|')
                 fi
               fi
 
-              if ! [[ "$TASK_ID" =~ ^[0-9]+$ ]]; then
-                echo "ERROR: TASK_ID must be a numeric Azure work item ID."
-                echo "  Parameter TASK_ID : '${{ parameters.TASK_ID }}'"
+              if ! [[ "$WIT_ID" =~ ^[0-9]+$ ]]; then
+                echo "ERROR: WIT_ID must be a numeric Azure work item ID."
+                echo "  Parameter WIT_ID : '${{ parameters.WIT_ID }}'"
                 echo "  Branch            : $BRANCH"
                 echo "  Expected branch   : task/12345-description"
                 exit 1
               fi
 
               PREVIEW_BASE_PATH='${{ parameters.PREVIEW_BASE_PATH }}'
-              DEPLOY_PATH="${PREVIEW_BASE_PATH}/${TASK_ID}"
-              FRONT_HOST="${TASK_ID}.local.sadgan.int"
-              API_HOST="${TASK_ID}-api.local.sadgan.int"
+              DEPLOY_PATH="${PREVIEW_BASE_PATH}/${WIT_ID}"
+              FRONT_HOST="${WIT_ID}.local.sadgan.int"
+              API_HOST="${WIT_ID}-api.local.sadgan.int"
 
-              echo "TASK_ID      : $TASK_ID"
+              echo "WIT_ID      : $WIT_ID"
               echo "BRANCH       : $BRANCH"
               echo "DEPLOY_PATH  : $DEPLOY_PATH"
               echo "FRONT_HOST   : $FRONT_HOST"
               echo "API_HOST     : $API_HOST"
 
-              IMAGE_TAG="task-${TASK_ID}_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
+              IMAGE_TAG="task-${WIT_ID}_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
 
-              echo "##vso[task.setvariable variable=TASK_ID;isOutput=true]$TASK_ID"
+              echo "##vso[task.setvariable variable=WIT_ID;isOutput=true]$WIT_ID"
               echo "##vso[task.setvariable variable=CURRENT_BRANCH;isOutput=true]$BRANCH"
               echo "##vso[task.setvariable variable=DEPLOY_PATH;isOutput=true]$DEPLOY_PATH"
               echo "##vso[task.setvariable variable=FRONT_HOST;isOutput=true]$FRONT_HOST"
@@ -130,7 +130,7 @@ stages:
     displayName: 'Build'
     dependsOn: INIT
     variables:
-      TASK_ID: $[ stageDependencies.INIT.InitJob.outputs['init.TASK_ID'] ]
+      WIT_ID: $[ stageDependencies.INIT.InitJob.outputs['init.WIT_ID'] ]
       CURRENT_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.CURRENT_BRANCH'] ]
       API_HOST: $[ stageDependencies.INIT.InitJob.outputs['init.API_HOST'] ]
       IMAGE_TAG: $[ stageDependencies.INIT.InitJob.outputs['init.IMAGE_TAG'] ]
@@ -436,7 +436,7 @@ stages:
       - Build
     condition: and(succeeded(), eq(variables['shouldDeploy'], 'True'))
     variables:
-      TASK_ID: $[ stageDependencies.INIT.InitJob.outputs['init.TASK_ID'] ]
+      WIT_ID: $[ stageDependencies.INIT.InitJob.outputs['init.WIT_ID'] ]
       DEPLOY_PATH: $[ stageDependencies.INIT.InitJob.outputs['init.DEPLOY_PATH'] ]
       FRONT_HOST: $[ stageDependencies.INIT.InitJob.outputs['init.FRONT_HOST'] ]
       API_HOST: $[ stageDependencies.INIT.InitJob.outputs['init.API_HOST'] ]
@@ -449,7 +449,7 @@ stages:
         steps:
           - template: templates/deploy-preview.yaml
             parameters:
-              TASK_ID: $(TASK_ID)
+              WIT_ID: $(WIT_ID)
               DEPLOY_PATH: $(DEPLOY_PATH)
               FRONT_HOST: $(FRONT_HOST)
               API_HOST: $(API_HOST)
