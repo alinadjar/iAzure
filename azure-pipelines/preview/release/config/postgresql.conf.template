@@ -1,5 +1,5 @@
 # Preview PostgreSQL config — rendered to postgresql.conf at deploy time.
-# Tune via preview/env.template (PG_MAX_CONNECTIONS, PG_SHARED_BUFFERS, etc.)
+# Tune via env.template (PG_MAX_CONNECTIONS, PG_SHARED_BUFFERS, etc.)
 
 listen_addresses = '*'
 port = 5432

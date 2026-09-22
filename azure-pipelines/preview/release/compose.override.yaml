@@ -1,0 +1,31 @@
+
+services:
+  pg:
+    container_name: pg-__WIT_ID__
+
+  redis:
+    container_name: redis-__WIT_ID__
+
+  mongo:
+    container_name: mongo-__WIT_ID__
+
+  backend:
+    container_name: api-__WIT_ID__
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=preview_net
+      - traefik.http.routers.__WIT_ID__-api.rule=Host(`__API_HOST__`)
+      - traefik.http.routers.__WIT_ID__-api.entrypoints=websecure
+      - traefik.http.routers.__WIT_ID__-api.tls=true
+      - traefik.http.services.__WIT_ID__-api.loadbalancer.server.port=8080
+
+  front:
+    container_name: panel-__WIT_ID__
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=preview_net
+      - traefik.http.routers.__WIT_ID__-front.rule=Host(`__FRONT_HOST__`)
+      - traefik.http.routers.__WIT_ID__-front.entrypoints=websecure
+      - traefik.http.routers.__WIT_ID__-front.tls=true
+      - traefik.http.services.__WIT_ID__-front.loadbalancer.server.port=80
+

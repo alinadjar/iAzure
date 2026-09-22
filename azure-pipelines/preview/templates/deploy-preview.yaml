@@ -20,6 +20,9 @@ parameters:
   - name: ADD_WI_COMMENT
     type: string
     default: 'YES'
+  - name: DB_TEMPLATE_FILENAME
+    type: string
+    default: 'backup-template.tar.gz'    
 
 steps:
   - checkout: none
@@ -35,6 +38,7 @@ steps:
       BACKEND_TAG="${{ parameters.BACKEND_TAG }}"
       PREVIEW_HOST="${{ parameters.PREVIEW_HOST }}"
       PREVIEW_SSH_USER="${{ parameters.PREVIEW_SSH_USER }}"
+      DB_TEMPLATE_FILENAME="${{ parameters.DB_TEMPLATE_FILENAME }}"
 
       echo "Deploying preview for task ${WIT_ID}"
       echo "  Front URL : https://${FRONT_HOST}"
@@ -60,6 +64,7 @@ steps:
       STAGING="$WORK_DIR/stack"
       mkdir -p "$STAGING/config" "$STAGING/init" "$STAGING/metadata" "$STAGING/backups"
       cp "$PREVIEW_SRC/compose.yaml" "$STAGING/"
+      cp "$PREVIEW_SRC/compose.override.yaml" "$STAGING/"
       cp "$PREVIEW_SRC/init/"*.sql "$STAGING/init/" 2>/dev/null || true
 
       ERP_VERSION="${FRONTEND_TAG}"
@@ -98,7 +103,7 @@ steps:
           "$src" > "$dst"
       }
 
-      # Defaults for PG tuning — override via Azure DevOps variable group if needed
+      # Defaults for PG tuning:
       PG_MAX_CONNECTIONS="${PG_MAX_CONNECTIONS:-100}"
       PG_SHARED_BUFFERS="${PG_SHARED_BUFFERS:-256MB}"
       PG_EFFECTIVE_CACHE_SIZE="${PG_EFFECTIVE_CACHE_SIZE:-1GB}"
@@ -122,20 +127,21 @@ steps:
       render_file "$PREVIEW_SRC/config/appsettings.front.json.template" "$STAGING/config/appsettings.front.json"
       render_file "$PREVIEW_SRC/config/postgresql.conf.template" "$STAGING/config/postgresql.conf"
       cp "$PREVIEW_SRC/config/pg_hba.conf" "$STAGING/config/pg_hba.conf"
-      render_file "$STAGING/compose.yaml" "$STAGING/compose.yaml.rendered"
-      mv "$STAGING/compose.yaml.rendered" "$STAGING/compose.yaml"
+      render_file "$STAGING/compose.override.yaml" "$STAGING/compose.override.yaml.rendered"
+      mv "$STAGING/compose.override.yaml.rendered" "$STAGING/compose.override.yaml"
 
       SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
       REMOTE="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
 
-      if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
-        KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key"
-        printf '%s\n' "$PREVIEW_SSH_PRIVATE_KEY" > "$KEY_FILE"
-        chmod 600 "$KEY_FILE"
-        SSH_OPTS="$SSH_OPTS -i $KEY_FILE"
-      fi
+      # if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
+      #   KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key"
+      #   printf '%s\n' "$PREVIEW_SSH_PRIVATE_KEY" > "$KEY_FILE"
+      #   chmod 600 "$KEY_FILE"
+      #   SSH_OPTS="$SSH_OPTS -i $KEY_FILE"
+      # fi
+      SSH_OPTS="$SSH_OPTS -i $PREVIEW_SSH_PRIVATE_KEY_PATH"
 
-      ssh $SSH_OPTS "$REMOTE" "mkdir -p '${DEPLOY_PATH}'"
+      ssh $SSH_OPTS "$REMOTE" "sudo mkdir -p '${DEPLOY_PATH}'"
       rsync -avz --delete \
         -e "ssh $SSH_OPTS" \
         "$STAGING/" \
@@ -146,9 +152,55 @@ steps:
          cd '${DEPLOY_PATH}' && \
          echo '${NEXUS_DOCKER_PASSWORD}' | docker login '${DOCKER_REGISTRY}' -u '${NEXUS_DOCKER_USERNAME}' --password-stdin && \
          export COMPOSE_PROJECT_NAME='preview-${WIT_ID}' && \
-         docker compose pull && \
-         docker compose up -d --remove-orphans && \
-         docker compose ps"
+         sudo docker compose pull && \
+         sudo docker compose -f compose.yaml -f compose.override.yaml up -d pg front redis mongo --remove-orphans && \
+         sudo docker compose ps"
+
+
+      # ---- Wait for Postgres to be healthy before restoring ----
+      echo "Waiting for Postgres (pg-${WIT_ID}) to become healthy ..."
+      ssh $SSH_OPTS "$REMOTE" \
+        "set -euo pipefail && \
+         CONTAINER='pg-${WIT_ID}'; \
+         DEADLINE=\$(( \$(date +%s) + 180 )); \
+         while true; do \
+           STATUS=\$(sudo docker inspect -f '{{.State.Health.Status}}' \"\$CONTAINER\" 2>/dev/null || echo 'missing'); \
+           if [ \"\$STATUS\" = 'healthy' ]; then \
+             echo \"Postgres container \$CONTAINER is healthy.\"; \
+             break; \
+           fi; \
+           if [ \"\$STATUS\" = 'unhealthy' ]; then \
+             echo \"ERROR: Postgres container \$CONTAINER reported unhealthy.\"; \
+             sudo docker logs --tail 100 \"\$CONTAINER\" || true; \
+             exit 1; \
+           fi; \
+           if [ \$(date +%s) -ge \$DEADLINE ]; then \
+             echo \"ERROR: timed out waiting for \$CONTAINER (last status: \$STATUS).\"; \
+             sudo docker logs --tail 100 \"\$CONTAINER\" || true; \
+             exit 1; \
+           fi; \
+           sleep 3; \
+         done && \
+         sudo docker exec \"\$CONTAINER\" pg_isready -U postgres"
+
+      # ---- Restore the template backup into the per-task Postgres ----
+      echo "Restoring ${DB_TEMPLATE_FILENAME} into pg-${WIT_ID} ..."
+      ssh $SSH_OPTS "$REMOTE" \
+        "set -euo pipefail && \
+         cd /mnt/erp/data && \
+         bash restore-streamlined.sh -c 'pg-${WIT_ID}' -u postgres -p 123 -f ${DB_TEMPLATE_FILENAME} --no-globals --drop-existing"
+
+      ssh $SSH_OPTS "$REMOTE" \
+        "set -euo pipefail && \
+         cd '${DEPLOY_PATH}' && \
+         echo '${NEXUS_DOCKER_PASSWORD}' | docker login '${DOCKER_REGISTRY}' -u '${NEXUS_DOCKER_USERNAME}' --password-stdin && \
+         export COMPOSE_PROJECT_NAME='preview-${WIT_ID}' && \
+         sudo docker compose -f compose.yaml -f compose.override.yaml up -d backend --remove-orphans && \
+         sudo docker compose ps"
+
+
+      echo "=== front url: https://${FRONT_HOST}"
+      echo "=== api url:   https://${API_HOST}"
 
       echo "##vso[task.setvariable variable=PREVIEW_FRONT_URL;isOutput=true]https://${FRONT_HOST}"
       echo "##vso[task.setvariable variable=PREVIEW_API_URL;isOutput=true]https://${API_HOST}"
@@ -158,6 +210,7 @@ steps:
     env:
       GIT_PAT: $(GIT_PAT)
       PREVIEW_SSH_PRIVATE_KEY: $(PREVIEW_SSH_PRIVATE_KEY)
+      PREVIEW_SSH_PRIVATE_KEY_PATH: $(PREVIEW_SSH_PRIVATE_KEY_PATH)
       PREVIEW_POSTGRES_PASSWORD: $(PREVIEW_POSTGRES_PASSWORD)
       PREVIEW_POSTGRES_RO_PASSWORD: $(PREVIEW_POSTGRES_RO_PASSWORD)
       PREVIEW_PG_REPLICA_PASSWORD: $(PREVIEW_PG_REPLICA_PASSWORD)
@@ -172,6 +225,7 @@ steps:
       NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
       NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
       DOCKER_REGISTRY: $(DOCKER_REGISTRY)
+
 
   - bash: |
       set -euo pipefail
@@ -191,8 +245,16 @@ steps:
 
       FRONTEND_TAG="${{ parameters.FRONTEND_TAG }}"
       BACKEND_TAG="${{ parameters.BACKEND_TAG }}"
-      PG_HOST_PORT=$((10000 + WIT_ID))
-      COMMENT="AI preview deployed for task **${WIT_ID}**.\n\n- Front: ${FRONT_URL}\n- API: ${API_URL}\n- PG host port: ${PG_HOST_PORT}\n- Build: ${BUILD_URL}\n- Images: front=${FRONTEND_TAG} / back=${BACKEND_TAG}"
+
+      COMMENT=$(cat <<EOF
+      🚀 <b>AI preview deployed</b><br>
+      <hr>
+      <b>Panel url:</b> <a href="${FRONT_URL}">${FRONT_URL}</a><br>
+      <b>API url:</b> <a href="${API_URL}">${API_URL}</a><br>
+      <b>Build:</b> <a href="${BUILD_URL}">${BUILD_URL}</a><br>
+      <b>Images:</b> front=<code>${FRONTEND_TAG}</code> / back=<code>${BACKEND_TAG}</code>
+      EOF
+      )
 
       BODY=$(jq -n \
         --arg text "$COMMENT" \

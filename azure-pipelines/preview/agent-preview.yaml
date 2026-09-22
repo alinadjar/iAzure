@@ -7,7 +7,7 @@
 trigger:
   branches:
     include:
-      - wi/*
+      - wit/*
 
 pool:
   name: 'WEB-1'
@@ -55,6 +55,10 @@ parameters:
     values:
       - YES
       - NO
+  - name: DB_TEMPLATE_FILENAME
+    type: string
+    default: 'backup-template.tar.gz'
+    displayName: 'Database template filename'       
 
 variables:
   - name: buildConfiguration
@@ -70,10 +74,10 @@ variables:
 
 stages:
   - stage: INIT
-    displayName: 'Init'
+    displayName: 'Init ${{ parameters.WIT_ID }}'
     jobs:
       - job: InitJob
-        displayName: 'Resolve WIT_ID and preview targets'
+        displayName: 'Resolve WIT_ID ${{ parameters.WIT_ID }}'
         steps:
           - checkout: none
           - bash: |
@@ -123,7 +127,7 @@ stages:
               echo "##vso[task.setvariable variable=API_HOST;isOutput=true]$API_HOST"
               echo "##vso[task.setvariable variable=IMAGE_TAG;isOutput=true]$IMAGE_TAG"
               echo "IMAGE_TAG    : $IMAGE_TAG"
-            displayName: 'Resolve task preview settings'
+            displayName: 'Resolve wit details'
             name: init
 
   - stage: Build
@@ -444,7 +448,7 @@ stages:
       BACKEND_TAG: $[ coalesce(stageDependencies.Build.Build_Backend.outputs['tagSetting.DOCKER_TAG'], stageDependencies.Build.Build_Frontend.outputs['tagSetting.DOCKER_TAG'], '') ]
     jobs:
       - job: DeployPreview
-        displayName: 'Deploy task preview'
+        displayName: 'Deploy wit preview'
         pool: 'WEB-1'
         steps:
           - template: templates/deploy-preview.yaml
@@ -458,3 +462,4 @@ stages:
               PREVIEW_HOST: ${{ parameters.PREVIEW_HOST }}
               PREVIEW_SSH_USER: ${{ parameters.PREVIEW_SSH_USER }}
               ADD_WI_COMMENT: ${{ parameters.ADD_WI_COMMENT }}
+              DB_TEMPLATE_FILENAME: ${{ parameters.DB_TEMPLATE_FILENAME }}

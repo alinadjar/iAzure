@@ -1,5 +1,5 @@
 # Per-task AI preview stack — routed by Traefik on the preview host.
-# Placeholders __TASK_ID__, __FRONT_HOST__, __API_HOST__ are replaced at deploy time.
+# Placeholders __WIT_ID__, __FRONT_HOST__, __API_HOST__ are replaced at deploy time.
 
 x-logging: &default-logging
   driver: "json-file"
@@ -23,16 +23,17 @@ services:
       App__SelfUrl: ${SelfUrl}
       App__Version: ${ERP_VERSION}
       App__IsDeveloperMode: true
+      App__VersionUrl: "https://localget.sadgan.com/releases/fx"
       LiteTableSync__IsEnabled: true
       TaxPayer_IsEnabled: false
       License__LicenseServerUrl: ${LicenseServer}/api/licensemanagement/activation
-      License__FingerprintAgentUrl: "http://192.168.10.244:4000"
-      Redis__Configuration: "redis-preview"
+      License__FingerprintAgentUrl: "http://192.168.10.160:4000"
+      Redis__Configuration: "${REDIS_HOST}"
       Redis__Port: 6379
       Redis__Password: "${REDIS_PASSWORD}"
       JWT__AccessTokenExpirationSeconds: 600
       JWT__RefreshTokenExpirationSeconds: 86400
-      DocumentDbConnectionStrings__Default: 'mongodb://admin:admin@mongo:27017'
+      DocumentDbConnectionStrings__Default: "mongodb://admin:admin@${MONGO_HOST}:27017"
     command: >
       sh -c '
         sed -i "
@@ -64,16 +65,11 @@ services:
     depends_on:
       pg:
         condition: service_healthy
-      redis-preview:
+      redis:
         condition: service_healthy
     logging:
       <<: *default-logging
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=preview_net
-      - traefik.http.routers.__TASK_ID__-api.rule=Host(`__API_HOST__`)
-      - traefik.http.routers.__TASK_ID__-api.entrypoints=web
-      - traefik.http.services.__TASK_ID__-api.loadbalancer.server.port=8080
+
 
   front:
     image: ${REGISTRY_URL}/fx/front:${ERP_VERSION}
@@ -87,15 +83,10 @@ services:
       - ./config/appsettings.front.json:/usr/share/nginx/html/appsettings.json
     logging:
       <<: *default-logging
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=preview_net
-      - traefik.http.routers.__TASK_ID__-front.rule=Host(`__FRONT_HOST__`)
-      - traefik.http.routers.__TASK_ID__-front.entrypoints=web
-      - traefik.http.services.__TASK_ID__-front.loadbalancer.server.port=80
+
 
   pg:
-    image: nexus.sadgan.int/postgres:18.0
+    image: registry.sadgan.int/common/postgres:18.0
     user: "999:999"
     environment:
       POSTGRES_USER: ${PG_RW_USER:-postgres}
@@ -131,7 +122,7 @@ services:
         max-file: "1"
 
   mongo:
-    image: mongo:8.3.2-noble
+    image: registry.sadgan.int/common/mongo:8.3.2-noble
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
@@ -157,7 +148,7 @@ services:
     logging:
       <<: *default-logging
 
-  redis-preview:
+  redis:
     image: registry.sadgan.int/common/redis-stack-server:latest
     restart: unless-stopped
     environment:
