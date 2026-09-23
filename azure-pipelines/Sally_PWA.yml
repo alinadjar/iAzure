@@ -246,15 +246,15 @@ stages:
           mkdir -p "$RELEASE_DIR"
           cd "$RELEASE_DIR"
 
-          if [ ! -f .env ]; then
-            if [ -f .env.example ]; then
-              cp .env.example .env
-              echo "Created .env from .env.example — review HOST_PORT on the host if needed."
-            else
-              echo ".env is missing on $RELEASE_DIR"
-              exit 1
-            fi
-          fi
+          # if [ ! -f .env ]; then
+          #   if [ -f .env.example ]; then
+          #     cp .env.example .env
+          #     echo "Created .env from .env.example — review HOST_PORT on the host if needed."
+          #   else
+          #     echo ".env is missing on $RELEASE_DIR"
+          #     exit 1
+          #   fi
+          # fi
 
           sed -i "s/^BUILD_TAG=.*/BUILD_TAG=$(BUILD_TAG)/" .env
           sed -i "s|^APP_FQIN=.*|APP_FQIN=$(APP_FQIN)|" .env
