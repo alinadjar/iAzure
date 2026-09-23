@@ -253,7 +253,8 @@ stages:
            #   fi
            # fi
 
-          echo "$(NEXUS_PASS)" | docker login "$(DOCKER_REGISTRY)" -u "$(NEXUS_USER)" --password-stdin 2>/dev/null
+          # Azure DevOps substitutes these on the agent BEFORE sending to the remote host
+          echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" -u "$(NEXUS_DOCKER_USERNAME)" --password-stdin 2>/dev/null
 
           echo "==== updating .env:"
           sed -i "s/^BUILD_TAG=.*/BUILD_TAG=$(BUILD_TAG)/" .env
@@ -264,6 +265,4 @@ stages:
 
           docker compose --env-file .env -f compose.yaml up -d --no-deps pwa
           docker compose --env-file .env -f compose.yaml ps
-      env:
-        NEXUS_USER: $(NEXUS_DOCKER_USERNAME)
-        NEXUS_PASS: $(NEXUS_DOCKER_PASSWORD)
+
