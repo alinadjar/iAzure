@@ -60,7 +60,7 @@ resources:
   repositories:
   - repository: self
     type: git
-    ref: "refs/heads/${{ parameters.BRANCH }}"
+    ref: refs/heads/main
 
 stages:
 - stage: INIT
