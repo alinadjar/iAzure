@@ -1,0 +1,273 @@
+# Azure DevOps Server — build, publish, and deploy Sadgan.Erp.Mobile (Sally PWA).
+#
+#
+# Required pipeline variables (secret where noted):
+#   BOT_TOKEN            — NupkgWeb2 feed (secret)
+#   DOCKER_REGISTRY      — Nexus registry host
+#   NEXUS_USER
+#   NEXUS_PASS           — (secret)
+#   AUTH_API_KEY         — Dify auth chatflow Service API key (secret)
+#
+# Optional pipeline variables:
+#   DOTNET_SDK_PATH      
+#   DEPLOY_RELEASE_ROOT  
+#   DIFY_API_BASE_URL    — default https://dify.fx.sadgan.int/v1
+#
+# Required service connection:
+#   SallyPwa-Deploy      — SSH endpoint to the deployment host
+
+
+trigger: none
+
+pool:
+  name: 'WEB-1'
+
+parameters:
+- name: BRANCH
+  type: string
+  displayName: 'Source branch'
+  default: 'main'
+  values:
+    - 'main'
+    - 'dev'
+- name: RUN_TESTS
+  type: string
+  displayName: 'Run unit tests'
+  default: 'true'
+  values:
+    - 'true'
+    - 'false'
+
+variables:
+  - name: buildConfiguration
+    value: 'Release'
+  - name: webAppProject
+    value: '$(Build.SourcesDirectory)/src/Sadgan.Erp.App.WebApp/Sadgan.Erp.App.WebApp.csproj'
+  - name: testProject
+    value: '$(Build.SourcesDirectory)/src/Sadgan.Erp.App.Tests/Sadgan.Erp.App.Tests.csproj'
+  - name: dockerfile
+    value: '$(Build.SourcesDirectory)/Dockerfile.pipe'
+  - name: nginxConf
+    value: '$(Build.SourcesDirectory)/deploy/nginx.conf'
+  - name: dockerImage
+    value: '$(DOCKER_REGISTRY)/sally/pwa'
+  - name: dotnetSdkPath
+    value: '/opt/net_sdk_10'
+  - name: deployReleaseRoot
+    value: '/usr/local/apps/sally-pwa'
+  - name: difyApiBaseUrl
+    value: 'https://dify.fx.sadgan.int/v1'
+
+resources:
+  repositories:
+  - repository: self
+    type: git
+    ref: refs/heads/${{ parameters.BRANCH }}
+
+stages:
+- stage: INIT
+  displayName: 'Init'
+  jobs:
+  - job: InitJob
+    displayName: 'Init'
+    steps:
+    - checkout: none
+    - bash: |
+        echo "Branch: ${{ parameters.BRANCH }}"
+        echo "Run tests: ${{ parameters.RUN_TESTS }}"
+      displayName: 'Init ${{ parameters.BRANCH }}'
+
+- stage: Build
+  displayName: 'Build & Publish'
+  jobs:
+  - job: Build_Pwa
+    displayName: 'Build Sally PWA'
+    pool: 'WEB-1'
+    steps:
+    - checkout: self
+      fetchDepth: 1
+
+    - bash: |
+        COMMIT_HASH="$(git rev-parse HEAD | cut -c1-12)"
+        echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$COMMIT_HASH"
+        echo "Commit: $COMMIT_HASH"
+      displayName: 'Record commit hash'
+      name: gitInfo
+
+    - bash: |
+        BUILD_TAG="sally_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
+        echo "Build tag: $BUILD_TAG"
+        echo "##vso[task.setvariable variable=BUILD_TAG;isOutput=true]$BUILD_TAG"
+        echo "##vso[task.setvariable variable=APP_FQIN;isOutput=true]$(dockerImage):$BUILD_TAG"
+      displayName: 'Assign build tag'
+      name: tagSetting
+
+    - bash: |
+        echo "##vso[task.setvariable variable=NUGET_SSL_VERIFY]false"
+
+        NUGET_CONFIG="$(Agent.TempDirectory)/NuGet.Config"
+        cat > "$NUGET_CONFIG" <<EOF
+        <?xml version="1.0" encoding="utf-8"?>
+        <configuration>
+          <packageSources>
+            <clear />
+            <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+            <add key="NupkgWeb2" value="http://192.168.10.118/WebApp/_packaging/NupkgWeb2/nuget/v3/index.json" allowInsecureConnections="true" />
+          </packageSources>
+          <packageSourceCredentials>
+            <NupkgWeb2>
+              <add key="Username" value="S_Bot_Azure" />
+              <add key="ClearTextPassword" value="$(BOT_TOKEN)" />
+            </NupkgWeb2>
+          </packageSourceCredentials>
+        </configuration>
+        EOF
+
+        find "$(Build.SourcesDirectory)" -name "NuGet.Config" -type f -delete 2>/dev/null || true
+        echo "##vso[task.setvariable variable=NUGET_CONFIG_PATH]$NUGET_CONFIG"
+      displayName: 'Create NuGet.Config'
+      env:
+        BOT_TOKEN: $(BOT_TOKEN)
+
+    - bash: |
+        set -e
+        APPSETTINGS="$(Build.SourcesDirectory)/src/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
+        test -f "$APPSETTINGS"
+
+        sed -i "s|\"DifyApiBaseUrl\": \".*\"|\"DifyApiBaseUrl\": \"$(DIFY_API_BASE_URL)\"|" "$APPSETTINGS"
+        sed -i "s|\"AuthApiKey\": \".*\"|\"AuthApiKey\": \"$(AUTH_API_KEY)\"|" "$APPSETTINGS"
+      displayName: 'Apply runtime appsettings'
+      env:
+        DIFY_API_BASE_URL: $(difyApiBaseUrl)
+        AUTH_API_KEY: $(AUTH_API_KEY)
+
+    - bash: |
+        set -e
+        export PATH="$(dotnetSdkPath):$PATH"
+        export MSBUILDDISABLENODEREUSE=1
+        export DOTNET_CLI_TELEMETRY_OPTOUT=1
+        dotnet --info
+        dotnet restore "$(webAppProject)" \
+          --configfile "$(NUGET_CONFIG_PATH)" \
+          --disable-parallel
+      displayName: 'Dotnet restore'
+
+    - bash: |
+        set -e
+        export PATH="$(dotnetSdkPath):$PATH"
+        export MSBUILDDISABLENODEREUSE=1
+        export DOTNET_CLI_TELEMETRY_OPTOUT=1
+        dotnet test "$(testProject)" \
+          --no-restore \
+          --configuration $(buildConfiguration) \
+          --logger "trx;LogFileName=test-results.trx"
+      displayName: 'Run unit tests'
+      condition: eq('${{ parameters.RUN_TESTS }}', 'true')
+
+    - bash: |
+        set -e
+        export PATH="$(dotnetSdkPath):$PATH"
+        export MSBUILDDISABLENODEREUSE=1
+        export DOTNET_CLI_TELEMETRY_OPTOUT=1
+        mkdir -p "$(Build.ArtifactStagingDirectory)/publish"
+        dotnet publish "$(webAppProject)" \
+          --no-restore \
+          --configuration $(buildConfiguration) \
+          --output "$(Build.ArtifactStagingDirectory)/publish" \
+          --disable-parallel \
+          -p:BuildInParallel=false \
+          -p:NodeReuse=false \
+          -m:1
+      displayName: 'Publish Blazor WASM'
+
+    - bash: |
+        set -e
+        STAGING="$(Build.ArtifactStagingDirectory)"
+        cp "$(dockerfile)" "$STAGING/Dockerfile.pipe"
+        cp "$(nginxConf)" "$STAGING/nginx.conf"
+
+        echo "$(NEXUS_PASS)" | docker login "$(DOCKER_REGISTRY)" \
+          -u "$(NEXUS_USER)" \
+          --password-stdin
+
+        docker build \
+          -t "$(tagSetting.APP_FQIN)" \
+          -f "$STAGING/Dockerfile.pipe" \
+          "$STAGING"
+
+        docker push "$(tagSetting.APP_FQIN)"
+      displayName: 'Build & push PWA image'
+      env:
+        NEXUS_USER: $(NEXUS_USER)
+        NEXUS_PASS: $(NEXUS_PASS)
+
+- stage: Deploy
+  displayName: 'Deploy'
+  dependsOn: Build
+  condition: succeeded()
+  variables:
+    BUILD_TAG: $[ stageDependencies.Build.Build_Pwa.outputs['tagSetting.BUILD_TAG'] ]
+    APP_FQIN: $[ stageDependencies.Build.Build_Pwa.outputs['tagSetting.APP_FQIN'] ]
+    COMMIT_HASH: $[ stageDependencies.Build.Build_Pwa.outputs['gitInfo.COMMIT_HASH'] ]
+    RELEASE_DIR: '$(deployReleaseRoot)'
+  jobs:
+  - job: Deployment
+    displayName: 'Deploy to Linux host'
+    pool: 'WEB-1'
+    steps:
+    - checkout: self
+      fetchDepth: 1
+
+    # - task: CopyFilesOverSSH@0
+    #   displayName: 'Sync deploy files to target'
+    #   inputs:
+    #     sshEndpoint: 'SallyPwa-Deploy'
+    #     sourceFolder: '$(Build.SourcesDirectory)/deploy'
+    #     contents: |
+    #       compose.yaml
+    #       .env.example
+    #     targetFolder: '$(RELEASE_DIR)'
+    #     cleanTargetFolder: false
+        overwrite: true
+
+    - task: SSH@0
+      displayName: 'Pull image and restart service'
+      inputs:
+        sshEndpoint: 'SallyPwa-Deploy'
+        runOptions: 'inline'
+        failOnStdErr: false
+        inline: |
+          set -e
+          echo "=== BUILD_TAG: $(BUILD_TAG)"
+          echo "BRANCH: ${{ parameters.BRANCH }}"
+          echo "COMMIT: $(COMMIT_HASH)"
+          echo "APP_FQIN: $(APP_FQIN)"
+
+          echo "$(NEXUS_PASS)" | docker login "$(DOCKER_REGISTRY)" \
+            -u "$(NEXUS_USER)" --password-stdin 2>/dev/null
+
+          RELEASE_DIR="$(RELEASE_DIR)"
+          mkdir -p "$RELEASE_DIR"
+          cd "$RELEASE_DIR"
+
+          if [ ! -f .env ]; then
+            if [ -f .env.example ]; then
+              cp .env.example .env
+              echo "Created .env from .env.example — review HOST_PORT on the host if needed."
+            else
+              echo ".env is missing on $RELEASE_DIR"
+              exit 1
+            fi
+          fi
+
+          sed -i "s/^BUILD_TAG=.*/BUILD_TAG=$(BUILD_TAG)/" .env
+          sed -i "s|^APP_FQIN=.*|APP_FQIN=$(APP_FQIN)|" .env
+
+          echo "Pulling image: $(APP_FQIN)"
+          docker pull "$(APP_FQIN)" || { echo "docker pull failed. Exiting."; exit 1; }
+
+          docker compose --env-file .env -f compose.yaml up -d --no-deps pwa
+          docker compose --env-file .env -f compose.yaml ps
+      env:
+        NEXUS_USER: $(NEXUS_USER)
+        NEXUS_PASS: $(NEXUS_PASS)
