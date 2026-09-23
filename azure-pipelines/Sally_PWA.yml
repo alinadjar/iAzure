@@ -228,7 +228,7 @@ stages:
     #       .env.example
     #     targetFolder: '$(RELEASE_DIR)'
     #     cleanTargetFolder: false
-        overwrite: true
+    #     overwrite: true
 
     - task: SSH@0
       displayName: 'Pull image and restart service'
