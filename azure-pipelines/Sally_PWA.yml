@@ -48,7 +48,7 @@ variables:
   - name: nginxConf
     value: '$(Build.SourcesDirectory)/deploy/nginx.conf'
   - name: dockerImage
-    value: '$(DOCKER_REGISTRY)/sally/pwa'
+    value: '$(DOCKER_REGISTRY)/fx/sally'
   - name: dotnetSdkPath
     value: '/opt/net_sdk_10'
   - name: deployReleaseRoot
@@ -91,7 +91,7 @@ stages:
       name: gitInfo
 
     - bash: |
-        BUILD_TAG="sally_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
+        BUILD_TAG="pwa_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
         echo "Build tag: $BUILD_TAG"
         echo "##vso[task.setvariable variable=BUILD_TAG;isOutput=true]$BUILD_TAG"
         echo "##vso[task.setvariable variable=APP_FQIN;isOutput=true]$(dockerImage):$BUILD_TAG"
