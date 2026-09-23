@@ -196,8 +196,8 @@ stages:
         docker push "$(tagSetting.APP_FQIN)"
       displayName: 'Build & push PWA image'
       env:
-        NEXUS_USER: $(NEXUS_USER)
-        NEXUS_PASS: $(NEXUS_PASS)
+        NEXUS_USER: $(NEXUS_DOCKER_USERNAME)
+        NEXUS_PASS: $(NEXUS_DOCKER_PASSWORD)
 
 - stage: Deploy
   displayName: 'Deploy'
@@ -267,5 +267,5 @@ stages:
           docker compose --env-file .env -f compose.yaml up -d --no-deps pwa
           docker compose --env-file .env -f compose.yaml ps
       env:
-        NEXUS_USER: $(NEXUS_USER)
-        NEXUS_PASS: $(NEXUS_PASS)
+        NEXUS_USER: $(NEXUS_DOCKER_USERNAME)
+        NEXUS_PASS: $(NEXUS_DOCKER_PASSWORD)
