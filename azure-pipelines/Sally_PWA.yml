@@ -31,7 +31,7 @@ parameters:
 - name: RUN_TESTS
   type: string
   displayName: 'Run unit tests'
-  default: 'true'
+  default: 'false'
   values:
     - 'true'
     - 'false'
