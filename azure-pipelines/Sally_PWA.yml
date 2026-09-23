@@ -12,15 +12,13 @@
 #   DOTNET_SDK_PATH      
 #   DEPLOY_RELEASE_ROOT  
 #   DIFY_API_BASE_URL    — default https://dify.fx.sadgan.int/v1
-#
-# Required service connection:
-#   SallyPwa-Deploy      — SSH endpoint to the deployment host
+
 
 
 trigger: none
 
 pool:
-  name: 'WEB-1'
+  name: 'FX_OSS'
 
 parameters:
 - name: BRANCH
@@ -82,7 +80,7 @@ stages:
   jobs:
   - job: Build_Pwa
     displayName: 'Build Sally PWA'
-    pool: 'WEB-1'
+    pool: 'FX_OSS'
     steps:
     - checkout: self
       fetchDepth: 1
@@ -129,17 +127,17 @@ stages:
       env:
         BOT_TOKEN: $(BOT_TOKEN)
 
-    - bash: |
-        set -e
-        APPSETTINGS="$(Build.SourcesDirectory)/src/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
-        test -f "$APPSETTINGS"
+    # - bash: |
+    #     set -e
+    #     APPSETTINGS="$(Build.SourcesDirectory)/src/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
+    #     test -f "$APPSETTINGS"
 
-        sed -i "s|\"DifyApiBaseUrl\": \".*\"|\"DifyApiBaseUrl\": \"$(DIFY_API_BASE_URL)\"|" "$APPSETTINGS"
-        sed -i "s|\"AuthApiKey\": \".*\"|\"AuthApiKey\": \"$(AUTH_API_KEY)\"|" "$APPSETTINGS"
-      displayName: 'Apply runtime appsettings'
-      env:
-        DIFY_API_BASE_URL: $(difyApiBaseUrl)
-        AUTH_API_KEY: $(AUTH_API_KEY)
+    #     sed -i "s|\"DifyApiBaseUrl\": \".*\"|\"DifyApiBaseUrl\": \"$(DIFY_API_BASE_URL)\"|" "$APPSETTINGS"
+    #     sed -i "s|\"AuthApiKey\": \".*\"|\"AuthApiKey\": \"$(AUTH_API_KEY)\"|" "$APPSETTINGS"
+    #   displayName: 'Apply runtime appsettings'
+    #   env:
+    #     DIFY_API_BASE_URL: $(difyApiBaseUrl)
+    #     AUTH_API_KEY: $(AUTH_API_KEY)
 
     - bash: |
         set -e
@@ -213,7 +211,7 @@ stages:
   jobs:
   - job: Deployment
     displayName: 'Deploy to Linux host'
-    pool: 'WEB-1'
+    pool: 'FX_OSS'
     steps:
     - checkout: self
       fetchDepth: 1
@@ -221,7 +219,7 @@ stages:
     # - task: CopyFilesOverSSH@0
     #   displayName: 'Sync deploy files to target'
     #   inputs:
-    #     sshEndpoint: 'SallyPwa-Deploy'
+    #     sshEndpoint: 'SSH_244'
     #     sourceFolder: '$(Build.SourcesDirectory)/deploy'
     #     contents: |
     #       compose.yaml
@@ -231,9 +229,9 @@ stages:
     #     overwrite: true
 
     - task: SSH@0
-      displayName: 'Pull image and restart service'
+      displayName: 'Deployment'
       inputs:
-        sshEndpoint: 'SallyPwa-Deploy'
+        sshEndpoint: 'SSH_244'
         runOptions: 'inline'
         failOnStdErr: false
         inline: |
