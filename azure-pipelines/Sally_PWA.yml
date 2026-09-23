@@ -60,8 +60,8 @@ resources:
   repositories:
   - repository: self
     type: git
-    ref: ${{ parameters.BRANCH }}
-    
+    ref: main
+
 stages:
 - stage: INIT
   displayName: 'Init'
