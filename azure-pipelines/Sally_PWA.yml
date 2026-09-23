@@ -80,6 +80,8 @@ stages:
     steps:
     - checkout: git://SadganErp/Sadgan.Erp.Mobile@${{ parameters.BRANCH }}
       fetchDepth: 1
+    # - checkout: git://Project/Repo@${{ parameters.BRANCH }}
+    # - checkout: git://Project/Repo@${{ parameters.BRANCH }}
 
     - bash: |
         COMMIT_HASH="$(git rev-parse HEAD | cut -c1-12)"
