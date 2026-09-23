@@ -118,7 +118,8 @@ stages:
               echo "FRONT_HOST   : $FRONT_HOST"
               echo "API_HOST     : $API_HOST"
 
-              IMAGE_TAG="task-${WIT_ID}_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
+              # IMAGE_TAG="wit-${WIT_ID}_$(TZ='GMT-3:30' date '+%Y%m%d_%H%M%S')"
+              IMAGE_TAG="wit-${WIT_ID}"
 
               echo "##vso[task.setvariable variable=WIT_ID;isOutput=true]$WIT_ID"
               echo "##vso[task.setvariable variable=CURRENT_BRANCH;isOutput=true]$BRANCH"
