@@ -20,6 +20,7 @@ parameters:
     default: 'https://alpha.api.fx.sadgan.int'
     values:
       - 'https://alpha.api.fx.sadgan.int'
+      - 'https://qa.api.fx.sadgan.int'
       - 'https://stage.api.fx.sadgan.int'
       - 'http://dev.api.fx.sadgan.int'
 
