@@ -211,8 +211,7 @@ stages:
     displayName: 'Deploy to Linux host'
     pool: 'FX_OSS'
     steps:
-    - checkout: self
-      fetchDepth: 1
+    - checkout: none
 
     # - task: CopyFilesOverSSH@0
     #   displayName: 'Sync deploy files to target'
@@ -245,6 +244,7 @@ stages:
           RELEASE_DIR="$(RELEASE_DIR)"
           mkdir -p "$RELEASE_DIR"
           cd "$RELEASE_DIR"
+          ls -alh
 
           # if [ ! -f .env ]; then
           #   if [ -f .env.example ]; then
