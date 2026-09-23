@@ -217,7 +217,7 @@ stages:
     # - task: CopyFilesOverSSH@0
     #   displayName: 'Sync deploy files to target'
     #   inputs:
-    #     sshEndpoint: 'SSH_244'
+    #     sshEndpoint: 'Sally-PWA'
     #     sourceFolder: '$(Build.SourcesDirectory)/deploy'
     #     contents: |
     #       compose.yaml
@@ -229,7 +229,7 @@ stages:
     - task: SSH@0
       displayName: 'Deployment'
       inputs:
-        sshEndpoint: 'SSH_244'
+        sshEndpoint: 'Sally-PWA'
         runOptions: 'inline'
         failOnStdErr: false
         inline: |
