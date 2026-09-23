@@ -78,7 +78,7 @@ stages:
     displayName: 'Build Sally PWA'
     pool: 'FX_OSS'
     steps:
-    - checkout: git://azure.sadgan.int/WebApp/SadganErp/_git/Sadgan.Erp.Mobile@${{ parameters.BRANCH }}
+    - checkout: git://SadganErp/Sadgan.Erp.Mobile@${{ parameters.BRANCH }}
       fetchDepth: 1
 
     - bash: |
