@@ -140,6 +140,15 @@ stages:
     #     AUTH_API_KEY: $(AUTH_API_KEY)
 
     - bash: |
+        echo "=== Build.SourcesDirectory ==="
+        echo "$(Build.SourcesDirectory)"
+        echo "=== Listing top-level ==="
+        ls -la "$(Build.SourcesDirectory)"
+        echo "=== Looking for the csproj ==="
+        find "$(Build.SourcesDirectory)" -name "Sadgan.Erp.App.WebApp.csproj" -type f
+      displayName: 'Debug - locate project file'
+
+    - bash: |
         set -e
         export PATH="$(dotnetSdkPath):$PATH"
         export MSBUILDDISABLENODEREUSE=1
