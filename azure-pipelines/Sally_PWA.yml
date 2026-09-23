@@ -238,24 +238,24 @@ stages:
           echo "COMMIT: $(COMMIT_HASH)"
           echo "APP_FQIN: $(APP_FQIN)"
 
-          echo "$NEXUS_PASS" | docker login "$(DOCKER_REGISTRY)" \
-            -u "$NEXUS_USER" --password-stdin 2>/dev/null
-
           RELEASE_DIR="$(RELEASE_DIR)"
           mkdir -p "$RELEASE_DIR"
           cd "$RELEASE_DIR"
           ls -alh
 
-          # if [ ! -f .env ]; then
-          #   if [ -f .env.example ]; then
-          #     cp .env.example .env
-          #     echo "Created .env from .env.example — review HOST_PORT on the host if needed."
-          #   else
-          #     echo ".env is missing on $RELEASE_DIR"
-          #     exit 1
-          #   fi
-          # fi
+           # if [ ! -f .env ]; then
+           #   if [ -f .env.example ]; then
+           #     cp .env.example .env
+           #     echo "Created .env from .env.example — review HOST_PORT on the host if needed."
+           #   else
+           #     echo ".env is missing on $RELEASE_DIR"
+           #     exit 1
+           #   fi
+           # fi
 
+          echo "$(NEXUS_PASS)" | docker login "$(DOCKER_REGISTRY)" -u "$(NEXUS_USER)" --password-stdin 2>/dev/null
+
+          echo "==== updating .env:"
           sed -i "s/^BUILD_TAG=.*/BUILD_TAG=$(BUILD_TAG)/" .env
           sed -i "s|^APP_FQIN=.*|APP_FQIN=$(APP_FQIN)|" .env
 
