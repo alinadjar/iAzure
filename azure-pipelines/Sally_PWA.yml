@@ -138,15 +138,6 @@ stages:
     #     AUTH_API_KEY: $(AUTH_API_KEY)
 
     - bash: |
-        echo "=== Build.SourcesDirectory ==="
-        echo "$(Build.SourcesDirectory)"
-        echo "=== Listing top-level ==="
-        ls -la "$(Build.SourcesDirectory)"
-        echo "=== Looking for the csproj ==="
-        find "$(Build.SourcesDirectory)" -name "Sadgan.Erp.App.WebApp.csproj" -type f
-      displayName: 'Debug - locate project file'
-
-    - bash: |
         set -e
         export PATH="$(dotnetSdkPath):$PATH"
         export MSBUILDDISABLENODEREUSE=1
@@ -191,8 +182,8 @@ stages:
         cp "$(dockerfile)" "$STAGING/Dockerfile.pipe"
         cp "$(nginxConf)" "$STAGING/nginx.conf"
 
-        echo "$(NEXUS_PASS)" | docker login "$(DOCKER_REGISTRY)" \
-          -u "$(NEXUS_USER)" \
+        echo "$NEXUS_PASS" | docker login "$(DOCKER_REGISTRY)" \
+          -u "$NEXUS_USER" \
           --password-stdin
 
         docker build \
@@ -248,8 +239,8 @@ stages:
           echo "COMMIT: $(COMMIT_HASH)"
           echo "APP_FQIN: $(APP_FQIN)"
 
-          echo "$(NEXUS_PASS)" | docker login "$(DOCKER_REGISTRY)" \
-            -u "$(NEXUS_USER)" --password-stdin 2>/dev/null
+          echo "$NEXUS_PASS" | docker login "$(DOCKER_REGISTRY)" \
+            -u "$NEXUS_USER" --password-stdin 2>/dev/null
 
           RELEASE_DIR="$(RELEASE_DIR)"
           mkdir -p "$RELEASE_DIR"
