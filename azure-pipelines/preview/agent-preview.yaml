@@ -82,6 +82,8 @@ stages:
           - checkout: none
           - bash: |
               set -euo pipefail
+              whoami
+              echo "nvm dir: $NVM_DIR"
 
               WIT_ID='${{ parameters.WIT_ID }}'
               BRANCH='${{ parameters.BRANCH }}'
