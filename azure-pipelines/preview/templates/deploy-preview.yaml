@@ -51,6 +51,15 @@ steps:
       rm -rf "$WORK_DIR"
       mkdir -p "$WORK_DIR"
 
+
+      #  # Configure Git with isolated config
+      # export GIT_CONFIG_GLOBAL="$(Agent.TempDirectory)/gitconfig_$(Build.BuildId)"
+      # git config --file "$GIT_CONFIG_GLOBAL"  user.email "S_Bot_Azure@sadgan.int"
+      # git config --file "$GIT_CONFIG_GLOBAL"  user.name "S_Bot_Azure"
+      # git config --file "$GIT_CONFIG_GLOBAL"  http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
+      # git config --file "$GIT_CONFIG_GLOBAL"  http.sslVerify false
+      # git config --file "$GIT_CONFIG_GLOBAL"  --add safe.directory '*'
+
       BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
       git clone --branch cicd --depth 1 "$BASE_URL/SadganErp/_git/CICD" "$WORK_DIR/cicd-src"
 
