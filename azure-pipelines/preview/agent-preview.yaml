@@ -260,6 +260,9 @@ stages:
 
           - bash: |
               set -e
+              export NVM_DIR="$HOME/.nvm"
+              [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+              nvm use 24.21.0
               export PATH="/opt/net_sdk_10:$PATH"
               export MSBUILDDISABLENODEREUSE=1
               mkdir -p "$(Build.ArtifactStagingDirectory)/publish"
@@ -408,6 +411,9 @@ stages:
 
           - bash: |
               set -e
+              export NVM_DIR="$HOME/.nvm"
+              [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+              nvm use 24.21.0
               export PATH="/opt/net_sdk_10:$PATH"
               export MSBUILDDISABLENODEREUSE=1
               mkdir -p "$(Build.ArtifactStagingDirectory)/publish"
