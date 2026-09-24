@@ -10,7 +10,7 @@ trigger:
       - wit/*
 
 pool:
-  name: 'WEB-1'
+  name: 'FX_WIT_PREVIEW'
 
 parameters:
   - name: WIT_ID
@@ -143,7 +143,7 @@ stages:
       - job: Build_Frontend
         displayName: 'Build Frontend'
         condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'front'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
-        pool: 'WEB-1'
+        pool: 'FX_WIT_PREVIEW'
         variables:
           solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
           DOCKER_IMG: $(DOCKER_REGISTRY)/fx/front
@@ -303,7 +303,7 @@ stages:
         dependsOn: Build_Frontend
         condition: and(in('${{ parameters.BUILD_COMPONENTS }}', 'back', 'both'), in(dependencies.Build_Frontend.result, 'Succeeded', 'Skipped'))
         # condition: or(eq('${{ parameters.BUILD_COMPONENTS }}', 'back'), eq('${{ parameters.BUILD_COMPONENTS }}', 'both'))
-        pool: 'WEB-1'
+        pool: 'FX_WIT_PREVIEW'
         variables:
           solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
           DOCKER_IMG: $(DOCKER_REGISTRY)/fx/backend
@@ -450,7 +450,7 @@ stages:
     jobs:
       - job: DeployPreview
         displayName: 'Deploy wit preview'
-        pool: 'WEB-1'
+        pool: 'FX_WIT_PREVIEW'
         steps:
           - template: templates/deploy-preview.yaml
             parameters:
