@@ -82,6 +82,9 @@ stages:
           - checkout: none
           - bash: |
               set -euo pipefail
+              export NVM_DIR="$HOME/.nvm"
+              [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+              nvm use 24.21.0
               whoami
               echo "nvm dir: $NVM_DIR"
 
