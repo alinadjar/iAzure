@@ -75,6 +75,7 @@ steps:
       cp "$PREVIEW_SRC/compose.yaml" "$STAGING/"
       cp "$PREVIEW_SRC/compose.override.yaml" "$STAGING/"
       cp "$PREVIEW_SRC/init/"*.sql "$STAGING/init/" 2>/dev/null || true
+      cp "$PREVIEW_SRC/metadata/"* "$STAGING/metadata/" 2>/dev/null || true
 
       ERP_VERSION="${FRONTEND_TAG}"
       if [ "$BACKEND_TAG" != "$FRONTEND_TAG" ]; then
