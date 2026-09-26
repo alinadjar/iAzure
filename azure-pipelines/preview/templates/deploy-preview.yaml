@@ -285,36 +285,36 @@ steps:
 
       PUSH_MESSAGE=$(printf '#### :sparkles: *Auto Deployment:*  `FX` work-item `%s`\n---\nPanel url: %s\nAPI url: %s\nBuild: %s\nImages:\n  - :package: front=%s\n  - :package: back=%s\n'   "$WIT_ID" "$FRONT_URL" "$API_URL" "$BUILD_URL" "$FRONTEND_TAG" "$BACKEND_TAG")
   
-      send_notification() {
-            local payload="$1"
-            shift
-            # --location-trusted keeps Authorization on redirects (plain -L drops it → 401)
-            curl -k -sS -w "\n%{http_code}" --location --location-trusted "https://chat.sadgan.int/api/v4/posts" \
-              --header 'Content-Type: application/json' \
-              "$@" \
-              --data "$payload" 2>&1 || true
-      }
+      # send_notification() {
+      #       local payload="$1"
+      #       shift
+      #       # --location-trusted keeps Authorization on redirects (plain -L drops it → 401)
+      #       curl -k -sS -w "\n%{http_code}" --location --location-trusted "https://chat.sadgan.int/api/v4/posts" \
+      #         --header 'Content-Type: application/json' \
+      #         "$@" \
+      #         --data "$payload" 2>&1 || true
+      # }
     
-      JSON_PAYLOAD=$(jq -n \
-              --arg channel_id "$CHANNEL_ID" \
-              --arg message "$PUSH_MESSAGE" \
-              '{ channel_id: $channel_id, message: $message }')
+      # JSON_PAYLOAD=$(jq -n \
+      #         --arg channel_id "$CHANNEL_ID" \
+      #         --arg message "$PUSH_MESSAGE" \
+      #         '{ channel_id: $channel_id, message: $message }')
     
-      response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_BOT_TOKEN}")
-      http_code=$(echo "$response" | tail -n1)
-      response_body=$(echo "$response" | sed '$d')
+      # response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_BOT_TOKEN}")
+      # http_code=$(echo "$response" | tail -n1)
+      # response_body=$(echo "$response" | sed '$d')
     
-      if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "204" ]; then
-        echo "✅ Mattermost notification sent (HTTP $http_code)"
-      else
-        echo "⚠️ Mattermost notification failed (HTTP $http_code)"
-        echo "$response_body"
-        if [ "$http_code" = "401" ]; then
-          echo "  Token rejected (expired session or wrong token)."
-          echo "  Use a Mattermost bot Access Token in MM_BOT_TOKEN — not Token ID, not a user login session."
-        fi
-        echo "Continuing pipeline..."
-      fi
+      # if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "204" ]; then
+      #   echo "✅ Mattermost notification sent (HTTP $http_code)"
+      # else
+      #   echo "⚠️ Mattermost notification failed (HTTP $http_code)"
+      #   echo "$response_body"
+      #   if [ "$http_code" = "401" ]; then
+      #     echo "  Token rejected (expired session or wrong token)."
+      #     echo "  Use a Mattermost bot Access Token in MM_BOT_TOKEN — not Token ID, not a user login session."
+      #   fi
+      #   echo "Continuing pipeline..."
+      # fi
     displayName: 'Comment preview URL on Azure work item'
     condition: succeeded()
     env:
