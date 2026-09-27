@@ -244,7 +244,7 @@ steps:
 
   - task: Bash@3
     displayName: 'Queue WIT cleanup pipeline'
-    condition: and(succeeded(), eq('${{ parameters.TRIGGER_WI_CLEANUP }}', 'YES'))
+    condition: eq('${{ parameters.TRIGGER_WI_CLEANUP }}', 'YES')
     env:
       GIT_PAT: $(GIT_PAT)
       WORK_ITEM_IDS: ${{ parameters.WORK_ITEM_IDS }}
