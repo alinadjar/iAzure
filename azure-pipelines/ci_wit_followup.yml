@@ -43,6 +43,17 @@ parameters:
     displayName: 'Tag to add (empty = promoted-{TARGET_BRANCH})'
     type: string
     default: ''
+  - name: TRIGGER_WI_CLEANUP
+    displayName: 'Queue post-promotion WIT cleanup pipeline?'
+    type: string
+    default: 'YES'
+    values:
+      - YES
+      - NO
+  - name: WI_CLEANUP_PIPELINE_ID
+    displayName: 'WIT cleanup pipeline ID (CICD repo — set after registering ci_wit_cleanup.yml)'
+    type: string
+    default: '158'
 
 variables:
   - name: orgUrl
@@ -231,6 +242,94 @@ steps:
         echo "Follow-up complete for ${#WI_IDS[@]} work item(s)"
         echo "========================================="
 
+  - task: Bash@3
+    displayName: 'Queue WIT cleanup pipeline'
+    condition: and(succeeded(), eq('${{ parameters.TRIGGER_WI_CLEANUP }}', 'YES'))
+    env:
+      GIT_PAT: $(GIT_PAT)
+      WORK_ITEM_IDS: ${{ parameters.WORK_ITEM_IDS }}
+      TARGET_BRANCH: ${{ parameters.TARGET_BRANCH }}
+      SOURCE_BRANCH: ${{ parameters.SOURCE_BRANCH }}
+      PROMOTION_BUILD_ID: ${{ parameters.PROMOTION_BUILD_ID }}
+      PROMOTION_BUILD_NUMBER: ${{ parameters.PROMOTION_BUILD_NUMBER }}
+      TRIGGER_WI_CLEANUP: ${{ parameters.TRIGGER_WI_CLEANUP }}
+      WI_CLEANUP_PIPELINE_ID: ${{ parameters.WI_CLEANUP_PIPELINE_ID }}
+      ORG_URL: $(orgUrl)
+      PROJECT: $(project)
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -euo pipefail
+
+        if [ -z "${WORK_ITEM_IDS:-}" ]; then
+          echo "No WORK_ITEM_IDS — skipping cleanup pipeline."
+          exit 0
+        fi
+
+        if [ -z "${WI_CLEANUP_PIPELINE_ID:-}" ]; then
+          echo "⚠️ TRIGGER_WI_CLEANUP=YES but WI_CLEANUP_PIPELINE_ID is empty — register ci_wit_cleanup.yml in Azure DevOps and set this parameter."
+          exit 0
+        fi
+
+        PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
+        AUTH_HEADER="Authorization: Basic $(echo -n ":${GIT_PAT}" | base64 | tr -d '\n')"
+
+        call_api() {
+          local url="$1"
+          local method="${2:-GET}"
+          local body="${3:-}"
+          local tmp http_code
+
+          tmp=$(mktemp)
+          if [ -n "$body" ]; then
+            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+              -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+              -d "$body" "$url")
+          else
+            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+              -H "$AUTH_HEADER" "$url")
+          fi
+
+          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+            cat "$tmp"
+            rm -f "$tmp"
+            return 0
+          fi
+
+          echo "API $method $url failed (HTTP $http_code):" >&2
+          cat "$tmp" >&2
+          rm -f "$tmp"
+          return 1
+        }
+
+        echo "🚀 Queueing WIT cleanup pipeline (ID: ${WI_CLEANUP_PIPELINE_ID})..."
+        QUEUE_URL="${ORG_URL}/${PROJECT}/_apis/pipelines/${WI_CLEANUP_PIPELINE_ID}/runs?api-version=7.0"
+        QUEUE_BODY=$(jq -n \
+          --arg ids "$WORK_ITEM_IDS" \
+          --arg target "$TARGET_BRANCH" \
+          --arg source "$SOURCE_BRANCH" \
+          --arg buildId "$PROMOTION_BUILD_ID" \
+          --arg buildNumber "$PROMOTION_BUILD_NUMBER" \
+          '{
+            resources: { repositories: { self: { refName: "refs/heads/cicd" } } },
+            templateParameters: {
+              WORK_ITEM_IDS: $ids,
+              TARGET_BRANCH: $target,
+              SOURCE_BRANCH: $source,
+              PROMOTION_BUILD_ID: $buildId,
+              PROMOTION_BUILD_NUMBER: $buildNumber
+            }
+          }')
+
+        QUEUE_RESPONSE=$(call_api "$QUEUE_URL" "POST" "$QUEUE_BODY") || {
+          echo "⚠️ Failed to queue WIT cleanup pipeline"
+          exit 0
+        }
+
+        CLEANUP_RUN_ID=$(echo "$QUEUE_RESPONSE" | jq -r '.id // empty')
+        CLEANUP_RUN_URL=$(echo "$QUEUE_RESPONSE" | jq -r '._links.web.href // empty')
+        echo "✅ Cleanup pipeline queued: run ID ${CLEANUP_RUN_ID}"
+        [ -n "$CLEANUP_RUN_URL" ] && echo "   $CLEANUP_RUN_URL"
 
 # # WorkItem follow-up pipeline — queued by CI.yml after PR creation / merge
 # trigger: none
