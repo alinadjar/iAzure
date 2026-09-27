@@ -10,21 +10,21 @@ schedules:
     always: true
 
 pool:
-  name: 'WEB-1'
+  name: 'FX_WIT_PREVIEW'
 
 parameters:
   - name: PREVIEW_HOST
     type: string
-    default: '192.168.10.220'
+    default: '192.168.10.160'
   - name: PREVIEW_BASE_PATH
     type: string
     default: '/usr/local/apps/fx/preview'
   - name: PREVIEW_SSH_USER
     type: string
-    default: 'azurebot'
+    default: 'devops'
   - name: MAX_AGE_DAYS
     type: string
-    default: '7'
+    default: '3'
 
 steps:
   - checkout: none
@@ -40,12 +40,13 @@ steps:
       SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
       REMOTE="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
 
-      if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
-        KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key"
-        printf '%s\n' "$PREVIEW_SSH_PRIVATE_KEY" > "$KEY_FILE"
-        chmod 600 "$KEY_FILE"
-        SSH_OPTS="$SSH_OPTS -i $KEY_FILE"
-      fi
+       # if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
+       #   KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key"
+       #   printf '%s\n' "$PREVIEW_SSH_PRIVATE_KEY" > "$KEY_FILE"
+       #   chmod 600 "$KEY_FILE"
+       #   SSH_OPTS="$SSH_OPTS -i $KEY_FILE"
+       # fi
+      SSH_OPTS="$SSH_OPTS -i $PREVIEW_SSH_PRIVATE_KEY_PATH"
 
       ssh $SSH_OPTS "$REMOTE" bash -s <<EOF
       set -euo pipefail
@@ -72,4 +73,5 @@ steps:
       EOF
     displayName: 'Remove preview stacks older than ${{ parameters.MAX_AGE_DAYS }} days'
     env:
-      PREVIEW_SSH_PRIVATE_KEY: $(PREVIEW_SSH_PRIVATE_KEY)
+      PREVIEW_SSH_PRIVATE_KEY_PATH: $(PREVIEW_SSH_PRIVATE_KEY_PATH)
+      # PREVIEW_SSH_PRIVATE_KEY: $(PREVIEW_SSH_PRIVATE_KEY)
