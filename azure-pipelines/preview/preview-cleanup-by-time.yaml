@@ -3,7 +3,7 @@ trigger: none
 
 schedules:
   - cron: '0 */8 * * *'
-    displayName: 'Nightly preview cleanup'
+    displayName: 'Scheduled preview cleanup'
     branches:
       include:
         - cicd
