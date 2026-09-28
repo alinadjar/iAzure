@@ -916,7 +916,269 @@ stages:
     #     targetPath: '$(Build.ArtifactStagingDirectory)'
     #     artifactName: 'pr-status'
 
- 
+
+
+
+# Stage 1b: Alpha hotfix — collect work items since last release tag (no PR)
+- stage: Hotfix_WI_Collection
+  displayName: 'Alpha Hotfix — Work Item Collection'
+  dependsOn: INIT
+  condition: and(succeeded(), eq(variables['isCreatePR'], 'False'), eq(variables['isBranchALPHA'], 'True'))
+  variables:
+    SOURCE_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.SOURCE_BRANCH'] ]
+    TARGET_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.TARGET_BRANCH'] ]
+  jobs:
+  - job: CollectHotfixWorkItems
+    displayName: 'Extract work items since last v*-*.* tag on alpha'
+    steps:
+    - checkout: none
+
+    - task: Bash@3
+      name: hotfix_wi
+      displayName: 'Collect work items from commits after last release tag'
+      env:
+        GIT_PAT: $(GIT_PAT)
+        SOURCE_BRANCH: $(SOURCE_BRANCH)
+        TARGET_BRANCH: $(TARGET_BRANCH)
+        BUILD_ID: $(Build.BuildId)
+        BUILD_NUMBER: $(Build.BuildNumber)
+        MANUAL_WORK_ITEM_IDS: ${{ coalesce(parameters.WORK_ITEM_IDS, '') }}
+        TRIGGER_WI_FOLLOWUP: ${{ parameters.TRIGGER_WI_FOLLOWUP }}
+        WI_FOLLOWUP_PIPELINE_ID: ${{ parameters.WI_FOLLOWUP_PIPELINE_ID }}
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -e
+
+          clean_repo_id() {
+            local id="$1"
+            local cleaned
+            cleaned=$(echo "$id" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+            if [ -z "$cleaned" ]; then
+              echo "$id" | tr -d '\n\r ' | cut -c1-36
+            else
+              echo "$cleaned"
+            fi
+          }
+
+          call_api() {
+            local url="$1"
+            local method="${2:-GET}"
+            local data="${3:-}"
+            local content_type="${4:-application/json}"
+            local temp_file http_code
+            temp_file=$(mktemp)
+            url=$(echo "$url" | tr -d '\n\r ')
+
+            if [ "$method" = "GET" ]; then
+              http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Cache-Control: no-cache" -H "Pragma: no-cache" \
+                -o "$temp_file" "$url")
+            else
+              http_code=$(curl -sS -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Content-Type: ${content_type}" \
+                -H "Cache-Control: no-cache" -H "Pragma: no-cache" \
+                -X "$method" -d "$data" -o "$temp_file" "$url")
+            fi
+
+            if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+              echo "❌ API call failed with HTTP $http_code" >&2
+              [ -s "$temp_file" ] && cat "$temp_file" >&2
+              rm -f "$temp_file"
+              return 1
+            fi
+
+            if [ -s "$temp_file" ] && ! jq empty "$temp_file" 2>/dev/null; then
+              echo "❌ Invalid JSON response" >&2
+              cat "$temp_file" >&2
+              rm -f "$temp_file"
+              return 1
+            fi
+
+            cat "$temp_file"
+            rm -f "$temp_file"
+            return 0
+          }
+
+          append_work_item_ids() {
+            local global_file="$1"
+            local ids="$2"
+            while IFS= read -r id; do
+              [ -n "$id" ] && echo "$id" >> "$global_file"
+            done <<< "$ids"
+          }
+
+          # Commits on TARGET_BRANCH after the latest tag matching vX.Y.Z-<branch>.N
+          extract_work_item_ids_since_release_tag() {
+            local project_api_url="$1"
+            local repo_id="$2"
+            local repo_git_url="$3"
+            local branch="$4"
+            local tmp_ids repo_id_clean tag_glob tag_regex latest_tag base_commit
+            local work_dir commit_id subject body full_comment wi_url wi_json
+
+            repo_id_clean=$(clean_repo_id "$repo_id")
+            tmp_ids=$(mktemp)
+            tag_glob="v*-${branch}.*"
+            tag_regex="^v[0-9]+\\.[0-9]+\\.[0-9]+-${branch}\\.[0-9]+$"
+
+            work_dir=$(mktemp -d)
+            echo "  📥 Cloning ${branch} for tag scan..." >&2
+            if ! git clone --quiet --branch "$branch" --tags "$repo_git_url" "$work_dir/repo" 2>/dev/null; then
+              echo "  ⚠️ Could not clone $branch — skipping repo" >&2
+              rm -rf "$work_dir" "$tmp_ids"
+              return 0
+            fi
+
+            cd "$work_dir/repo"
+            latest_tag=$(git tag -l "$tag_glob" | grep -E "$tag_regex" | sort -V | tail -1)
+            if [ -z "$latest_tag" ]; then
+              echo "  ⚠️ No release tag matching ${tag_glob} (pattern vX.Y.Z-${branch}.N) — skipping repo" >&2
+              cd - >/dev/null
+              rm -rf "$work_dir"
+              rm -f "$tmp_ids"
+              return 0
+            fi
+
+            base_commit=$(git rev-parse "${latest_tag}^{commit}")
+            echo "  🏷️ Latest release tag: $latest_tag ($base_commit)" >&2
+
+            while IFS= read -r commit_id; do
+              [ -z "$commit_id" ] && continue
+              subject=$(git log -1 --format=%s "$commit_id")
+              body=$(git log -1 --format=%b "$commit_id")
+              full_comment="${subject}"$'\n'"${body}"
+
+              if [[ "$subject" == "Merged PR"* ]] || [[ "$subject" == "Merge pull request"* ]] || [[ "$subject" == "Merge branch"* ]]; then
+                echo "  ⏭️ Skipping merge commit: $(echo "$subject" | cut -c1-80)" >&2
+                continue
+              fi
+
+              echo "$full_comment" | grep -oE '(AB#|#)[0-9]+' | sed 's/AB#//;s/#//' >> "$tmp_ids" 2>/dev/null || true
+
+              wi_url="${project_api_url}/git/repositories/${repo_id_clean}/commits/${commit_id}/workItems?api-version=7.0"
+              wi_json=$(call_api "$wi_url") || continue
+              echo "$wi_json" | jq -r '.value[]?.id // empty' >> "$tmp_ids" 2>/dev/null || true
+            done < <(git rev-list "${base_commit}..HEAD")
+
+            cd - >/dev/null
+            rm -rf "$work_dir"
+            sort -u "$tmp_ids" | grep -E '^[0-9]+$' || true
+            rm -f "$tmp_ids"
+          }
+
+          git config --global user.email "S_Bot_Azure@sadgan.int"
+          git config --global user.name "S_Bot_Azure"
+          git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64 -w 0)"
+          git config --global http.sslVerify false
+          git config --global --add safe.directory '*'
+
+          GIT_BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
+          REPOSITORIES=(
+            "SadganShared/_git/1_Configs"
+            "SadganShared/_git/2_SharedLibrary"
+            "SadganShared/_git/3_ClientLibrary"
+            "SadganShared/_git/4_ServerLibrary"
+            "SadganErp/_git/Sadgan.Erp.Client.Core"
+            "SadganErp/_git/Sadgan.Erp.Panel"
+            "SadganErp/_git/SadganErpApi"
+          )
+
+          GLOBAL_WI_FILE=$(mktemp)
+          touch "$GLOBAL_WI_FILE"
+
+          MANUAL_WORK_ITEM_IDS="$(echo "${MANUAL_WORK_ITEM_IDS:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          if [ -n "$MANUAL_WORK_ITEM_IDS" ]; then
+            echo "$MANUAL_WORK_ITEM_IDS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+              | grep -E '^[0-9]+$' >> "$GLOBAL_WI_FILE" || true
+            echo "Manual work item IDs: $MANUAL_WORK_ITEM_IDS"
+          fi
+
+          echo "========================================="
+          echo "Alpha hotfix WI collection on $TARGET_BRANCH (since last v*-${TARGET_BRANCH}.* tag)"
+          echo "========================================="
+
+          for REPO_NAME in "${REPOSITORIES[@]}"; do
+            echo ""
+            echo "📦 $REPO_NAME"
+            PROJECT_NAME=$(echo "$REPO_NAME" | cut -d'/' -f1)
+            SIMPLE_REPO_NAME=$(basename "$REPO_NAME")
+            PROJECT_API_URL="$GIT_BASE_URL/$PROJECT_NAME/_apis"
+            REPO_GIT_URL="$GIT_BASE_URL/$REPO_NAME"
+
+            REPOS_URL="$PROJECT_API_URL/git/repositories?api-version=7.0&_=$(date +%s%N)"
+            REPOS_RESPONSE=$(call_api "$REPOS_URL") || {
+              echo "  ⚠️ Failed to list repositories in $PROJECT_NAME — skipping"
+              continue
+            }
+
+            RAW_REPO_ID=$(echo "$REPOS_RESPONSE" | jq -r --arg name "$SIMPLE_REPO_NAME" '.value[] | select(.name==$name) | .id')
+            REPO_ID=$(clean_repo_id "$RAW_REPO_ID")
+            if [ -z "$REPO_ID" ] || [ "$REPO_ID" = "null" ]; then
+              echo "  ⚠️ Repository not found: $SIMPLE_REPO_NAME — skipping"
+              continue
+            fi
+
+            EXTRACTED_WI_IDS=$(extract_work_item_ids_since_release_tag \
+              "$PROJECT_API_URL" "$REPO_ID" "$REPO_GIT_URL" "$TARGET_BRANCH")
+            if [ -n "$EXTRACTED_WI_IDS" ]; then
+              echo "  📝 Work item IDs from commits after release tag:"
+              echo "$EXTRACTED_WI_IDS" | sed 's/^/    - /'
+              append_work_item_ids "$GLOBAL_WI_FILE" "$EXTRACTED_WI_IDS"
+            else
+              echo "  ℹ️ No work item IDs found for $REPO_NAME"
+            fi
+          done
+
+          DEDUPED_WORK_ITEM_IDS=$(sort -u "$GLOBAL_WI_FILE" | grep -E '^[0-9]+$' | paste -sd, - || true)
+          rm -f "$GLOBAL_WI_FILE"
+
+          echo ""
+          echo "========================================="
+          echo "HOTFIX WORK ITEMS SUMMARY"
+          echo "========================================="
+          if [ -n "$DEDUPED_WORK_ITEM_IDS" ]; then
+            echo "Deduped work item IDs: $DEDUPED_WORK_ITEM_IDS"
+            echo "##vso[task.setvariable variable=WORK_ITEM_IDS;isOutput=true]$DEDUPED_WORK_ITEM_IDS"
+            echo "##vso[task.setvariable variable=DEDUPED_WORK_ITEM_IDS;isOutput=true]$DEDUPED_WORK_ITEM_IDS"
+          else
+            echo "No work item IDs collected from hotfix commits"
+            echo "##vso[task.setvariable variable=WORK_ITEM_IDS;isOutput=true]"
+            echo "##vso[task.setvariable variable=DEDUPED_WORK_ITEM_IDS;isOutput=true]"
+          fi
+
+          if [ "$TRIGGER_WI_FOLLOWUP" = "YES" ] && [ -n "$DEDUPED_WORK_ITEM_IDS" ] && [ -n "$WI_FOLLOWUP_PIPELINE_ID" ]; then
+            echo ""
+            echo "🚀 Queueing WorkItem follow-up pipeline (ID: $WI_FOLLOWUP_PIPELINE_ID)..."
+            QUEUE_URL="http://azure.sadgan.int/WebApp/SadganErp/_apis/pipelines/${WI_FOLLOWUP_PIPELINE_ID}/runs?api-version=7.0"
+            QUEUE_BODY=$(jq -n \
+              --arg ids "$DEDUPED_WORK_ITEM_IDS" \
+              --arg target "$TARGET_BRANCH" \
+              --arg source "$SOURCE_BRANCH" \
+              --arg buildId "$BUILD_ID" \
+              --arg buildNumber "$BUILD_NUMBER" \
+              '{
+                resources: { repositories: { self: { refName: "refs/heads/cicd" } } },
+                templateParameters: {
+                  WORK_ITEM_IDS: $ids,
+                  TARGET_BRANCH: $target,
+                  SOURCE_BRANCH: $source,
+                  PROMOTION_BUILD_ID: $buildId,
+                  PROMOTION_BUILD_NUMBER: $buildNumber
+                }
+              }')
+            QUEUE_RESPONSE=$(call_api "$QUEUE_URL" "POST" "$QUEUE_BODY") || {
+              echo "⚠️ Failed to queue WorkItem follow-up pipeline"
+            }
+            if [ -n "$QUEUE_RESPONSE" ]; then
+              FOLLOWUP_RUN_ID=$(echo "$QUEUE_RESPONSE" | jq -r '.id // empty')
+              FOLLOWUP_RUN_URL=$(echo "$QUEUE_RESPONSE" | jq -r '._links.web.href // empty')
+              echo "✅ Follow-up pipeline queued: run ID ${FOLLOWUP_RUN_ID}"
+              [ -n "$FOLLOWUP_RUN_URL" ] && echo "   $FOLLOWUP_RUN_URL"
+            fi
+          fi
+		  
+		
 
 
 # Stage 2: Build
@@ -980,24 +1242,39 @@ stages:
                 exit 1
             fi
         }
+
+        record_repo_commit() {
+            local output_name="$1"
+            local repo_dir="$2"
+            local full_hash short_hash
+            full_hash=$(git -C "$repo_dir" rev-parse HEAD)
+            short_hash=$(echo "$full_hash" | cut -c1-8)
+            echo "📌 $output_name @ $short_hash ($full_hash)"
+            echo "##vso[task.setvariable variable=${output_name};isOutput=true]${full_hash}"
+        }
         
         PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True" ] && echo "dev" || echo "$CURRENT_BRANCH" )
         
         # Clone shared repos (common to both)
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/1_Configs"            "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
+        record_repo_commit CONFIGS_COMMIT "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/2_SharedLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
+        record_repo_commit SHARED_LIBRARY_COMMIT "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/4_ServerLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
+        record_repo_commit SERVER_LIBRARY_COMMIT "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/3_ClientLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary"
+        record_repo_commit CLIENT_LIBRARY_COMMIT "$(System.DefaultWorkingDirectory)/SadganShared/3_ClientLibrary"
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel"        "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
+        record_repo_commit PANEL_COMMIT "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core"  "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"
+        record_repo_commit CLIENT_CORE_COMMIT "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Client.Core"
         clone_or_pull  cicd          "$BASE_URL/SadganErp/_git/CICD"                    "$(System.DefaultWorkingDirectory)/CICD"
 
-        # Get frontend commit hash and export as output variable
-        cd "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel"
-        FRONTEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+        FRONTEND_COMMIT=$(git -C "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel" rev-parse HEAD)
+        FRONTEND_COMMIT_SHORT=$(echo "$FRONTEND_COMMIT" | cut -c1-8)
         echo "##vso[task.setvariable variable=FRONTEND_COMMIT;isOutput=true]$FRONTEND_COMMIT"
-        echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$FRONTEND_COMMIT"
-        echo "Frontend commit: $FRONTEND_COMMIT"
+        echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$FRONTEND_COMMIT_SHORT"
+        echo "Frontend commit: $FRONTEND_COMMIT_SHORT ($FRONTEND_COMMIT)"
         
       displayName: "Git Checkout"
       name: gitPull
@@ -1069,23 +1346,35 @@ stages:
                 exit 1
             fi
         }
+
+        record_repo_commit() {
+            local output_name="$1"
+            local repo_dir="$2"
+            local full_hash short_hash
+            full_hash=$(git -C "$repo_dir" rev-parse HEAD)
+            short_hash=$(echo "$full_hash" | cut -c1-8)
+            echo "📌 $output_name @ $short_hash ($full_hash)"
+            echo "##vso[task.setvariable variable=${output_name};isOutput=true]${full_hash}"
+        }
         
         PULL_BRANCH=$( [ "$(isBranchDevelop)" = "True" -o  "$(isBranchDevOps)" = "True" ] && echo "dev" || echo "$CURRENT_BRANCH" )
         
         # Clone shared repos (common to both)
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/1_Configs"            "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
+        record_repo_commit CONFIGS_COMMIT "$(System.DefaultWorkingDirectory)/SadganShared/1_Configs"
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/2_SharedLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
+        record_repo_commit SHARED_LIBRARY_COMMIT "$(System.DefaultWorkingDirectory)/SadganShared/2_SharedLibrary"
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganShared/_git/4_ServerLibrary"      "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
+        record_repo_commit SERVER_LIBRARY_COMMIT "$(System.DefaultWorkingDirectory)/SadganShared/4_ServerLibrary"
         clone_or_pull  $PULL_BRANCH  "$BASE_URL/SadganErp/_git/SadganErpApi"            "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
+        record_repo_commit API_COMMIT "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
         clone_or_pull  cicd          "$BASE_URL/SadganErp/_git/CICD"                    "$(System.DefaultWorkingDirectory)/CICD"
 
-
-        # Get backend commit hash and export as output variable
-        cd "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi"
-        BACKEND_COMMIT=$(git rev-parse HEAD | cut -c1-8)
+        BACKEND_COMMIT=$(git -C "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi" rev-parse HEAD)
+        BACKEND_COMMIT_SHORT=$(echo "$BACKEND_COMMIT" | cut -c1-8)
         echo "##vso[task.setvariable variable=BACKEND_COMMIT;isOutput=true]$BACKEND_COMMIT"
-        echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$BACKEND_COMMIT"
-        echo "Backend commit: $BACKEND_COMMIT"
+        echo "##vso[task.setvariable variable=COMMIT_HASH;isOutput=true]$BACKEND_COMMIT_SHORT"
+        echo "Backend commit: $BACKEND_COMMIT_SHORT ($BACKEND_COMMIT)"
         
       displayName: "Git Checkout"
       name: gitPull
@@ -1115,109 +1404,235 @@ stages:
       FRONTEND_COMMIT: $[ dependencies.Build_Frontend.outputs['gitPull.FRONTEND_COMMIT'] ]
       BACKEND_TAG: $[ dependencies.Build_Backend.outputs['tagSetting.DOCKER_TAG'] ]
       BACKEND_COMMIT: $[ dependencies.Build_Backend.outputs['gitPull.BACKEND_COMMIT'] ]
+      CONFIGS_COMMIT: $[ coalesce(dependencies.Build_Frontend.outputs['gitPull.CONFIGS_COMMIT'], dependencies.Build_Backend.outputs['gitPull.CONFIGS_COMMIT']) ]
+      SHARED_LIBRARY_COMMIT: $[ coalesce(dependencies.Build_Frontend.outputs['gitPull.SHARED_LIBRARY_COMMIT'], dependencies.Build_Backend.outputs['gitPull.SHARED_LIBRARY_COMMIT']) ]
+      SERVER_LIBRARY_COMMIT: $[ coalesce(dependencies.Build_Frontend.outputs['gitPull.SERVER_LIBRARY_COMMIT'], dependencies.Build_Backend.outputs['gitPull.SERVER_LIBRARY_COMMIT']) ]
+      CLIENT_LIBRARY_COMMIT: $[ dependencies.Build_Frontend.outputs['gitPull.CLIENT_LIBRARY_COMMIT'] ]
+      CLIENT_CORE_COMMIT: $[ dependencies.Build_Frontend.outputs['gitPull.CLIENT_CORE_COMMIT'] ]
+      PANEL_COMMIT: $[ coalesce(dependencies.Build_Frontend.outputs['gitPull.PANEL_COMMIT'], dependencies.Build_Frontend.outputs['gitPull.FRONTEND_COMMIT']) ]
+      API_COMMIT: $[ coalesce(dependencies.Build_Backend.outputs['gitPull.API_COMMIT'], dependencies.Build_Backend.outputs['gitPull.BACKEND_COMMIT']) ]
     steps:
     - checkout: none
     
-    - bash: |
-        set -e
-        
-        # Function to create tag on Git repository
-        create_tag() {
-          local repo_name="$1"
-          local repo_url="$2"
-          local tag="$3"
-          local expected_commit="$4"
-          local branch="$5"
-          
-          echo ""
-          echo "📦 Processing $repo_name..."
-          echo "  Tag: $tag"
-          echo "  Expected commit: $expected_commit"
-          
-          # Clean up any existing directory
-          rm -rf "$repo_name-repo"
-          
-          # Clone the repository
-          git clone --branch "$branch" "$repo_url" "$repo_name-repo"
-          cd "$repo_name-repo"
-          
-          # Verify and get the correct commit
-          CURRENT_COMMIT=$(git rev-parse HEAD | cut -c1-8)
-          if [ "$CURRENT_COMMIT" != "$expected_commit" ]; then
-            echo "⚠️  Current commit $CURRENT_COMMIT differs from expected $expected_commit"
-            echo "   Checking out specific commit..."
-            
-            # Try to checkout the commit directly
-            if git checkout "$expected_commit" 2>/dev/null; then
-              echo "✅ Successfully checked out commit $expected_commit"
-            else
-              echo "❌ ERROR: Commit $expected_commit not found in repository!"
-              echo "   Available commits near HEAD:"
-              git log --oneline -10
-              cd ..
-              rm -rf "$repo_name-repo"
-              return 1
-            fi
-          fi
-          
-          # Create tag if it doesn't exist
-          if git rev-parse "$tag" >/dev/null 2>&1; then
-            echo "⚠️  Tag $tag already exists locally"
-          else
-            git tag -a "$tag" -m "Release $tag [commit: $expected_commit]"
-            echo "✅ Tag created locally"
-          fi
-          
-          # Push tag
-          if git push origin "$tag" 2>/dev/null; then
-            echo "✅ Tag pushed to remote"
-          else
-            echo "⚠️  Tag may already exist on remote (push failed)"
-          fi
-          
-          cd ..
-          rm -rf "$repo_name-repo"
-        }
-        
-        # Configure Git
-        git config --global user.email "S_Bot_Azure@sadgan.int"
-        git config --global user.name "S_Bot_Azure"
-        git config --global http.extraHeader "Authorization: Basic $(echo -n "PAT:$(GIT_PAT)" | base64)"
-        git config --global http.sslVerify false
-        git config --global --add safe.directory '*'
-        
-        echo "========================================="
-        echo "Creating Git tags for successful builds"
-        echo "========================================="
-        
-        BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
-        
-        # Create frontend tag
-        create_tag \
-          "frontend" \
-          "$BASE_URL/SadganErp/_git/Sadgan.Erp.Panel" \
-          "$(FRONTEND_TAG)" \
-          "$(FRONTEND_COMMIT)" \
-          "${{ parameters.BRANCH }}"
-        
-        # Create backend tag
-        create_tag \
-          "backend" \
-          "$BASE_URL/SadganErp/_git/SadganErpApi" \
-          "$(BACKEND_TAG)" \
-          "$(BACKEND_COMMIT)" \
-          "${{ parameters.BRANCH }}"
-        
-        echo ""
-        echo "========================================="
-        echo "✅ Git tags created successfully"
-        echo "========================================="
-        echo "Frontend: $(FRONTEND_TAG) -> $(FRONTEND_COMMIT)"
-        echo "Backend:  $(BACKEND_TAG) -> $(BACKEND_COMMIT)"
-        
-      displayName: 'Create and Push Git Tags'
+    - task: Bash@3
+      displayName: 'Create release tags (Azure DevOps Git API)'
       env:
         GIT_PAT: $(GIT_PAT)
+        FRONTEND_TAG: $(FRONTEND_TAG)
+        BACKEND_TAG: $(BACKEND_TAG)
+        CONFIGS_COMMIT: $(CONFIGS_COMMIT)
+        SHARED_LIBRARY_COMMIT: $(SHARED_LIBRARY_COMMIT)
+        SERVER_LIBRARY_COMMIT: $(SERVER_LIBRARY_COMMIT)
+        CLIENT_LIBRARY_COMMIT: $(CLIENT_LIBRARY_COMMIT)
+        CLIENT_CORE_COMMIT: $(CLIENT_CORE_COMMIT)
+        PANEL_COMMIT: $(PANEL_COMMIT)
+        API_COMMIT: $(API_COMMIT)
+      inputs:
+        targetType: 'inline'
+        script: |
+          set -euo pipefail
+          ZERO_OID="0000000000000000000000000000000000000000"
+          GIT_BASE_URL="http://azure.sadgan.int/WebApp"
+
+          clean_repo_id() {
+            local id="$1"
+            local cleaned
+            cleaned=$(echo "$id" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+            if [ -z "$cleaned" ]; then
+              echo "$id" | tr -d '\n\r ' | cut -c1-36
+            else
+              echo "$cleaned"
+            fi
+          }
+
+          call_api() {
+            local url="$1"
+            local method="${2:-GET}"
+            local data="${3:-}"
+            local content_type="${4:-application/json}"
+            local temp_file http_code
+            temp_file=$(mktemp)
+            url=$(echo "$url" | tr -d '\n\r ')
+
+            if [ "$method" = "GET" ]; then
+              http_code=$(curl -s -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Cache-Control: no-cache" -H "Pragma: no-cache" \
+                -o "$temp_file" "$url")
+            else
+              http_code=$(curl -sS -w "%{http_code}" -u ":$GIT_PAT" \
+                -H "Content-Type: ${content_type}" \
+                -H "Cache-Control: no-cache" -H "Pragma: no-cache" \
+                -X "$method" -d "$data" \
+                -o "$temp_file" "$url")
+            fi
+
+            if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+              echo "❌ API $method failed (HTTP $http_code): $url" >&2
+              [ -s "$temp_file" ] && cat "$temp_file" >&2
+              rm -f "$temp_file"
+              return 1
+            fi
+
+            if [ -s "$temp_file" ] && ! jq empty "$temp_file" 2>/dev/null; then
+              echo "❌ Invalid JSON from $url" >&2
+              cat "$temp_file" >&2
+              rm -f "$temp_file"
+              return 1
+            fi
+
+            cat "$temp_file"
+            rm -f "$temp_file"
+            return 0
+          }
+
+          declare -A PROJECT_REPOS_JSON
+
+          load_project_repos() {
+            local project="$1"
+            if [ -n "${PROJECT_REPOS_JSON[$project]:-}" ]; then
+              return 0
+            fi
+            PROJECT_REPOS_JSON[$project]=$(call_api \
+              "${GIT_BASE_URL}/${project}/_apis/git/repositories?api-version=7.0&_=$(date +%s%N)")
+          }
+
+          resolve_repo_id() {
+            local project="$1"
+            local repo_name="$2"
+            local raw_id
+            load_project_repos "$project"
+            raw_id=$(echo "${PROJECT_REPOS_JSON[$project]}" | jq -r --arg name "$repo_name" \
+              '.value[] | select(.name==$name) | .id' | head -1)
+            clean_repo_id "$raw_id"
+          }
+
+          normalize_commit() {
+            echo "$1" | tr '[:upper:]' '[:lower:]' | tr -d '\n\r '
+          }
+
+          verify_commit_in_repo() {
+            local project_api_url="$1"
+            local repo_id="$2"
+            local commit_id="$3"
+            call_api "${project_api_url}/git/repositories/${repo_id}/commits/${commit_id}?api-version=7.0" > /dev/null
+          }
+
+          get_tag_peeled_commit() {
+            local project_api_url="$1"
+            local repo_id="$2"
+            local tag_name="$3"
+            local refs_json peeled object_id
+            refs_json=$(call_api \
+              "${project_api_url}/git/repositories/${repo_id}/refs?filter=tags/${tag_name}&peelTags=true&api-version=7.0") || return 1
+            peeled=$(echo "$refs_json" | jq -r '.value[0].peeledObjectId // empty')
+            object_id=$(echo "$refs_json" | jq -r '.value[0].objectId // empty')
+            if [ -n "$peeled" ] && [ "$peeled" != "null" ]; then
+              echo "$peeled"
+            else
+              echo "$object_id"
+            fi
+          }
+
+          get_tag_ref_object_id() {
+            local project_api_url="$1"
+            local repo_id="$2"
+            local tag_name="$3"
+            local refs_json
+            refs_json=$(call_api \
+              "${project_api_url}/git/repositories/${repo_id}/refs?filter=tags/${tag_name}&api-version=7.0") || return 1
+            echo "$refs_json" | jq -r '.value[0].objectId // empty'
+          }
+
+          create_or_verify_tag_ref() {
+            local project="$1"
+            local repo_name="$2"
+            local tag_name="$3"
+            local commit_id="$4"
+            local project_api_url repo_id tag_ref existing_peeled existing_ref_oid patch_body
+
+            tag_name=$(echo "$tag_name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            commit_id=$(normalize_commit "$commit_id")
+
+            if [ -z "$tag_name" ] || [ -z "$commit_id" ]; then
+              echo "❌ Missing tag or commit for $repo_name"
+              return 1
+            fi
+
+            echo ""
+            echo "📦 $repo_name ($project)"
+            echo "  Tag:    $tag_name"
+            echo "  Commit: $commit_id"
+
+            project_api_url="${GIT_BASE_URL}/${project}/_apis"
+            repo_id=$(resolve_repo_id "$project" "$repo_name")
+            if [ -z "$repo_id" ] || [ "$repo_id" = "null" ]; then
+              echo "  ❌ Repository not found: $repo_name in $project"
+              return 1
+            fi
+
+            verify_commit_in_repo "$project_api_url" "$repo_id" "$commit_id" || {
+              echo "  ❌ Commit $commit_id not found in $repo_name"
+              return 1
+            }
+
+            tag_ref="refs/tags/${tag_name}"
+            existing_peeled=$(get_tag_peeled_commit "$project_api_url" "$repo_id" "$tag_name" || echo "")
+
+            if [ -n "$existing_peeled" ] && [ "$existing_peeled" != "null" ]; then
+              existing_peeled=$(normalize_commit "$existing_peeled")
+              if [ "$existing_peeled" = "$commit_id" ]; then
+                echo "  ℹ️ Tag already points at build commit — skipping"
+                return 0
+              fi
+              echo "  ❌ Tag $tag_name already exists on different commit: $existing_peeled"
+              return 1
+            fi
+
+            patch_body=$(jq -n \
+              --arg name "$tag_ref" \
+              --arg newOid "$commit_id" \
+              --arg oldOid "$ZERO_OID" \
+              '[{ name: $name, oldObjectId: $oldOid, newObjectId: $newOid }]')
+
+            call_api \
+              "${project_api_url}/git/repositories/${repo_id}/refs?api-version=7.0" \
+              "POST" "$patch_body" > /dev/null
+
+            existing_peeled=$(get_tag_peeled_commit "$project_api_url" "$repo_id" "$tag_name" || echo "")
+            existing_peeled=$(normalize_commit "$existing_peeled")
+            if [ "$existing_peeled" = "$commit_id" ]; then
+              echo "  ✅ Created tag ref $tag_ref -> $commit_id"
+              return 0
+            fi
+
+            existing_ref_oid=$(get_tag_ref_object_id "$project_api_url" "$repo_id" "$tag_name" || echo "")
+            if [ -n "$existing_ref_oid" ] && [ "$existing_ref_oid" != "null" ]; then
+              echo "  ✅ Tag ref created (annotated/peeled commit: ${existing_peeled:-unknown}, ref object: $existing_ref_oid)"
+              return 0
+            fi
+
+            echo "  ❌ Tag create call succeeded but ref verification failed"
+            return 1
+          }
+
+          echo "========================================="
+          echo "Creating Git tags via Azure DevOps API"
+          echo "========================================="
+          echo "Frontend tag: $FRONTEND_TAG"
+          echo "Backend tag:  $BACKEND_TAG"
+
+          create_or_verify_tag_ref "SadganShared" "1_Configs"              "$FRONTEND_TAG" "$CONFIGS_COMMIT"
+          create_or_verify_tag_ref "SadganShared" "2_SharedLibrary"        "$FRONTEND_TAG" "$SHARED_LIBRARY_COMMIT"
+          create_or_verify_tag_ref "SadganShared" "3_ClientLibrary"        "$FRONTEND_TAG" "$CLIENT_LIBRARY_COMMIT"
+          create_or_verify_tag_ref "SadganShared" "4_ServerLibrary"        "$FRONTEND_TAG" "$SERVER_LIBRARY_COMMIT"
+          create_or_verify_tag_ref "SadganErp"    "Sadgan.Erp.Client.Core"  "$FRONTEND_TAG" "$CLIENT_CORE_COMMIT"
+          create_or_verify_tag_ref "SadganErp"    "Sadgan.Erp.Panel"        "$FRONTEND_TAG" "$PANEL_COMMIT"
+          create_or_verify_tag_ref "SadganErp"    "SadganErpApi"            "$BACKEND_TAG"  "$API_COMMIT"
+
+          echo ""
+          echo "========================================="
+          echo "✅ All release tag refs created/verified"
+          echo "========================================="
 
 
   - job: 
@@ -1269,6 +1684,7 @@ stages:
   dependsOn:
     - INIT
     - PR_Creation
+    - Hotfix_WI_Collection
     - Build
   # condition: and(
   #     in(stageDependencies.PR_Creation.result, 'Succeeded', 'SucceededWithIssues'),
@@ -1279,7 +1695,7 @@ stages:
   #     )
   #   )
   variables:
-    WORK_ITEM_IDS: $[ coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.WORK_ITEM_IDS'], stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.DEDUPED_WORK_ITEM_IDS'], '') ]
+    WORK_ITEM_IDS: $[ coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.WORK_ITEM_IDS'], stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.DEDUPED_WORK_ITEM_IDS'], stageDependencies.Hotfix_WI_Collection.CollectHotfixWorkItems.outputs['hotfix_wi.WORK_ITEM_IDS'], stageDependencies.Hotfix_WI_Collection.CollectHotfixWorkItems.outputs['hotfix_wi.DEDUPED_WORK_ITEM_IDS'], '') ]
     BACKEND_TAG: $[ coalesce(stageDependencies.Build.Build_Backend.outputs['tagSetting.DOCKER_TAG'], stageDependencies.Build.Build_Frontend.outputs['gitPull.FRONTEND_COMMIT'], '') ]
     SOURCE_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.SOURCE_BRANCH'] ]
     TARGET_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.TARGET_BRANCH'] ]
@@ -1362,7 +1778,7 @@ stages:
           echo ""
 
           if [ -z "$WORK_ITEM_IDS" ]; then
-            echo "No WORK_ITEM_IDS from PR_Creation stage — skipping."
+            echo "No WORK_ITEM_IDS from PR_Creation or Hotfix_WI_Collection — skipping."
             exit 0
           fi
 
@@ -1443,7 +1859,7 @@ stages:
         MM_BOT_TOKEN: $(MM_BOT_TOKEN)
         MATTERMOST_BOT_TOKEN: $(MATTERMOST_BOT_TOKEN)
         MM_WI_TAG_JWT: $(JWT_TOKEN_WFN8N___WI-Tag-Notif)
-        MM_CHANNEL: 7rj46o9qwjfpxfgwzw4fjpjaph
+        MM_CHANNEL: 5n9f4s6jrtn63kmmajz5dzij7o
         MM_USERNAME: 'p.akhlaghpour'
       inputs:
         targetType: 'inline'
@@ -1837,807 +2253,4 @@ stages:
             fi
             echo "Continuing pipeline..."
           fi
-
-
-
-# # Stage 3: Tag work items with backend release version
-# - stage: WorkItem_Tagging
-#   displayName: 'Work Item Tagging'
-#   dependsOn:
-#     - INIT
-#     - PR_Creation
-#     - Build
-#   # condition: and(
-#   #     in(stageDependencies.PR_Creation.result, 'Succeeded', 'SucceededWithIssues'),
-#   #     in(stageDependencies.Build.result, 'Succeeded', 'SucceededWithIssues'),
-#   #     or(
-#   #       ne(coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.WORK_ITEM_IDS'], ''), ''),
-#   #       ne(coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.DEDUPED_WORK_ITEM_IDS'], ''), '')
-#   #     )
-#   #   )
-#   variables:
-#     WORK_ITEM_IDS: $[ coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.WORK_ITEM_IDS'], stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.DEDUPED_WORK_ITEM_IDS'], '') ]
-#     BACKEND_TAG: $[ coalesce(stageDependencies.Build.Build_Backend.outputs['tagSetting.DOCKER_TAG'], stageDependencies.Build.Build_Frontend.outputs['gitPull.FRONTEND_COMMIT'], '') ]
-#     SOURCE_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.SOURCE_BRANCH'] ]
-#     TARGET_BRANCH: $[ stageDependencies.INIT.InitJob.outputs['init.TARGET_BRANCH'] ]
-#   jobs:
-#   - job: TagWorkItems
-#     displayName: 'Print & Tag Work Items'
-#     pool: 'WEB-1'
-#     steps:
-#     - checkout: none
-
-#     - task: Bash@3
-#       name: tag_work_items
-#       displayName: 'Print work item IDs and apply BACKEND_TAG'
-#       env:
-#         GIT_PAT: $(GIT_PAT)
-#         WORK_ITEM_IDS: $(WORK_ITEM_IDS)
-#         BACKEND_TAG: $(BACKEND_TAG)
-#         SOURCE_BRANCH: $(SOURCE_BRANCH)
-#         TARGET_BRANCH: $(TARGET_BRANCH)
-#         ORG_URL: $(orgUrl)
-#         PROJECT: $(project)
-#       inputs:
-#         targetType: 'inline'
-#         script: |
-#           set -euo pipefail
-
-#           PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
-#           AUTH_HEADER="Authorization: Basic $(echo -n ":${GIT_PAT}" | base64 | tr -d '\n')"
-
-#           call_api() {
-#             local url="$1"
-#             local method="${2:-GET}"
-#             local body="${3:-}"
-#             local content_type="${4:-application/json}"
-#             local tmp http_code
-#             tmp=$(mktemp)
-
-#             if [ -n "$body" ]; then
-#               http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
-#                 -H "$AUTH_HEADER" -H "Content-Type: ${content_type}" \
-#                 -d "$body" "$url")
-#             else
-#               http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
-#                 -H "$AUTH_HEADER" "$url")
-#             fi
-
-#             if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-#               cat "$tmp"
-#               rm -f "$tmp"
-#               return 0
-#             fi
-
-#             echo "API $method $url failed (HTTP $http_code):" >&2
-#             cat "$tmp" >&2
-#             rm -f "$tmp"
-#             return 1
-#           }
-
-#           patch_work_item() {
-#             local wi_id="$1"
-#             local patch_body="$2"
-#             call_api \
-#               "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0" \
-#               "PATCH" "$patch_body" "application/json-patch+json"
-#           }
-
-#           tag_already_present() {
-#             local existing_tags="$1"
-#             local new_tag="$2"
-#             echo "$existing_tags" | tr ';' '\n' \
-#               | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
-#               | grep -Fxqi "$new_tag"
-#           }
-
-#           echo "========================================="
-#           echo "WORK ITEM RELEASE TAGGING"
-#           echo "========================================="
-#           echo "Promotion: ${SOURCE_BRANCH:-?} -> ${TARGET_BRANCH:-?}"
-#           echo "BACKEND_TAG: ${BACKEND_TAG:-<not set>}"
-#           echo ""
-
-#           if [ -z "$WORK_ITEM_IDS" ]; then
-#             echo "No WORK_ITEM_IDS from PR_Creation stage — skipping."
-#             exit 0
-#           fi
-
-#           if [ -z "$BACKEND_TAG" ]; then
-#             echo "BACKEND_TAG is empty — cannot tag work items."
-#             exit 0
-#           fi
-
-#           mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' \
-#             | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
-
-#           echo "Work item IDs (${#WI_IDS[@]}):"
-#           printf '  - %s\n' "${WI_IDS[@]}"
-#           echo ""
-#           echo "##vso[task.setvariable variable=WORK_ITEM_IDS;isOutput=true]$(IFS=,; echo "${WI_IDS[*]}")"
-#           echo "##vso[task.setvariable variable=BACKEND_TAG;isOutput=true]${BACKEND_TAG}"
-#           echo ""
-
-#           for wi_id in "${WI_IDS[@]}"; do
-#             echo "-----------------------------------------"
-#             echo "Work item #$wi_id"
-#             echo "-----------------------------------------"
-
-#             wi_json=$(call_api "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0") || {
-#               echo "  ⚠️ Could not fetch work item #$wi_id — skipping"
-#               continue
-#             }
-
-#             wi_title=$(echo "$wi_json" | jq -r '.fields["System.Title"] // ""')
-#             wi_state=$(echo "$wi_json" | jq -r '.fields["System.State"] // ""')
-#             wi_tags=$(echo "$wi_json" | jq -r '.fields["System.Tags"] // ""')
-
-#             echo "  State:  $wi_state"
-#             echo "  Title:  $wi_title"
-#             [ -n "$wi_tags" ] && echo "  Tags:   $wi_tags"
-
-#             if tag_already_present "$wi_tags" "$BACKEND_TAG"; then
-#               echo "  ℹ️ Tag already present: $BACKEND_TAG"
-#               continue
-#             fi
-
-#             if [ -z "$wi_tags" ]; then
-#               patch_body=$(jq -n --arg tag "$BACKEND_TAG" \
-#                 '[{ "op": "add", "path": "/fields/System.Tags", "value": $tag }]')
-#             else
-#               patch_body=$(jq -n --arg existing "$wi_tags" --arg tag "$BACKEND_TAG" \
-#                 '[{ "op": "replace", "path": "/fields/System.Tags", "value": ($existing + "; " + $tag) }]')
-#             fi
-
-#             if patch_work_item "$wi_id" "$patch_body" > /dev/null; then
-#               echo "  ✅ Tagged with BACKEND_TAG: $BACKEND_TAG"
-#             else
-#               echo "  ⚠️ Failed to tag work item (check PAT: Work Items Read & Write)"
-#             fi
-#             echo ""
-#           done
-
-#           echo "========================================="
-#           echo "Tagged ${#WI_IDS[@]} work item(s) with $BACKEND_TAG"
-#           echo "========================================="
-
-#     - task: Bash@3
-#       name: notify_mattermost
-#       displayName: 'Notify Mattermost — work item summary'
-#       condition: and(succeeded(), eq('${{ parameters.NOTIFY_MATTERMOST }}', 'YES'))
-#       env:
-#         GIT_PAT: $(GIT_PAT)
-#         WORK_ITEM_IDS: $(tag_work_items.WORK_ITEM_IDS)
-#         BACKEND_TAG: $(tag_work_items.BACKEND_TAG)
-#         SOURCE_BRANCH: $(SOURCE_BRANCH)
-#         TARGET_BRANCH: $(TARGET_BRANCH)
-#         BUILD_ID: $(Build.BuildId)
-#         BUILD_NUMBER: $(Build.BuildNumber)
-#         ORG_URL: $(orgUrl)
-#         PROJECT: $(project)
-#         MM_WEBHOOK_URL: https://chat.sadgan.int/api/v4/posts
-#         MM_JWT_TOKEN: ''
-#         MM_BOT_TOKEN: $(MM_BOT_TOKEN)
-#         MATTERMOST_BOT_TOKEN: $(MATTERMOST_BOT_TOKEN)
-#         MM_WI_TAG_JWT: $(JWT_TOKEN_WFN8N___WI-Tag-Notif)
-#         MM_CHANNEL: 7rj46o9qwjfpxfgwzw4fjpjaph
-#         MM_USERNAME: 'p.akhlaghpour'
-#       inputs:
-#         targetType: 'inline'
-#         script: |
-#           set -euo pipefail
-
-#           if [ -z "${MM_WEBHOOK_URL:-}" ]; then
-#             echo "MATTERMOST_WI_NOTIFY_WEBHOOK is not set — skipping Mattermost notification."
-#             exit 0
-#           fi
-
-#           if [ -z "${WORK_ITEM_IDS:-}" ]; then
-#             echo "No WORK_ITEM_IDS to notify — skipping."
-#             exit 0
-#           fi
-
-#           PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
-#           BUILD_URL="${ORG_URL}/${PROJECT}/_build/results?buildId=${BUILD_ID}"
-#           NOTIFY_DT="$(TZ='Asia/Tehran' date '+%Y-%m-%d %a %H:%M:%S')"
-#           MM_USER="${MM_USERNAME#@}"
-
-#           wi_state_badge() {
-#             local state="$1"
-#             if [ -n "$state" ]; then
-#               printf '%s%s%s' '`' "$state" '`'
-#             fi
-#           }
-
-#           rtl_text() {
-#             # RLM only — full RLE wrapping breaks markdown tables and links
-#             printf '%s%s' $'\u200F' "$1"
-#           }
-
-#           escape_md_cell() {
-#             printf '%s' "$1" | sed 's/|/\\|/g' | tr '\n\r' '  '
-#           }
-
-#           wi_type_icon() {
-#             local t
-#             t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-#             case "$t" in
-#               *bug*)                   printf '%s' ':bug:' ;;
-#               *task*)                  printf '%s' ':clipboard:' ;;
-#               *product*backlog*|*pbi*) printf '%s' ':bookmark:' ;;
-#               *user*stor*|*story*)     printf '%s' ':notebook:' ;;
-#               *feature*)               printf '%s' ':star:' ;;
-#               *epic*)                  printf '%s' ':crown:' ;;
-#               *impediment*)            printf '%s' ':construction:' ;;
-#               *issue*)                 printf '%s' ':exclamation:' ;;
-#               *test*)                  printf '%s' ':white_check_mark:' ;;
-#               *)                       printf '%s' ':label:' ;;
-#             esac
-#           }
-
-#           wi_type_short() {
-#             local t
-#             t=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-#             case "$t" in
-#               *bug*)                   printf '%s' 'Bug' ;;
-#               *task*)                  printf '%s' 'Task' ;;
-#               *product*backlog*|*pbi*) printf '%s' 'PBI' ;;
-#               *user*stor*|*story*)     printf '%s' 'Story' ;;
-#               *feature*)               printf '%s' 'Feature' ;;
-#               *epic*)                  printf '%s' 'Epic' ;;
-#               *impediment*)            printf '%s' 'Imped.' ;;
-#               *issue*)                 printf '%s' 'Issue' ;;
-#               *test*)                  printf '%s' 'Test' ;;
-#               *)                       printf '%s' "$1" ;;
-#             esac
-#           }
-
-#           format_work_item_row() {
-#             local wi_id="$1"
-#             local wi_type="$2"
-#             local wi_title="$3"
-#             local wi_url="$4"
-#             local wi_state="${5:-}"
-#             local icon type_cell title_cell state_label=""
-#             icon=$(wi_type_icon "$wi_type")
-#             type_cell=$(printf '%s %s' "$icon" "$(wi_type_short "$wi_type")")
-#             title_cell=$(escape_md_cell "$wi_title")
-#             if [ -n "$title_cell" ]; then
-#               title_cell=$(rtl_text "$title_cell")
-#               if [ -n "$wi_url" ]; then
-#                 title_cell=$(printf '[%s](%s)' "$title_cell" "$wi_url")
-#               fi
-#             else
-#               title_cell=$(printf '#%s' "$wi_id")
-#             fi
-#             if [ -n "$wi_state" ]; then
-#               state_label=$(wi_state_badge "$wi_state")
-#             fi
-#             printf '| %s | %s | %s | #%s |' "$type_cell" "$title_cell" "$state_label" "$wi_id"
-#           }
-
-#           fetch_work_item() {
-#             local wi_id="$1"
-#             curl -sS -u ":$GIT_PAT" \
-#               "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0" 2>/dev/null || echo '{}'
-#           }
-
-#           wi_table=$(printf '%s\n%s' '| | Title | State | ID |' '|:--:|:--|:-:|:-:|')
-#           wi_json_array='[]'
-
-#           if [ -n "${WORK_ITEMS_NOTIFY_B64:-}" ]; then
-#             WI_NOTIFY_JSON=$(echo "$WORK_ITEMS_NOTIFY_B64" | base64 -d 2>/dev/null || echo '[]')
-#             echo "Using work item details from tag step ($(echo "$WI_NOTIFY_JSON" | jq 'length') item(s))"
-#           else
-#             WI_NOTIFY_JSON='[]'
-#           fi
-
-#           if [ "$(echo "$WI_NOTIFY_JSON" | jq 'length')" -eq 0 ]; then
-#             echo "No cached work item details — fetching from API..."
-#             mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' \
-#               | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
-#             for wi_id in "${WI_IDS[@]}"; do
-#               wi_resp=$(fetch_work_item "$wi_id")
-#               WI_NOTIFY_JSON=$(echo "$WI_NOTIFY_JSON" | jq \
-#                 --arg id "$wi_id" \
-#                 --arg type "$(echo "$wi_resp" | jq -r '.fields["System.WorkItemType"] // "Work Item"')" \
-#                 --arg title "$(echo "$wi_resp" | jq -r '.fields["System.Title"] // ""')" \
-#                 --arg url "$(echo "$wi_resp" | jq -r '._links.html.href // empty')" \
-#                 --arg state "$(echo "$wi_resp" | jq -r '.fields["System.State"] // ""')" \
-#                 '. + [{ id: $id, type: $type, title: $title, url: $url, state: $state }]')
-#             done
-#           fi
-
-#           while IFS= read -r wi_row; do
-#             wi_id=$(echo "$wi_row" | jq -r '.id')
-#             wi_type=$(echo "$wi_row" | jq -r '.type')
-#             wi_title=$(echo "$wi_row" | jq -r '.title')
-#             wi_state=$(echo "$wi_row" | jq -r '.state')
-#             wi_url=$(echo "$wi_row" | jq -r '.url')
-#             if [ -z "$wi_url" ] || [ "$wi_url" = "null" ]; then
-#               wi_url="${ORG_URL}/${PROJECT}/_workitems/edit/${wi_id}"
-#             fi
-#             wi_icon=$(wi_type_icon "$wi_type")
-#             wi_line=$(format_work_item_row "$wi_id" "$wi_type" "$wi_title" "$wi_url" "$wi_state")
-#             echo "  Notify row: $wi_line"
-#             wi_table="${wi_table}"$'\n'"${wi_line}"
-#             wi_json_array=$(echo "$wi_json_array" | jq \
-#               --arg id "$wi_id" --arg type "$wi_type" --arg state "$wi_state" \
-#               --arg title "$wi_title" --arg url "$wi_url" --arg icon "$wi_icon" \
-#               --arg line "$wi_line" \
-#               '. + [{ id: $id, type: $type, state: $state, title: $title, url: $url, icon: $icon, line: $line }]')
-#           done < <(echo "$WI_NOTIFY_JSON" | jq -c '.[]')
-
-#           # Do not wrap the table in RLE — that reverses columns. RTL is applied to titles only.
-#           MM_TEXT=$(printf '%b' "**Branch promotion:** \`${SOURCE_BRANCH}\` → \`${TARGET_BRANCH}\`  ·  **Tag:** \`${BACKEND_TAG}\`  ·  [Build #${BUILD_NUMBER}](${BUILD_URL})\n_${NOTIFY_DT}_\n\n${wi_table}")
-
-#           if [ -n "$MM_USER" ] && echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
-#             MM_TEXT="${MM_TEXT}"$'\n\n'"@${MM_USER}"
-#           fi
-
-#           # Route target for incoming webhooks (channel name or @username)
-#           MM_TARGET=""
-#           if [ -n "$MM_USER" ] && ! echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
-#             MM_TARGET="@${MM_USER}"
-#           elif [ -n "$MM_CHANNEL" ]; then
-#             MM_TARGET="$MM_CHANNEL"
-#           fi
-
-#           MM_API_TOKEN="${MM_BOT_TOKEN:-${MATTERMOST_BOT_TOKEN:-${MM_WI_TAG_JWT:-${MM_JWT_TOKEN:-}}}}"
-#           MM_API_TOKEN="$(printf '%s' "$MM_API_TOKEN" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^[Bb]earer[[:space:]]*//')"
-
-#           send_notification() {
-#             local payload="$1"
-#             shift
-#             # --location-trusted keeps Authorization on redirects (plain -L drops it → 401)
-#             curl -k -sS -w "\n%{http_code}" --location --location-trusted "$MM_WEBHOOK_URL" \
-#               --header 'Content-Type: application/json' \
-#               "$@" \
-#               --data "$payload" 2>&1 || true
-#           }
-
-#           mm_api_base() {
-#             echo "$MM_WEBHOOK_URL" | sed -E 's|/api/v4/.*||'
-#           }
-
-#           resolve_dm_channel_id() {
-#             local base user_id me_id dm_json
-#             base="$(mm_api_base)"
-#             user_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
-#               "${base}/api/v4/users/username/${MM_USER}" 2>/dev/null || echo '{}')
-#             user_id=$(echo "$user_json" | jq -r '.id // empty')
-#             if [ -z "$user_id" ]; then
-#               echo "  ⚠️ Mattermost user not found: ${MM_USER}" >&2
-#               return 1
-#             fi
-#             me_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
-#               "${base}/api/v4/users/me" 2>/dev/null || echo '{}')
-#             me_id=$(echo "$me_json" | jq -r '.id // empty')
-#             if [ -z "$me_id" ]; then
-#               echo "  ⚠️ Could not resolve Mattermost bot user (/users/me)" >&2
-#               return 1
-#             fi
-#             dm_json=$(curl -k -sS -X POST \
-#               -H "Authorization: Bearer ${MM_API_TOKEN}" \
-#               -H "Content-Type: application/json" \
-#               -d "[\"${me_id}\", \"${user_id}\"]" \
-#               "${base}/api/v4/channels/direct" 2>/dev/null || echo '{}')
-#             echo "$dm_json" | jq -r '.id // empty'
-#           }
-
-#           echo "Sending Mattermost notification (${#WI_IDS[@]} work item(s))..."
-
-#           if echo "$MM_WEBHOOK_URL" | grep -qiE '/hooks/'; then
-#             # Mattermost incoming webhook — token is in URL; do NOT send Bearer auth
-#             echo "Mode: Mattermost incoming webhook (/hooks/)" >&2
-#             JSON_PAYLOAD=$(jq -n \
-#               --arg text "$MM_TEXT" \
-#               --arg channel "$MM_TARGET" \
-#               --arg username "Azure CI" \
-#               '{
-#                 text: $text,
-#                 username: $username,
-#                 icon_emoji: ":label:"
-#               } + (if ($channel | length) > 0 then { channel: $channel } else {} end)')
-#             response=$(send_notification "$JSON_PAYLOAD")
-#           elif echo "$MM_WEBHOOK_URL" | grep -qiE 'n8n\.|/webhook'; then
-#             # n8n webhook — full payload + optional JWT (same pattern as QA_Gate / PM_GATE)
-#             echo "Mode: n8n webhook" >&2
-#             JSON_PAYLOAD=$(jq -n \
-#               --arg erp "DevOps" \
-#               --arg channel "$MM_CHANNEL" \
-#               --arg username "$MM_USER" \
-#               --arg text "$MM_TEXT" \
-#               --arg source "$SOURCE_BRANCH" \
-#               --arg target "$TARGET_BRANCH" \
-#               --arg release_tag "$BACKEND_TAG" \
-#               --arg work_item_ids "$WORK_ITEM_IDS" \
-#               --arg build_id "$BUILD_ID" \
-#               --arg build_number "$BUILD_NUMBER" \
-#               --arg build_url "$BUILD_URL" \
-#               --arg notify_dt "$NOTIFY_DT" \
-#               --argjson work_items "$wi_json_array" \
-#               '{
-#                 ERP: $erp,
-#                 channel: $channel,
-#                 username: $username,
-#                 text: $text,
-#                 promotion: ($source + " -> " + $target),
-#                 source_branch: $source,
-#                 target_branch: $target,
-#                 release_tag: $release_tag,
-#                 work_item_ids: $work_item_ids,
-#                 work_items: $work_items,
-#                 build_id: $build_id,
-#                 build_number: $build_number,
-#                 build_url: $build_url,
-#                 notify_dt: $notify_dt
-#               }')
-#             if [ -n "${MM_JWT_TOKEN:-}" ]; then
-#               response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_JWT_TOKEN}")
-#             else
-#               response=$(send_notification "$JSON_PAYLOAD")
-#             fi
-#           elif echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
-#             # Mattermost REST API POST /api/v4/posts — requires channel_id + Bearer token
-#             echo "Mode: Mattermost REST API (/api/v4/posts)" >&2
-#             if [ -z "${MM_API_TOKEN:-}" ]; then
-#               echo "⚠️ Mattermost API token not set — use MATTERMOST_BOT_TOKEN or JWT_TOKEN_WFN8N___WI-Tag-Notif in variable group."
-#               exit 0
-#             fi
-
-#             CHANNEL_ID=""
-#             if [ -n "$MM_CHANNEL" ]; then
-#               CHANNEL_ID="$MM_CHANNEL"
-#               echo "  Target: channel_id=${CHANNEL_ID}" >&2
-#             elif [ -n "$MM_USER" ]; then
-#               echo "  Target: DM @${MM_USER}" >&2
-#               CHANNEL_ID=$(resolve_dm_channel_id) || CHANNEL_ID=""
-#             fi
-
-#             if [ -z "$CHANNEL_ID" ]; then
-#               echo "⚠️ No Mattermost channel_id — set MM_CHANNEL to a channel ID, or MM_USERNAME for DM."
-#               exit 0
-#             fi
-
-#             JSON_PAYLOAD=$(jq -n \
-#               --arg channel_id "$CHANNEL_ID" \
-#               --arg message "$MM_TEXT" \
-#               '{ channel_id: $channel_id, message: $message }')
-#             response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_API_TOKEN}")
-#           else
-#             echo "⚠️ Unknown webhook URL pattern — using plain JSON POST without auth." >&2
-#             JSON_PAYLOAD=$(jq -n --arg text "$MM_TEXT" '{ text: $text }')
-#             response=$(send_notification "$JSON_PAYLOAD")
-#           fi
-
-#           http_code=$(echo "$response" | tail -n1)
-#           response_body=$(echo "$response" | sed '$d')
-
-#           if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "204" ]; then
-#             echo "✅ Mattermost notification sent (HTTP $http_code)"
-#           else
-#             echo "⚠️ Mattermost notification failed (HTTP $http_code)"
-#             echo "$response_body"
-#             if [ "$http_code" = "401" ]; then
-#               echo "  Token rejected (expired session or wrong token)."
-#               echo "  Use a Mattermost bot Access Token in MM_BOT_TOKEN — not Token ID, not a user login session."
-#             fi
-#             echo "Continuing pipeline..."
-#           fi
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # - task: Bash@3
-    #   name: notify_mattermost
-    #   displayName: 'Notify Mattermost — work item summary'
-    #   condition: and(succeeded(), eq('${{ parameters.NOTIFY_MATTERMOST }}', 'YES'))
-    #   env:
-    #     GIT_PAT: $(GIT_PAT)
-    #     WORK_ITEM_IDS: $(tag_work_items.WORK_ITEM_IDS)
-    #     BACKEND_TAG: $(tag_work_items.BACKEND_TAG)
-    #     SOURCE_BRANCH: $(SOURCE_BRANCH)
-    #     TARGET_BRANCH: $(TARGET_BRANCH)
-    #     BUILD_ID: $(Build.BuildId)
-    #     BUILD_NUMBER: $(Build.BuildNumber)
-    #     ORG_URL: $(orgUrl)
-    #     PROJECT: $(project)
-    #     MM_WEBHOOK_URL: https://chat.sadgan.int/api/v4/posts
-    #     MM_JWT_TOKEN: ''
-    #     MM_BOT_TOKEN: $(MM_BOT_TOKEN)
-    #     MM_CHANNEL: 7rj46o9qwjfpxfgwzw4fjpjaph
-    #     MM_USERNAME: 'p.akhlaghpour'
-    #   inputs:
-    #     targetType: 'inline'
-    #     script: |
-    #       set -euo pipefail
-
-    #       if [ -z "${MM_WEBHOOK_URL:-}" ]; then
-    #         echo "MATTERMOST_WI_NOTIFY_WEBHOOK is not set — skipping Mattermost notification."
-    #         exit 0
-    #       fi
-
-    #       if [ -z "${WORK_ITEM_IDS:-}" ]; then
-    #         echo "No WORK_ITEM_IDS to notify — skipping."
-    #         exit 0
-    #       fi
-
-    #       PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
-    #       BUILD_URL="${ORG_URL}/${PROJECT}/_build/results?buildId=${BUILD_ID}"
-    #       NOTIFY_DT="$(TZ='Asia/Tehran' date '+%Y-%m-%d %a %H:%M:%S')"
-    #       MM_USER="${MM_USERNAME#@}"
-
-    #       wi_type_icon() {
-    #         case "$1" in
-    #           Bug) echo "🐞" ;;
-    #           Task) echo "🛠️" ;;
-    #           "User Story") echo "📖" ;;
-    #           Feature) echo "✨" ;;
-    #           Epic) echo "🏔️" ;;
-    #           *) echo "📋" ;;
-    #         esac
-    #       }
-
-    #       wi_state_badge() {
-    #         local state="$1"
-    #         local normalized dot=""
-    #         normalized=$(echo "$state" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    #         case "$normalized" in
-    #           doing|developing) dot="🔵" ;;                       # active
-    #           test|"ui review"|"po review"|suspended) dot="🟡" ;; # review / waiting
-    #           release|done) dot="🟢" ;;                                # shipping
-    #           *) dot="⚪" ;;                                      # to do, done, removed, unknown
-    #         esac
-    #         if [ -n "$state" ]; then
-    #           printf '%s `%s`' "$dot" "$state"
-    #         fi
-    #       }
-
-    #       format_work_item_line() {
-    #         local wi_id="$1"
-    #         local wi_type="$2"
-    #         local wi_title="$3"
-    #         local wi_url="$4"
-    #         local wi_state="${5:-}"
-    #         local icon state_label=""
-    #         icon=$(wi_type_icon "$wi_type")
-    #         if [ -n "$wi_state" ]; then
-    #           state_label=$(wi_state_badge "$wi_state")
-    #         fi
-    #         if [ -n "$wi_title" ] && [ -n "$wi_url" ]; then
-    #           if [ -n "$state_label" ]; then
-    #             printf '%s / %s / %s / [%s](%s)' "$icon" "$wi_id" "$state_label" "$wi_title" "$wi_url"
-    #           else
-    #             printf '%s / %s / [%s](%s)' "$icon" "$wi_id" "$wi_title" "$wi_url"
-    #           fi
-    #         elif [ -n "$wi_title" ]; then
-    #           if [ -n "$state_label" ]; then
-    #             printf '%s / %s / %s / %s' "$icon" "$wi_id" "$state_label" "$wi_title"
-    #           else
-    #             printf '%s / %s / %s' "$icon" "$wi_id" "$wi_title"
-    #           fi
-    #         elif [ -n "$state_label" ]; then
-    #           printf '%s / %s / %s' "$icon" "$wi_id" "$state_label"
-    #         else
-    #           printf '%s / %s' "$icon" "$wi_id"
-    #         fi
-    #       }
-
-    #       fetch_work_item() {
-    #         local wi_id="$1"
-    #         curl -sS -u ":$GIT_PAT" \
-    #           "${PROJECT_API_URL}/wit/workitems/${wi_id}?api-version=7.0" 2>/dev/null || echo '{}'
-    #       }
-
-    #       wi_lines=""
-    #       wi_json_array='[]'
-
-    #       if [ -n "${WORK_ITEMS_NOTIFY_B64:-}" ]; then
-    #         WI_NOTIFY_JSON=$(echo "$WORK_ITEMS_NOTIFY_B64" | base64 -d 2>/dev/null || echo '[]')
-    #         echo "Using work item details from tag step ($(echo "$WI_NOTIFY_JSON" | jq 'length') item(s))"
-    #       else
-    #         WI_NOTIFY_JSON='[]'
-    #       fi
-
-    #       if [ "$(echo "$WI_NOTIFY_JSON" | jq 'length')" -eq 0 ]; then
-    #         echo "No cached work item details — fetching from API..."
-    #         mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' \
-    #           | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
-    #         for wi_id in "${WI_IDS[@]}"; do
-    #           wi_resp=$(fetch_work_item "$wi_id")
-    #           WI_NOTIFY_JSON=$(echo "$WI_NOTIFY_JSON" | jq \
-    #             --arg id "$wi_id" \
-    #             --arg type "$(echo "$wi_resp" | jq -r '.fields["System.WorkItemType"] // "Work Item"')" \
-    #             --arg title "$(echo "$wi_resp" | jq -r '.fields["System.Title"] // ""')" \
-    #             --arg url "$(echo "$wi_resp" | jq -r '._links.html.href // empty')" \
-    #             --arg state "$(echo "$wi_resp" | jq -r '.fields["System.State"] // ""')" \
-    #             '. + [{ id: $id, type: $type, title: $title, url: $url, state: $state }]')
-    #         done
-    #       fi
-
-    #       while IFS= read -r wi_row; do
-    #         wi_id=$(echo "$wi_row" | jq -r '.id')
-    #         wi_type=$(echo "$wi_row" | jq -r '.type')
-    #         wi_title=$(echo "$wi_row" | jq -r '.title')
-    #         wi_state=$(echo "$wi_row" | jq -r '.state')
-    #         wi_url=$(echo "$wi_row" | jq -r '.url')
-    #         if [ -z "$wi_url" ] || [ "$wi_url" = "null" ]; then
-    #           wi_url="${ORG_URL}/${PROJECT}/_workitems/edit/${wi_id}"
-    #         fi
-    #         wi_icon=$(wi_type_icon "$wi_type")
-    #         wi_line=$(format_work_item_line "$wi_id" "$wi_type" "$wi_title" "$wi_url" "$wi_state")
-    #         echo "  Notify line: $wi_line"
-    #         if [ -n "$wi_lines" ]; then
-    #           wi_lines="${wi_lines}"$'\n'"${wi_line}"
-    #         else
-    #           wi_lines="$wi_line"
-    #         fi
-    #         wi_json_array=$(echo "$wi_json_array" | jq \
-    #           --arg id "$wi_id" --arg type "$wi_type" --arg state "$wi_state" \
-    #           --arg title "$wi_title" --arg url "$wi_url" --arg icon "$wi_icon" \
-    #           --arg line "$wi_line" \
-    #           '. + [{ id: $id, type: $type, state: $state, title: $title, url: $url, icon: $icon, line: $line }]')
-    #       done < <(echo "$WI_NOTIFY_JSON" | jq -c '.[]')
-
-    #       MM_TEXT=$(printf '%b' "**Branch promotion:** \`${SOURCE_BRANCH}\` → \`${TARGET_BRANCH}\`  |  **Tag:** \`${BACKEND_TAG}\`  |  [Build #${BUILD_NUMBER}](${BUILD_URL})\n_${NOTIFY_DT}_\n\n${wi_lines}")
-
-    #       if [ -n "$MM_USER" ] && echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
-    #         MM_TEXT="${MM_TEXT}"$'\n\n'"@${MM_USER}"
-    #       fi
-
-    #       # Route target for incoming webhooks (channel name or @username)
-    #       MM_TARGET=""
-    #       if [ -n "$MM_USER" ] && ! echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
-    #         MM_TARGET="@${MM_USER}"
-    #       elif [ -n "$MM_CHANNEL" ]; then
-    #         MM_TARGET="$MM_CHANNEL"
-    #       fi
-
-    #       MM_API_TOKEN="${MM_BOT_TOKEN:-${MM_JWT_TOKEN:-}}"
-
-    #       send_notification() {
-    #         local payload="$1"
-    #         shift
-    #         curl -k -sS -w "\n%{http_code}" --location "$MM_WEBHOOK_URL" \
-    #           --header 'Content-Type: application/json' \
-    #           "$@" \
-    #           --data "$payload" 2>&1 || true
-    #       }
-
-    #       mm_api_base() {
-    #         echo "$MM_WEBHOOK_URL" | sed -E 's|/api/v4/.*||'
-    #       }
-
-    #       resolve_dm_channel_id() {
-    #         local base user_id me_id dm_json
-    #         base="$(mm_api_base)"
-    #         user_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
-    #           "${base}/api/v4/users/username/${MM_USER}" 2>/dev/null || echo '{}')
-    #         user_id=$(echo "$user_json" | jq -r '.id // empty')
-    #         if [ -z "$user_id" ]; then
-    #           echo "  ⚠️ Mattermost user not found: ${MM_USER}" >&2
-    #           return 1
-    #         fi
-    #         me_json=$(curl -k -sS -H "Authorization: Bearer ${MM_API_TOKEN}" \
-    #           "${base}/api/v4/users/me" 2>/dev/null || echo '{}')
-    #         me_id=$(echo "$me_json" | jq -r '.id // empty')
-    #         if [ -z "$me_id" ]; then
-    #           echo "  ⚠️ Could not resolve Mattermost bot user (/users/me)" >&2
-    #           return 1
-    #         fi
-    #         dm_json=$(curl -k -sS -X POST \
-    #           -H "Authorization: Bearer ${MM_API_TOKEN}" \
-    #           -H "Content-Type: application/json" \
-    #           -d "[\"${me_id}\", \"${user_id}\"]" \
-    #           "${base}/api/v4/channels/direct" 2>/dev/null || echo '{}')
-    #         echo "$dm_json" | jq -r '.id // empty'
-    #       }
-
-    #       echo "Sending Mattermost notification (${#WI_IDS[@]} work item(s))..."
-
-    #       if echo "$MM_WEBHOOK_URL" | grep -qiE '/hooks/'; then
-    #         # Mattermost incoming webhook — token is in URL; do NOT send Bearer auth
-    #         echo "Mode: Mattermost incoming webhook (/hooks/)" >&2
-    #         JSON_PAYLOAD=$(jq -n \
-    #           --arg text "$MM_TEXT" \
-    #           --arg channel "$MM_TARGET" \
-    #           --arg username "Azure CI" \
-    #           '{
-    #             text: $text,
-    #             username: $username,
-    #             icon_emoji: ":label:"
-    #           } + (if ($channel | length) > 0 then { channel: $channel } else {} end)')
-    #         response=$(send_notification "$JSON_PAYLOAD")
-    #       elif echo "$MM_WEBHOOK_URL" | grep -qiE 'n8n\.|/webhook'; then
-    #         # n8n webhook — full payload + optional JWT (same pattern as QA_Gate / PM_GATE)
-    #         echo "Mode: n8n webhook" >&2
-    #         JSON_PAYLOAD=$(jq -n \
-    #           --arg erp "DevOps" \
-    #           --arg channel "$MM_CHANNEL" \
-    #           --arg username "$MM_USER" \
-    #           --arg text "$MM_TEXT" \
-    #           --arg source "$SOURCE_BRANCH" \
-    #           --arg target "$TARGET_BRANCH" \
-    #           --arg release_tag "$BACKEND_TAG" \
-    #           --arg work_item_ids "$WORK_ITEM_IDS" \
-    #           --arg build_id "$BUILD_ID" \
-    #           --arg build_number "$BUILD_NUMBER" \
-    #           --arg build_url "$BUILD_URL" \
-    #           --arg notify_dt "$NOTIFY_DT" \
-    #           --argjson work_items "$wi_json_array" \
-    #           '{
-    #             ERP: $erp,
-    #             channel: $channel,
-    #             username: $username,
-    #             text: $text,
-    #             promotion: ($source + " -> " + $target),
-    #             source_branch: $source,
-    #             target_branch: $target,
-    #             release_tag: $release_tag,
-    #             work_item_ids: $work_item_ids,
-    #             work_items: $work_items,
-    #             build_id: $build_id,
-    #             build_number: $build_number,
-    #             build_url: $build_url,
-    #             notify_dt: $notify_dt
-    #           }')
-    #         if [ -n "${MM_JWT_TOKEN:-}" ]; then
-    #           response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_JWT_TOKEN}")
-    #         else
-    #           response=$(send_notification "$JSON_PAYLOAD")
-    #         fi
-    #       elif echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
-    #         # Mattermost REST API POST /api/v4/posts — requires channel_id + Bearer token
-    #         echo "Mode: Mattermost REST API (/api/v4/posts)" >&2
-    #         if [ -z "${MM_API_TOKEN:-}" ]; then
-    #           echo "⚠️ Mattermost API token not set — use MATTERMOST_BOT_TOKEN or JWT_TOKEN_WFN8N___WI-Tag-Notif in variable group."
-    #           exit 0
-    #         fi
-
-    #         CHANNEL_ID=""
-    #         if [ -n "$MM_CHANNEL" ]; then
-    #           CHANNEL_ID="$MM_CHANNEL"
-    #           echo "  Target: channel_id=${CHANNEL_ID}" >&2
-    #         elif [ -n "$MM_USER" ]; then
-    #           echo "  Target: DM @${MM_USER}" >&2
-    #           CHANNEL_ID=$(resolve_dm_channel_id) || CHANNEL_ID=""
-    #         fi
-
-    #         if [ -z "$CHANNEL_ID" ]; then
-    #           echo "⚠️ No Mattermost channel_id — set MM_CHANNEL to a channel ID, or MM_USERNAME for DM."
-    #           exit 0
-    #         fi
-
-    #         JSON_PAYLOAD=$(jq -n \
-    #           --arg channel_id "$CHANNEL_ID" \
-    #           --arg message "$MM_TEXT" \
-    #           '{ channel_id: $channel_id, message: $message }')
-    #         response=$(send_notification "$JSON_PAYLOAD" --header "Authorization: Bearer ${MM_API_TOKEN}")
-    #       else
-    #         echo "⚠️ Unknown webhook URL pattern — using plain JSON POST without auth." >&2
-    #         JSON_PAYLOAD=$(jq -n --arg text "$MM_TEXT" '{ text: $text }')
-    #         response=$(send_notification "$JSON_PAYLOAD")
-    #       fi
-
-    #       http_code=$(echo "$response" | tail -n1)
-    #       response_body=$(echo "$response" | sed '$d')
-
-    #       if [ "$http_code" = "200" ] || [ "$http_code" = "201" ] || [ "$http_code" = "204" ]; then
-    #         echo "✅ Mattermost notification sent (HTTP $http_code)"
-    #       else
-    #         echo "⚠️ Mattermost notification failed (HTTP $http_code)"
-    #         echo "$response_body"
-    #         echo "Continuing pipeline..."
-    #       fi
 
