@@ -1181,8 +1181,10 @@ stages:
 # Stage 2: Build
 - stage: Build
   displayName: 'Build Stage'
-  dependsOn: PR_Creation
-  condition: succeededOrFailed()  # Run even if PR stage was skipped
+  dependsOn:
+    - PR_Creation
+    - Hotfix_WI_Collection
+  condition: succeededOrFailed()  # Run when PR and/or Hotfix stage succeeded, failed, or was skipped
   jobs:           
   - job: Build_Frontend
     displayName: 'Build Frontend'
