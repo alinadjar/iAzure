@@ -1177,9 +1177,6 @@ stages:
               [ -n "$FOLLOWUP_RUN_URL" ] && echo "   $FOLLOWUP_RUN_URL"
             fi
           fi
-		  
-		
-
 
 # Stage 2: Build
 - stage: Build
