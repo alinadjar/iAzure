@@ -1685,14 +1685,14 @@ stages:
     - PR_Creation
     - Hotfix_WI_Collection
     - Build
-  # condition: and(
-  #     in(stageDependencies.PR_Creation.result, 'Succeeded', 'SucceededWithIssues'),
-  #     in(stageDependencies.Build.result, 'Succeeded', 'SucceededWithIssues'),
-  #     or(
-  #       ne(coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.WORK_ITEM_IDS'], ''), ''),
-  #       ne(coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.DEDUPED_WORK_ITEM_IDS'], ''), '')
-  #     )
-  #   )
+  condition: |
+    and(
+      in(stageDependencies.Build.result, 'Succeeded', 'SucceededWithIssues'),
+      or(
+        in(stageDependencies.PR_Creation.result, 'Succeeded', 'SucceededWithIssues'),
+        in(stageDependencies.Hotfix_WI_Collection.result, 'Succeeded', 'SucceededWithIssues')
+      )
+    )
   variables:
     WORK_ITEM_IDS: $[ coalesce(stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.WORK_ITEM_IDS'], stageDependencies.PR_Creation.CreatePRs.outputs['create_pr_multi_repo.DEDUPED_WORK_ITEM_IDS'], stageDependencies.Hotfix_WI_Collection.CollectHotfixWorkItems.outputs['hotfix_wi.WORK_ITEM_IDS'], stageDependencies.Hotfix_WI_Collection.CollectHotfixWorkItems.outputs['hotfix_wi.DEDUPED_WORK_ITEM_IDS'], '') ]
     BACKEND_TAG: $[ coalesce(stageDependencies.Build.Build_Backend.outputs['tagSetting.DOCKER_TAG'], stageDependencies.Build.Build_Frontend.outputs['gitPull.FRONTEND_COMMIT'], '') ]
