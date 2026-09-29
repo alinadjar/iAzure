@@ -2,7 +2,7 @@
 trigger: none
 
 schedules:
-  - cron: '0 */8 * * *'
+  - cron: '0 */24 * * *'
     displayName: 'Scheduled preview cleanup'
     branches:
       include:
