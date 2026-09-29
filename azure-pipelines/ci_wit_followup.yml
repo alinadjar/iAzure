@@ -361,7 +361,7 @@ steps:
 #   - name: ADD_WI_COMMENT
 #     displayName: 'Add promotion comment to each work item?'
 #     type: string
-#     default: 'YES'
+#     default: 'NO'
 #     values:
 #       - YES
 #       - NO
@@ -469,10 +469,10 @@ steps:
 #           local tag_to_add="$2"
 #           local patch='[]'
 
-#           if [ "$ADD_WI_COMMENT" = "YES" ]; then
-#             patch=$(jq -n --argjson ops "$patch" --arg text "$COMMENT_TEXT" \
-#               '$ops + [{ "op": "add", "path": "/fields/System.History", "value": $text }]')
-#           fi
+#         # if [ "$ADD_WI_COMMENT" = "YES" ]; then
+#         #   patch=$(jq -n --argjson ops "$patch" --arg text "$COMMENT_TEXT" \
+#         #     '$ops + [{ "op": "add", "path": "/fields/System.History", "value": $text }]')
+#         # fi
 
 #           if [ "$ADD_WI_TAG" = "YES" ] && [ -n "$tag_to_add" ] && ! tag_already_present "$existing_tags" "$tag_to_add"; then
 #             if [ -z "$existing_tags" ]; then
