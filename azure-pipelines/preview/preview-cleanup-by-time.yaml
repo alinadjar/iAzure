@@ -1,13 +1,13 @@
 # Removes stale AI preview stacks from the preview host.
 trigger: none
 
-schedules:
-  - cron: '0 */24 * * *'
-    displayName: 'Scheduled preview cleanup'
-    branches:
-      include:
-        - cicd
-    always: true
+# schedules:
+#   - cron: '0 */24 * * *'
+#     displayName: 'Scheduled preview cleanup'
+#     branches:
+#       include:
+#         - cicd
+#     always: true
 
 pool:
   name: 'FX_WIT_PREVIEW'
