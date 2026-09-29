@@ -105,8 +105,8 @@ services:
           -c config_file=/etc/postgresql/postgresql.conf
           -c hba_file=/etc/postgresql/pg_hba.conf
       "
-    # ports:
-    #   - "${PG_HOST_PORT}:5432"
+    ports:
+      - "${PG_HOST_PORT}:5432"
     networks:
       - preview_net
     restart: unless-stopped
