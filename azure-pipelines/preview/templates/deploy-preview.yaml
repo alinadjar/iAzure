@@ -212,6 +212,10 @@ steps:
 
       echo "=== front url: https://${FRONT_HOST}"
       echo "=== api url:   https://${API_HOST}"
+      echo "================================= DB Connection:"
+      echo "   - IP  :   192.168.10.160 : ${WIT_ID}"
+      echo "   - user:   postgres"
+      echo "   - pass:   123"
 
       echo "##vso[task.setvariable variable=PREVIEW_FRONT_URL;isOutput=true]https://${FRONT_HOST}"
       echo "##vso[task.setvariable variable=PREVIEW_API_URL;isOutput=true]https://${API_HOST}"
