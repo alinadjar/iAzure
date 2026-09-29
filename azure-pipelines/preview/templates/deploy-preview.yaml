@@ -83,12 +83,12 @@ steps:
       fi
 
       # PG_HOST_PORT=$((10000 + WIT_ID))
-      PG_HOST_PORT=$(WIT_ID)
-      if [ "$PG_HOST_PORT" -gt 65535 ]; then
-        echo "ERROR: PG_HOST_PORT ${PG_HOST_PORT} exceeds max port (WIT_ID too large)"
-        exit 1
-      fi
-      echo "PG host port: ${PG_HOST_PORT}"
+      PG_HOST_PORT_EXPOSED=$(WIT_ID)
+      # if [ "$PG_HOST_PORT" -gt 65535 ]; then
+      #   echo "ERROR: PG_HOST_PORT ${PG_HOST_PORT} exceeds max port (WIT_ID too large)"
+      #   exit 1
+      # fi
+      echo "PG host port: ${PG_HOST_PORT_EXPOSED}"
 
       render_file() {
         local src="$1"
@@ -110,7 +110,7 @@ steps:
           -e "s|__PG_MAX_WAL_SIZE__|${PG_MAX_WAL_SIZE}|g" \
           -e "s|__PG_CHECKPOINT_TIMEOUT__|${PG_CHECKPOINT_TIMEOUT}|g" \
           -e "s|__PG_LOG_MIN_DURATION_MS__|${PG_LOG_MIN_DURATION_MS}|g" \
-          -e "s|__PG_HOST_PORT__|${PG_HOST_PORT}|g" \
+          -e "s|__PG_HOST_PORT_EXPOSED__|${PG_HOST_PORT_EXPOSED}|g" \
           "$src" > "$dst"
       }
 
