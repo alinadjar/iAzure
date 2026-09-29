@@ -26,8 +26,8 @@ parameters:
     displayName: 'Components to build'
     default: 'both'
     values:
-      - front
-      - back
+      # - front
+      # - back
       - both
   - name: SHOULD_DEPLOY
     type: string
