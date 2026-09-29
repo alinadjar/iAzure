@@ -82,7 +82,8 @@ steps:
         echo "Warning: frontend and backend tags differ; using frontend tag for ERP_VERSION"
       fi
 
-      PG_HOST_PORT=$((10000 + WIT_ID))
+      # PG_HOST_PORT=$((10000 + WIT_ID))
+      PG_HOST_PORT=$(WIT_ID)
       if [ "$PG_HOST_PORT" -gt 65535 ]; then
         echo "ERROR: PG_HOST_PORT ${PG_HOST_PORT} exceeds max port (WIT_ID too large)"
         exit 1
