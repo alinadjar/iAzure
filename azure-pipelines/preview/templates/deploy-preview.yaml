@@ -209,23 +209,19 @@ steps:
          sudo docker compose -f compose.yaml -f compose.override.yaml up -d backend --remove-orphans && \
          sudo docker compose ps"
 
-      CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-      DIM='\033[2m';     BOLD='\033[1m';     NC='\033[0m'
-      
-      printf '\n%s%s%s\n' "$BOLD" "═════════════════════════════════════════════════════" "$NC"
-      printf "  %s🚀 Deployment Summary%s\n" "$BOLD" "$NC"
-      printf '%s%s%s\n\n' "$BOLD" "═════════════════════════════════════════════════════" "$NC"
-      
-      printf "  %s🌐 Front URL%s : %shttps://%s%s\n" "$CYAN" "$NC" "$GREEN" "${FRONT_HOST}" "$NC"
-      printf "  %s🔌 API URL%s   : %shttps://%s%s\n\n" "$CYAN" "$NC" "$GREEN" "${API_HOST}" "$NC"
-      
-      printf "  %s🗄️  Database Connection%s\n" "$BOLD" "$NC"
-      printf "     %s├─ IP  %s : 192.168.10.160\n" "$DIM" "$NC"
-      printf "     %s├─ ID  %s : %s\n" "$DIM" "$NC" "${WIT_ID}"
-      printf "     %s├─ User%s : postgres\n" "$DIM" "$NC"
-      printf "     %s└─ Pass%s : 123\n\n" "$DIM" "$NC"
-      
-      printf '%s%s%s\n\n' "$BOLD" "═════════════════════════════════════════════════════" "$NC"
+      printf '\n'
+      printf ' 🚀 Deployment Summary\n'
+      printf '__________________________________________________________\n'
+      printf '  Front URL : https://%s\n' "${FRONT_HOST}"
+      printf '  API URL   : https://%s\n' "${API_HOST}"
+      printf '\n'
+      printf '  DB Connection\n'
+      printf '    - IP   : 192.168.10.160\n'
+      printf '    - ID   : %s\n' "${WIT_ID}"
+      printf '    - User : postgres\n'
+      printf '    - Pass : 123\n'
+      printf '__________________________________________________________\n'
+      printf '\n'
 
       echo "##vso[task.setvariable variable=PREVIEW_FRONT_URL;isOutput=true]https://${FRONT_HOST}"
       echo "##vso[task.setvariable variable=PREVIEW_API_URL;isOutput=true]https://${API_HOST}"
