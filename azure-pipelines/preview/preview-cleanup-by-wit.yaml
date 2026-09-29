@@ -85,207 +85,207 @@ steps:
         PROJECT_API_URL="${ORG_URL}/${PROJECT}/_apis"
         AUTH_HEADER="Authorization: Basic $(echo -n ":${GIT_PAT}" | base64 | tr -d '\n')"
 
-        call_api() {
-          local url="$1"
-          local method="${2:-GET}"
-          local body="${3:-}"
-          local content_type="${4:-application/json}"
-          local tmp http_code
+        # call_api() {
+        #   local url="$1"
+        #   local method="${2:-GET}"
+        #   local body="${3:-}"
+        #   local content_type="${4:-application/json}"
+        #   local tmp http_code
 
-          url=$(echo "$url" | tr -d '\n\r ')
-          tmp=$(mktemp)
+        #   url=$(echo "$url" | tr -d '\n\r ')
+        #   tmp=$(mktemp)
 
-          if [ -n "$body" ]; then
-            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
-              -H "$AUTH_HEADER" -H "Content-Type: ${content_type}" \
-              -d "$body" "$url")
-          else
-            http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
-              -H "$AUTH_HEADER" "$url")
-          fi
+        #   if [ -n "$body" ]; then
+        #     http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+        #       -H "$AUTH_HEADER" -H "Content-Type: ${content_type}" \
+        #       -d "$body" "$url")
+        #   else
+        #     http_code=$(curl -sS -w "%{http_code}" -o "$tmp" -X "$method" \
+        #       -H "$AUTH_HEADER" "$url")
+        #   fi
 
-          if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
-            cat "$tmp"
-            rm -f "$tmp"
-            return 0
-          fi
+        #   if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        #     cat "$tmp"
+        #     rm -f "$tmp"
+        #     return 0
+        #   fi
 
-          echo "API $method $url failed (HTTP $http_code):" >&2
-          cat "$tmp" >&2
-          rm -f "$tmp"
-          return 1
-        }
+        #   echo "API $method $url failed (HTTP $http_code):" >&2
+        #   cat "$tmp" >&2
+        #   rm -f "$tmp"
+        #   return 1
+        # }
 
-        clean_repo_id() {
-          local id="$1"
-          local cleaned
-          cleaned=$(echo "$id" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
-          if [ -z "$cleaned" ]; then
-            echo "$id" | tr -d '\n\r ' | cut -c1-36
-          else
-            echo "$cleaned"
-          fi
-        }
+        # clean_repo_id() {
+        #   local id="$1"
+        #   local cleaned
+        #   cleaned=$(echo "$id" | grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
+        #   if [ -z "$cleaned" ]; then
+        #     echo "$id" | tr -d '\n\r ' | cut -c1-36
+        #   else
+        #     echo "$cleaned"
+        #   fi
+        # }
 
-        REPOSITORIES=(
-          "SadganShared/_git/1_Configs"
-          "SadganShared/_git/2_SharedLibrary"
-          "SadganShared/_git/3_ClientLibrary"
-          "SadganShared/_git/4_ServerLibrary"
-          "SadganErp/_git/Sadgan.Erp.Client.Core"
-          "SadganErp/_git/Sadgan.Erp.Panel"
-          "SadganErp/_git/SadganErpApi"
-        )
+        # REPOSITORIES=(
+        #   "SadganShared/_git/1_Configs"
+        #   "SadganShared/_git/2_SharedLibrary"
+        #   "SadganShared/_git/3_ClientLibrary"
+        #   "SadganShared/_git/4_ServerLibrary"
+        #   "SadganErp/_git/Sadgan.Erp.Client.Core"
+        #   "SadganErp/_git/Sadgan.Erp.Panel"
+        #   "SadganErp/_git/SadganErpApi"
+        # )
 
 
-        delete_wit_branches_for_repo() {
-          local repo_path="$1"
-          local wi_id="$2"
-          local project_name simple_repo_name project_api_url repos_url repos_response repo_id refs_url refs_json updates post_url result failed
+        # delete_wit_branches_for_repo() {
+        #   local repo_path="$1"
+        #   local wi_id="$2"
+        #   local project_name simple_repo_name project_api_url repos_url repos_response repo_id refs_url refs_json updates post_url result failed
 
-          project_name=$(echo "$repo_path" | cut -d'/' -f1)
-          simple_repo_name=$(basename "$repo_path")
-          project_api_url="${ORG_URL}/${project_name}/_apis"
+        #   project_name=$(echo "$repo_path" | cut -d'/' -f1)
+        #   simple_repo_name=$(basename "$repo_path")
+        #   project_api_url="${ORG_URL}/${project_name}/_apis"
 
-          repos_url="${project_api_url}/git/repositories?api-version=7.0"
-          repos_response=$(call_api "$repos_url") || {
-            echo "  ⚠️ Could not list repositories in ${project_name} — skipping ${simple_repo_name}"
-            return 0
-          }
+        #   repos_url="${project_api_url}/git/repositories?api-version=7.0"
+        #   repos_response=$(call_api "$repos_url") || {
+        #     echo "  ⚠️ Could not list repositories in ${project_name} — skipping ${simple_repo_name}"
+        #     return 0
+        #   }
 
-          repo_id=$(clean_repo_id "$(echo "$repos_response" | jq -r --arg name "$simple_repo_name" '.value[] | select(.name==$name) | .id')")
-          if [ -z "$repo_id" ] || [ "$repo_id" = "null" ]; then
-            echo "  ℹ️ Repository not found: ${simple_repo_name} — skipping"
-            return 0
-          fi
+        #   repo_id=$(clean_repo_id "$(echo "$repos_response" | jq -r --arg name "$simple_repo_name" '.value[] | select(.name==$name) | .id')")
+        #   if [ -z "$repo_id" ] || [ "$repo_id" = "null" ]; then
+        #     echo "  ℹ️ Repository not found: ${simple_repo_name} — skipping"
+        #     return 0
+        #   fi
 
-          refs_url="${project_api_url}/git/repositories/${repo_id}/refs?filter=heads/wit/${wi_id}&api-version=7.0"
-          refs_json=$(call_api "$refs_url") || {
-            echo "  ⚠️ Could not list refs for ${simple_repo_name} — skipping"
-            return 0
-          }
+        #   refs_url="${project_api_url}/git/repositories/${repo_id}/refs?filter=heads/wit/${wi_id}&api-version=7.0"
+        #   refs_json=$(call_api "$refs_url") || {
+        #     echo "  ⚠️ Could not list refs for ${simple_repo_name} — skipping"
+        #     return 0
+        #   }
 
-          updates=$(echo "$refs_json" | jq -c --arg prefix "refs/heads/wit/${wi_id}_" '
-            [.value[]?
-              | select(.name | startswith($prefix))
-              | {
-                  name: .name,
-                  oldObjectId: .objectId,
-                  newObjectId: "0000000000000000000000000000000000000000"
-                }
-            ]')
+        #   updates=$(echo "$refs_json" | jq -c --arg prefix "refs/heads/wit/${wi_id}_" '
+        #     [.value[]?
+        #       | select(.name | startswith($prefix))
+        #       | {
+        #           name: .name,
+        #           oldObjectId: .objectId,
+        #           newObjectId: "0000000000000000000000000000000000000000"
+        #         }
+        #     ]')
 
-          if [ -z "$updates" ] || [ "$updates" = "[]" ] || [ "$updates" = "null" ]; then
-            echo "  ℹ️ No wit/${wi_id}_* branches in ${simple_repo_name}"
-            return 0
-          fi
+        #   if [ -z "$updates" ] || [ "$updates" = "[]" ] || [ "$updates" = "null" ]; then
+        #     echo "  ℹ️ No wit/${wi_id}_* branches in ${simple_repo_name}"
+        #     return 0
+        #   fi
 
-          echo "$updates" | jq -r '.[].name' | sed 's/^/    delete /'
-          post_url="${project_api_url}/git/repositories/${repo_id}/refs?api-version=7.0"
-          result=$(call_api "$post_url" "POST" "$updates") || {
-            echo "  ⚠️ Branch delete request failed for ${simple_repo_name}"
-            return 0
-          }
+        #   echo "$updates" | jq -r '.[].name' | sed 's/^/    delete /'
+        #   post_url="${project_api_url}/git/repositories/${repo_id}/refs?api-version=7.0"
+        #   result=$(call_api "$post_url" "POST" "$updates") || {
+        #     echo "  ⚠️ Branch delete request failed for ${simple_repo_name}"
+        #     return 0
+        #   }
 
-          failed=$(echo "$result" | jq '[.[]? | select(.success != true)] | length')
-          if [ "${failed:-0}" -gt 0 ]; then
-            echo "  ⚠️ Some branch deletes failed in ${simple_repo_name}:"
-            echo "$result" | jq -r '.[]? | select(.success != true) | "    \(.name // .customMessage // .)"'
-          else
-            echo "  ✅ Deleted wit/${wi_id}_* branches in ${simple_repo_name}"
-          fi
-        }
+        #   failed=$(echo "$result" | jq '[.[]? | select(.success != true)] | length')
+        #   if [ "${failed:-0}" -gt 0 ]; then
+        #     echo "  ⚠️ Some branch deletes failed in ${simple_repo_name}:"
+        #     echo "$result" | jq -r '.[]? | select(.success != true) | "    \(.name // .customMessage // .)"'
+        #   else
+        #     echo "  ✅ Deleted wit/${wi_id}_* branches in ${simple_repo_name}"
+        #   fi
+        # }
 
-        cleanup_preview_stack_remote() {
-          local wi_ids_csv="$1"
-          local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          local remote key_file
+        # cleanup_preview_stack_remote() {
+        #   local wi_ids_csv="$1"
+        #   local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        #   local remote key_file
 
-          # if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
-          #   key_file="$(Agent.TempDirectory)/preview_cleanup_key"
-          #   printf '%s\n' "$PREVIEW_SSH_PRIVATE_KEY" > "$key_file"
-          #   chmod 600 "$key_file"
-          #   ssh_opts="$ssh_opts -i $key_file"
-          # elif [ -n "${PREVIEW_SSH_PRIVATE_KEY_PATH:-}" ] && [ -f "${PREVIEW_SSH_PRIVATE_KEY_PATH}" ]; then
-          #   ssh_opts="$ssh_opts -i ${PREVIEW_SSH_PRIVATE_KEY_PATH}"
-          # fi
-          ssh_opts="$ssh_opts -i ${PREVIEW_SSH_PRIVATE_KEY_PATH}"
+        #   # if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
+        #   #   key_file="$(Agent.TempDirectory)/preview_cleanup_key"
+        #   #   printf '%s\n' "$PREVIEW_SSH_PRIVATE_KEY" > "$key_file"
+        #   #   chmod 600 "$key_file"
+        #   #   ssh_opts="$ssh_opts -i $key_file"
+        #   # elif [ -n "${PREVIEW_SSH_PRIVATE_KEY_PATH:-}" ] && [ -f "${PREVIEW_SSH_PRIVATE_KEY_PATH}" ]; then
+        #   #   ssh_opts="$ssh_opts -i ${PREVIEW_SSH_PRIVATE_KEY_PATH}"
+        #   # fi
+        #   ssh_opts="$ssh_opts -i ${PREVIEW_SSH_PRIVATE_KEY_PATH}"
 
-          remote="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
+        #   remote="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
 
-          ssh $ssh_opts "$remote" bash -s <<EOF
-        set -euo pipefail
-        BASE='${PREVIEW_BASE_PATH}'
-        IFS=',' read -r -a WI_IDS <<< '${wi_ids_csv}'
+        #   ssh $ssh_opts "$remote" bash -s <<EOF
+        # set -euo pipefail
+        # BASE='${PREVIEW_BASE_PATH}'
+        # IFS=',' read -r -a WI_IDS <<< '${wi_ids_csv}'
 
-        for raw in "\${WI_IDS[@]}"; do
-          task_id=\$(echo "\$raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-          if ! [[ "\$task_id" =~ ^[0-9]+$ ]]; then
-            continue
-          fi
-          dir="\${BASE}/\${task_id}"
-          if [ ! -d "\$dir" ]; then
-            echo "Preview path already absent: \$dir"
-            continue
-          fi
-          echo "Removing preview stack for work item \$task_id (\$dir)"
-          cd "\$dir"
-          export COMPOSE_PROJECT_NAME="preview-\${task_id}"
-          docker compose down -v --remove-orphans 2>/dev/null || docker-compose down -v --remove-orphans 2>/dev/null || true
-          cd /
-          rm -rf "\$dir"
-          echo "Removed \$dir"
-        done
-        EOF
-        }
+        # for raw in "\${WI_IDS[@]}"; do
+        #   task_id=\$(echo "\$raw" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        #   if ! [[ "\$task_id" =~ ^[0-9]+$ ]]; then
+        #     continue
+        #   fi
+        #   dir="\${BASE}/\${task_id}"
+        #   if [ ! -d "\$dir" ]; then
+        #     echo "Preview path already absent: \$dir"
+        #     continue
+        #   fi
+        #   echo "Removing preview stack for work item \$task_id (\$dir)"
+        #   cd "\$dir"
+        #   export COMPOSE_PROJECT_NAME="preview-\${task_id}"
+        #   docker compose down -v --remove-orphans 2>/dev/null || docker-compose down -v --remove-orphans 2>/dev/null || true
+        #   cd /
+        #   rm -rf "\$dir"
+        #   echo "Removed \$dir"
+        # done
+        # EOF
+        # }
 
-        echo "========================================="
-        echo "WIT POST-PROMOTION CLEANUP"
-        echo "========================================="
-        echo "Promotion: ${SOURCE_BRANCH:-?} -> ${TARGET_BRANCH:-?}"
-        echo "CI build: ${PROMOTION_BUILD_NUMBER:-?} (ID ${PROMOTION_BUILD_ID:-?})"
-        echo ""
+        # echo "========================================="
+        # echo "WIT POST-PROMOTION CLEANUP"
+        # echo "========================================="
+        # echo "Promotion: ${SOURCE_BRANCH:-?} -> ${TARGET_BRANCH:-?}"
+        # echo "CI build: ${PROMOTION_BUILD_NUMBER:-?} (ID ${PROMOTION_BUILD_ID:-?})"
+        # echo ""
 
-        if [ -z "$WORK_ITEM_IDS" ]; then
-          echo "No WORK_ITEM_IDS — nothing to clean up."
-          exit 0
-        fi
+        # if [ -z "$WORK_ITEM_IDS" ]; then
+        #   echo "No WORK_ITEM_IDS — nothing to clean up."
+        #   exit 0
+        # fi
 
-        mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' \
-          | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
-        echo "Work item(s) to clean: ${WI_IDS[*]}"
-        echo ""
+        # mapfile -t WI_IDS < <(echo "$WORK_ITEM_IDS" | tr ',' '\n' \
+        #   | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -E '^[0-9]+$' | sort -u)
+        # echo "Work item(s) to clean: ${WI_IDS[*]}"
+        # echo ""
 
-        if [ "$DELETE_WIT_BRANCHES" = "YES" ]; then
-          echo "-----------------------------------------"
-          echo "Deleting wit/{id}_* branches (7 repos)"
-          echo "-----------------------------------------"
-          for wi_id in "${WI_IDS[@]}"; do
-            echo ""
-            echo "Work item #${wi_id}"
-            for repo_path in "${REPOSITORIES[@]}"; do
-              echo "  📦 ${repo_path}"
-              delete_wit_branches_for_repo "$repo_path" "$wi_id" || true
-            done
-          done
-        else
-          echo "DELETE_WIT_BRANCHES=NO — skipping branch deletion"
-        fi
+        # if [ "$DELETE_WIT_BRANCHES" = "YES" ]; then
+        #   echo "-----------------------------------------"
+        #   echo "Deleting wit/{id}_* branches (7 repos)"
+        #   echo "-----------------------------------------"
+        #   for wi_id in "${WI_IDS[@]}"; do
+        #     echo ""
+        #     echo "Work item #${wi_id}"
+        #     for repo_path in "${REPOSITORIES[@]}"; do
+        #       echo "  📦 ${repo_path}"
+        #       delete_wit_branches_for_repo "$repo_path" "$wi_id" || true
+        #     done
+        #   done
+        # else
+        #   echo "DELETE_WIT_BRANCHES=NO — skipping branch deletion"
+        # fi
 
-        if [ "$DELETE_PREVIEW_STACK" = "YES" ]; then
-          echo ""
-          echo "-----------------------------------------"
-          echo "Removing preview stacks on ${PREVIEW_HOST}"
-          echo "-----------------------------------------"
-          WI_CSV=$(IFS=,; echo "${WI_IDS[*]}")
-          cleanup_preview_stack_remote "$WI_CSV" || {
-            echo "⚠️ Preview host cleanup failed (branches may already be removed)"
-          }
-        else
-          echo "DELETE_PREVIEW_STACK=NO — skipping preview host cleanup"
-        fi
+        # if [ "$DELETE_PREVIEW_STACK" = "YES" ]; then
+        #   echo ""
+        #   echo "-----------------------------------------"
+        #   echo "Removing preview stacks on ${PREVIEW_HOST}"
+        #   echo "-----------------------------------------"
+        #   WI_CSV=$(IFS=,; echo "${WI_IDS[*]}")
+        #   cleanup_preview_stack_remote "$WI_CSV" || {
+        #     echo "⚠️ Preview host cleanup failed (branches may already be removed)"
+        #   }
+        # else
+        #   echo "DELETE_PREVIEW_STACK=NO — skipping preview host cleanup"
+        # fi
 
-        echo ""
-        echo "========================================="
-        echo "Cleanup complete for ${#WI_IDS[@]} work item(s)"
-        echo "========================================="
+        # echo ""
+        # echo "========================================="
+        # echo "Cleanup complete for ${#WI_IDS[@]} work item(s)"
+        # echo "========================================="
