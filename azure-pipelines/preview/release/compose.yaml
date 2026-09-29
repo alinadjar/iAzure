@@ -15,6 +15,10 @@ services:
     image: ${REGISTRY_URL}/fx/backend:${ERP_VERSION}
     env_file:
       - .env
+    labels:
+      logging: "enabled"
+      release: ${WIT_ID}
+      proj: "Local"
     environment:
       <<: *default-environment
       TZ: Asia/Tehran
