@@ -1,3 +1,4 @@
+
 # Self-hosted Azure DevOps Server — API pytest pipeline
 # Working dir: pytest/api
 # Agent pool must have Python 3.12 (+ optional /opt/qavenv prebuilt venv)
@@ -176,7 +177,11 @@ variables:
   apiDir: '$(System.DefaultWorkingDirectory)/$(projectName)/pytest/api'
   PIP_CACHE_DIR: '$(Pipeline.Workspace)/.pip'
 
-steps:
+jobs:
+- job: ApiTests
+  displayName: 'API pytest'
+  timeoutInMinutes: 180
+  steps:
   # ── 1. Checkout (on-prem clone; avoids agent checkout SSL issues) ──
   - checkout: none
 
