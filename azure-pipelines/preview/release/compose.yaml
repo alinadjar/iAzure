@@ -22,7 +22,7 @@ services:
     environment:
       <<: *default-environment
       TZ: Asia/Tehran
-      App__DisableCors: false
+      App__DisableCors: true
       App__CorsOrigins: ${CorsOrigins}
       App__SelfUrl: ${SelfUrl}
       App__Version: ${ERP_VERSION}
