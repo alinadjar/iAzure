@@ -297,12 +297,18 @@ steps:
   - task: SonarQubeAnalyze@8
     displayName: 'SonarQube Analyze (Backend)'
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    env:
+      PATH: $(DOTNET_PATH)
+      DOTNET_ROOT: /opt/net_sdk_10
     inputs:
       SonarQube: 'SonarQube-Sadgan'
 
   - task: SonarQubePublish@8
     displayName: 'SonarQube Publish (Backend)'
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    env:
+      PATH: $(DOTNET_PATH)
+      DOTNET_ROOT: /opt/net_sdk_10
     inputs:
       SonarQube: 'SonarQube-Sadgan'
       pollingTimeoutSec: '300'    
