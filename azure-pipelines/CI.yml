@@ -1,7 +1,7 @@
 trigger: none
 
 schedules:
-- cron: "30 21 * * 4"   
+- cron: "0 20 * * *" 
   displayName: Nightly
   branches:
     include:
