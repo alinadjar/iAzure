@@ -47,6 +47,21 @@ parameters:
       - collectOnly       # pytest --collect-only -q
       - azureSyncOnly     # pytest --azure-sync-only
 
+  # ── Suite design (-m) ───────────────────────────────────────
+  # pytest.ini skips legacy by default. This choice is always applied,
+  # including together with a feature, a tag, or a custom -m expression.
+  #   fluent → -m fluent
+  #   csv    → -m legacy
+  #   both   → -m "legacy or fluent"
+  - name: suiteDesign
+    displayName: 'Suite design'
+    type: string
+    default: 'fluent'
+    values:
+      - fluent
+      - csv
+      - both
+
   # ── Feature marker (-m) ──────────────────────────────────────
   - name: featureMarker
     displayName: 'Feature marker (-m)  |  e.g. bank, auth'
@@ -269,6 +284,7 @@ jobs:
       export VERIFY_SSL="${VERIFY_SSL:-false}"
 
       RUN_MODE="$(echo "${{ parameters.runMode }}" | xargs)"
+      SUITE="${{ parameters.suiteDesign }}"
       FEATURE="${{ parameters.featureMarker }}"
       TAG="${{ parameters.tagMarker }}"
       CUSTOM_MARKER="${{ parameters.markerExpression }}"
@@ -306,6 +322,23 @@ jobs:
       elif [ -n "$TAG" ]; then
         MARKER="$TAG"
       fi
+      
+      if [ -n "$MARKER" ]; then
+        MARKER="($MARKER) and ($DESIGN_MARKER)"
+      else
+        MARKER="$DESIGN_MARKER"
+      fi
+
+      case "$SUITE" in
+        fluent) DESIGN_MARKER="fluent" ;;
+        csv) DESIGN_MARKER="legacy" ;;
+        both) DESIGN_MARKER="legacy or fluent" ;;
+        *)
+          echo "Unknown suiteDesign: '$SUITE'"
+          exit 1
+          ;;
+      esac
+
 
       PYTEST_ARGS=()
       if [ "$VERBOSE" = "True" ] || [ "$VERBOSE" = "true" ]; then
@@ -325,6 +358,7 @@ jobs:
       echo " 🔧 TEST CONFIGURATION"
       echo "=================================================="
       echo "Mode:      $RUN_MODE"
+      echo "Suite:     $SUITE"
       echo "Base URL:  $API_BASE_URL"
       echo "Marker:    ${MARKER:-(none)}"
       echo "Path:      ${TEST_PATH:-(all)}"
