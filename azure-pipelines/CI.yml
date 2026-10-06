@@ -1309,7 +1309,10 @@ stages:
         isBranchDevelop: $(isBranchDevelop)
         isBranchDevOps: $(isBranchDevOps)
         COMMIT_HASH: $(gitPull.COMMIT_HASH)
-        RUN_SONARQUBE: ${{ iif(eq(variables['Build.Reason'], 'Schedule'), 'YES', parameters.RUN_SONARQUBE) }}
+        ${{ if eq(variables['Build.Reason'], 'Schedule') }}:
+          RUN_SONARQUBE: 'YES'
+        ${{ else }}:
+          RUN_SONARQUBE: ${{ parameters.RUN_SONARQUBE }}
 
   - job: Build_Backend
     displayName: 'Build Backend'
@@ -1410,7 +1413,10 @@ stages:
         isBranchDevelop: $(isBranchDevelop)
         isBranchDevOps: $(isBranchDevOps)
         COMMIT_HASH: $(gitPull.COMMIT_HASH)
-        RUN_SONARQUBE: ${{ iif(eq(variables['Build.Reason'], 'Schedule'), 'YES', parameters.RUN_SONARQUBE) }}
+        ${{ if eq(variables['Build.Reason'], 'Schedule') }}:
+          RUN_SONARQUBE: 'YES'
+        ${{ else }}:
+          RUN_SONARQUBE: ${{ parameters.RUN_SONARQUBE }}
 
   - job: Git_Tagging
     displayName: 'Create Git Tags'
