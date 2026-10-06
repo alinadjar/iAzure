@@ -241,6 +241,10 @@ steps:
 
 
 - ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:
+  - bash: echo "##vso[task.prependpath]/opt/net_sdk_10"
+    displayName: 'Add .NET SDK to PATH (Backend)'
+    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    
   - task: SonarQubePrepare@8
     displayName: 'SonarQube Prepare (Backend)'
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
@@ -249,6 +253,8 @@ steps:
       scannerMode: 'dotnet'
       projectKey: 'SadganErp_SadganErpApi_a7b90ca2-f44f-444f-8002-66250793e0e4'
       projectName: 'SadganErpApi'
+      extraProperties: |
+        sonar.exclusions=**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json
 
 
 # - bash: |
