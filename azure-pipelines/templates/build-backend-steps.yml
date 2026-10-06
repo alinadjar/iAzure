@@ -9,6 +9,9 @@ parameters:
   type: string
 - name: COMMIT_HASH
   type: string  
+- name: RUN_SONARQUBE
+  type: string
+  default: 'NO'  
 
 steps:
 - task: Bash@3
@@ -235,7 +238,18 @@ steps:
     dotnet restore "$(solution)" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
   displayName: 'Dotnet Restore (Backend)'
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-            
+
+
+- ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:
+  - task: SonarQubePrepare@8
+    displayName: 'SonarQube Prepare (Backend)'
+    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    inputs:
+      SonarQube: 'svc_sonarqube'
+      scannerMode: 'dotnet'
+      projectKey: 'SadganErp_SadganErpApi_a7b90ca2-f44f-444f-8002-66250793e0e4'
+      projectName: 'SadganErpApi'
+
 
 # - bash: |
 #     export PATH="/opt/net_sdk_10:$PATH"
@@ -264,6 +278,20 @@ steps:
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
   env:
     MSBUILDDISABLENODEREUSE: '1'
+
+- ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:
+  - task: SonarQubeAnalyze@8
+    displayName: 'SonarQube Analyze (Backend)'
+    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    inputs:
+      SonarQube: 'SonarQube-Sadgan'
+
+  - task: SonarQubePublish@8
+    displayName: 'SonarQube Publish (Backend)'
+    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    inputs:
+      SonarQube: 'SonarQube-Sadgan'
+      pollingTimeoutSec: '300'    
     
 
 - bash: |
