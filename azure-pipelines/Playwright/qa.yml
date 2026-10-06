@@ -10,6 +10,7 @@ trigger:
 
 pr: none
 
+
 pool:
   name: 'Playwright_FX'
 
