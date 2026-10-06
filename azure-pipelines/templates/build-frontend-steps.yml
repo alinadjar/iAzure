@@ -327,13 +327,21 @@ steps:
 
 
 - ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:
-  - bash: echo "##vso[task.prependpath]/opt/net_sdk_10"
+  - bash: |
+      set -e
+      export PATH="/opt/net_sdk_10:$PATH"
+      command -v dotnet
+      echo "##vso[task.setvariable variable=DOTNET_PATH]$PATH"
+      echo "##vso[task.prependpath]/opt/net_sdk_10"
     displayName: 'Add .NET SDK to PATH (Frontend)'
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
     
   - task: SonarQubePrepare@8
     displayName: 'SonarQube Prepare (Frontend)'
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    env:
+      PATH: $(DOTNET_PATH)
+      DOTNET_ROOT: /opt/net_sdk_10
     inputs:
       SonarQube: 'svc_sonarqube'
       scannerMode: 'dotnet'
@@ -369,12 +377,18 @@ steps:
   - task: SonarQubeAnalyze@8
     displayName: 'SonarQube Analyze (Frontend)'
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    env:
+      PATH: $(DOTNET_PATH)
+      DOTNET_ROOT: /opt/net_sdk_10
     inputs:
       SonarQube: 'SonarQube-Sadgan'
 
   - task: SonarQubePublish@8
     displayName: 'SonarQube Publish (Frontend)'
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    env:
+      PATH: $(DOTNET_PATH)
+      DOTNET_ROOT: /opt/net_sdk_10
     inputs:
       SonarQube: 'SonarQube-Sadgan'
       pollingTimeoutSec: '300'
