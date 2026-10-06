@@ -323,11 +323,6 @@ jobs:
         MARKER="$TAG"
       fi
       
-      if [ -n "$MARKER" ]; then
-        MARKER="($MARKER) and ($DESIGN_MARKER)"
-      else
-        MARKER="$DESIGN_MARKER"
-      fi
 
       case "$SUITE" in
         fluent) DESIGN_MARKER="fluent" ;;
@@ -339,6 +334,11 @@ jobs:
           ;;
       esac
 
+      if [ -n "$MARKER" ]; then
+        MARKER="($MARKER) and ($DESIGN_MARKER)"
+      else
+        MARKER="$DESIGN_MARKER"
+      fi
 
       PYTEST_ARGS=()
       if [ "$VERBOSE" = "True" ] || [ "$VERBOSE" = "true" ]; then
