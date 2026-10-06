@@ -9,6 +9,9 @@ parameters:
   type: string
 - name: COMMIT_HASH
   type: string  
+- name: RUN_SONARQUBE
+  type: string
+  default: 'NO'  
 
 steps:
 - task: Bash@3
@@ -323,6 +326,17 @@ steps:
   condition: succeeded()
 
 
+- ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:
+  - task: SonarQubePrepare@8
+    displayName: 'SonarQube Prepare (Frontend)'
+    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    inputs:
+      SonarQube: 'svc_sonarqube'
+      scannerMode: 'dotnet'
+      projectKey: 'SadganErp_Sadgan.Erp.Panel_fc9a9514-f178-476b-bdfb-745f4c5375e5'
+      projectName: 'Sadgan.Erp.Panel'  
+
+
 - bash: |
     set -e
     export PATH="/opt/net_sdk_10:$PATH"
@@ -343,6 +357,22 @@ steps:
   condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
   env:
     MSBUILDDISABLENODEREUSE: '1'
+
+
+- ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:
+  - task: SonarQubeAnalyze@8
+    displayName: 'SonarQube Analyze (Frontend)'
+    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    inputs:
+      SonarQube: 'SonarQube-Sadgan'
+
+  - task: SonarQubePublish@8
+    displayName: 'SonarQube Publish (Frontend)'
+    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    inputs:
+      SonarQube: 'SonarQube-Sadgan'
+      pollingTimeoutSec: '300'
+
 
 # Cache Busting (Frontend only)
 # - bash: |
