@@ -1,4 +1,14 @@
 trigger: none
+
+schedules:
+- cron: "30 21 * * 4"   
+  displayName: Nightly
+  branches:
+    include:
+    - cicd  
+  always: true
+
+
 pool:
   name: 'WEB-1'
 
@@ -24,6 +34,13 @@ parameters:
     - 'dev'
     - 'alpha'
     - 'beta'
+- name: RUN_SONARQUBE
+  displayName: "Run SonarQube ?"
+  type: string
+  default: 'NO'
+  values:
+    - YES
+    - NO    
 - name: WORK_ITEM_IDS
   displayName: "Extra work item IDs to link (comma-separated, optional)"
   type: string
@@ -1188,6 +1205,7 @@ stages:
   jobs:           
   - job: Build_Frontend
     displayName: 'Build Frontend'
+    timeoutInMinutes: 0
     pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/Sadgan.Erp.Panel.WebApp.csproj'
@@ -1291,9 +1309,11 @@ stages:
         isBranchDevelop: $(isBranchDevelop)
         isBranchDevOps: $(isBranchDevOps)
         COMMIT_HASH: $(gitPull.COMMIT_HASH)
+        RUN_SONARQUBE: ${{ iif(eq(variables['Build.Reason'], 'Schedule'), 'YES', parameters.RUN_SONARQUBE) }}
 
   - job: Build_Backend
     displayName: 'Build Backend'
+    timeoutInMinutes: 0
     pool: 'WEB-1'
     variables:
       solution: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj'
@@ -1390,6 +1410,7 @@ stages:
         isBranchDevelop: $(isBranchDevelop)
         isBranchDevOps: $(isBranchDevOps)
         COMMIT_HASH: $(gitPull.COMMIT_HASH)
+        RUN_SONARQUBE: ${{ iif(eq(variables['Build.Reason'], 'Schedule'), 'YES', parameters.RUN_SONARQUBE) }}
 
   - job: Git_Tagging
     displayName: 'Create Git Tags'
