@@ -222,7 +222,7 @@ steps:
       printf '\n'
       printf '  DB Connection\n'
       printf '    - IP   : 192.168.10.160\n'
-      printf '    - ID   : %s\n' "${WIT_ID}"
+      printf '    - Port   : %s\n' "${WIT_ID}"
       printf '    - User : postgres\n'
       printf '    - Pass : 123\n'
       printf '__________________________________________________________\n'
