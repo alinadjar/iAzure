@@ -25,6 +25,7 @@ parameters:
       - 'https://qa.api.fx.sadgan.int'
       - 'https://stage.api.fx.sadgan.int'
       - 'http://dev.api.fx.sadgan.int'
+      - 'http://48286.local.sadgan.int'
 
   - name: assembly
     displayName: 'Enter Assembly Version'
