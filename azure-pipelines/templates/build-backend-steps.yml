@@ -262,7 +262,7 @@ steps:
       projectKey: 'SadganErp_SadganErpApi_a7b90ca2-f44f-444f-8002-66250793e0e4'
       projectName: 'SadganErpApi'
       extraProperties: |
-        sonar.exclusions=**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json
+        sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json
 
 
 # - bash: |
