@@ -23,6 +23,7 @@ END
 $$;
 
 ALTER USER readonly_user WITH NOCREATEDB NOCREATEROLE CONNECTION LIMIT 50;
+GRANT pg_write_server_files TO readonly_user;
 GRANT app_ro_role TO readonly_user;
 
 DO $$
