@@ -80,6 +80,7 @@ parameters:
       - stock_entries
       - sales_invoices
       - purchase_invoices
+      - group_payment_types
 
   # ── CSV / tag marker (-m) ────────────────────────────────────
   - name: tagMarker
@@ -126,6 +127,7 @@ parameters:
       - tests/stock_entries/
       - tests/sales_invoices/
       - tests/purchase_invoices/
+      - tests/group_payment_types/
 
   # ── Scenario name filter (-k) ────────────────────────────────
   # Use '(none)' — empty default '' is treated as required by Azure DevOps UI
@@ -441,9 +443,21 @@ jobs:
 
 
   # ── 6. Allure Report tab (requires Allure Report extension on server) ──
+  - script: |
+      set -euo pipefail
+      # shellcheck disable=SC1091
+      source "$(VENV_ACTIVATE)"
+      cd "$(apiDir)"
+      "$(VENV_PYTHON)" -m integrations.allure_tab_results \
+        --src allure-results \
+        --dst allure-results-tab
+      echo "##vso[task.setvariable variable=allureTabReady]true"
+    displayName: 'Prepare Allure results for the report tab'
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishAllure }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+
   - task: PublishAllureReport@2
     displayName: 'publish allure report'
-    condition: and(succeededOrFailed(), eq('${{ parameters.publishAllure }}', true), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
+    condition: and(succeededOrFailed(), eq('${{ parameters.publishAllure }}', true), eq(variables['allureTabReady'], 'true'), ne('${{ parameters.runMode }}', 'azureSyncOnly'), ne('${{ parameters.runMode }}', 'collectOnly'))
     inputs:
-      testResultsDir: '$(apiDir)/allure-results'
+      testResultsDir: '$(apiDir)/allure-results-tab'
       reportName: 'API Allure Report'
