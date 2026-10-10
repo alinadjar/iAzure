@@ -74,10 +74,12 @@ steps:
       mkdir -p "$STAGING/config" "$STAGING/init" "$STAGING/metadata" "$STAGING/backups"
       cp "$PREVIEW_SRC/compose.yaml" "$STAGING/"
       cp "$PREVIEW_SRC/compose.override.yaml" "$STAGING/"
+      cp "$PREVIEW_SRC/fix-permission.sh" "$STAGING/"
       cp "$PREVIEW_SRC/init/"*.sql "$STAGING/init/" 2>/dev/null || true
       # cp "$PREVIEW_SRC/metadata/"* "$STAGING/metadata/" 2>/dev/null || true
       cp "$PREVIEW_SRC/getLock.sh" "$STAGING/"
       chmod +x "$STAGING/getLock.sh"
+      chmod +x "$STAGING/fix-permission.sh"
 
       ERP_VERSION="${FRONTEND_TAG}"
       if [ "$BACKEND_TAG" != "$FRONTEND_TAG" ]; then
@@ -209,6 +211,8 @@ steps:
          sed -i 's/\r$//' getLock.sh && \
          bash getLock.sh 'V2R6MK' && \
          mv instance.lock metadata/ && \
+         sed -i 's/\r$//' fix-permission.sh && \
+         bash fix-permission.sh "$WIT_ID" && \
          echo '${NEXUS_DOCKER_PASSWORD}' | docker login '${DOCKER_REGISTRY}' -u '${NEXUS_DOCKER_USERNAME}' --password-stdin && \
          export COMPOSE_PROJECT_NAME='preview-${WIT_ID}' && \
          sudo docker compose -f compose.yaml -f compose.override.yaml up -d backend --remove-orphans && \
