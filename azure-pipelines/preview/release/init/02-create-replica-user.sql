@@ -23,6 +23,7 @@ END
 $$;
 
 ALTER USER replica_user WITH NOCREATEDB NOCREATEROLE CONNECTION LIMIT 50;
+GRANT pg_write_server_files TO replica_user;
 GRANT app_ro_role TO replica_user;
 
 DO $$
