@@ -29,6 +29,13 @@ parameters:
       # - front
       # - back
       - both
+  - name: Is_Reset_DB
+    type: string
+    displayName: 'Reset Database ?'
+    default: 'NO'
+    values:
+      - YES
+      - NO
   - name: SHOULD_DEPLOY
     type: string
     displayName: 'Deploy preview after successful build?'
@@ -475,3 +482,4 @@ stages:
               PREVIEW_SSH_USER: ${{ parameters.PREVIEW_SSH_USER }}
               ADD_WI_COMMENT: ${{ parameters.ADD_WI_COMMENT }}
               DB_TEMPLATE_FILENAME: ${{ parameters.DB_TEMPLATE_FILENAME }}
+              Is_Reset_DB: ${{ parameters.Is_Reset_DB }}
