@@ -157,7 +157,7 @@ stages:
             echo "❌ appsettings.pipe.json not found!"
             exit 1
         fi
-        rm $(Build.SourcesDirectory)/global.json
+        rm $(Build.SourcesDirectory)/Sadgan.Erp.Mobile/global.json
       displayName: "Override appsettings.json"
 
     - bash: |
