@@ -44,13 +44,13 @@ variables:
   - name: buildConfiguration
     value: 'Release'
   - name: webAppProject
-    value: '$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.WebApp/Sadgan.Erp.App.WebApp.csproj'
+    value: '$(Build.SourcesDirectory)/Sadgan.Erp.Mobile/SadganApps/Sadgan.Erp.App.WebApp/Sadgan.Erp.App.WebApp.csproj'
   - name: testProject
-    value: '$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.Tests/Sadgan.Erp.App.Tests.csproj'
+    value: '$(Build.SourcesDirectory)/Sadgan.Erp.Mobile/SadganApps/Sadgan.Erp.App.Tests/Sadgan.Erp.App.Tests.csproj'
   - name: dockerfile
-    value: '$(Build.SourcesDirectory)/Dockerfile.pipe'
+    value: '$(Build.SourcesDirectory)/Sadgan.Erp.Mobile/Dockerfile.pipe'
   - name: nginxConf
-    value: '$(Build.SourcesDirectory)/deploy/nginx.conf'
+    value: '$(Build.SourcesDirectory)/Sadgan.Erp.Mobile/deploy/nginx.conf'
   - name: dockerImage
     value: '$(DOCKER_REGISTRY)/fx/sally'
   - name: dotnetSdkPath
