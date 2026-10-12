@@ -148,7 +148,8 @@ stages:
         sourceFile="$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.WebApp/wwwroot/appsettings.pipe.json"
         destinationFile="$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
 
-        # ls -l $(Build.SourcesDirectory)
+        ls -l $(Build.SourcesDirectory)
+        pwd
         if [ -f "$sourceFile" ]; then
             cp -f "$sourceFile" "$destinationFile"
             echo "Successfully copied appsettings.pipe.json to appsettings.json"
