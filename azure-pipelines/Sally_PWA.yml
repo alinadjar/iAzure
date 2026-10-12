@@ -146,6 +146,9 @@ stages:
     - bash: |
         sourceFile="$(Build.SourcesDirectory)/src/Sadgan.Erp.App.WebApp/wwwroot/appsettings.pipe.json"
         destinationFile="$(Build.SourcesDirectory)/src/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
+
+        ls -l $(Build.SourcesDirectory)
+        
     
         if [ -f "$sourceFile" ]; then
             cp -f "$sourceFile" "$destinationFile"
