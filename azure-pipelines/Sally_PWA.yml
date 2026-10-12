@@ -44,9 +44,9 @@ variables:
   - name: buildConfiguration
     value: 'Release'
   - name: webAppProject
-    value: '$(Build.SourcesDirectory)/src/Sadgan.Erp.App.WebApp/Sadgan.Erp.App.WebApp.csproj'
+    value: '$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.WebApp/Sadgan.Erp.App.WebApp.csproj'
   - name: testProject
-    value: '$(Build.SourcesDirectory)/src/Sadgan.Erp.App.Tests/Sadgan.Erp.App.Tests.csproj'
+    value: '$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.Tests/Sadgan.Erp.App.Tests.csproj'
   - name: dockerfile
     value: '$(Build.SourcesDirectory)/Dockerfile.pipe'
   - name: nginxConf
@@ -131,9 +131,8 @@ stages:
 
     # - bash: |
     #     set -e
-    #     APPSETTINGS="$(Build.SourcesDirectory)/src/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
+    #     APPSETTINGS="$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
     #     test -f "$APPSETTINGS"
-
     #     sed -i "s|\"DifyApiBaseUrl\": \".*\"|\"DifyApiBaseUrl\": \"$(DIFY_API_BASE_URL)\"|" "$APPSETTINGS"
     #     sed -i "s|\"AuthApiKey\": \".*\"|\"AuthApiKey\": \"$(AUTH_API_KEY)\"|" "$APPSETTINGS"
     #   displayName: 'Apply runtime appsettings'
@@ -148,7 +147,6 @@ stages:
         destinationFile="$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
 
         # ls -l $(Build.SourcesDirectory)
-    
         if [ -f "$sourceFile" ]; then
             cp -f "$sourceFile" "$destinationFile"
             echo "Successfully copied appsettings.pipe.json to appsettings.json"
