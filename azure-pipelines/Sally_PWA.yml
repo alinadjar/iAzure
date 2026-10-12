@@ -215,7 +215,7 @@ stages:
         cd $(Build.ArtifactStagingDirectory)
         pwd
         ls -alh
-        APPSETTINGS_FILE="$STAGING/appsettings.json"
+        APPSETTINGS_FILE="$STAGING/publish/wwwroot/appsettings.json"
         sed -i 's|"Version": "[^"]*"|"Version": "'"$(tagSetting.BUILD_TAG)"'"|'                   $APPSETTINGS_FILE
         sed -i '/"Application": {/,/}/ s|"IsDeveloperMode": ".*"|"IsDeveloperMode": "false"|'     "$APPSETTINGS_FILE"
         cat "$APPSETTINGS_FILE" | jq .
