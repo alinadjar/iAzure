@@ -235,72 +235,72 @@ stages:
         NEXUS_USER: $(NEXUS_DOCKER_USERNAME)
         NEXUS_PASS: $(NEXUS_DOCKER_PASSWORD)
 
-# - stage: Deploy
-#   displayName: 'Deploy'
-#   dependsOn: Build
-#   condition: succeeded()
-#   variables:
-#     BUILD_TAG: $[ stageDependencies.Build.Build_Pwa.outputs['tagSetting.BUILD_TAG'] ]
-#     APP_FQIN: $[ stageDependencies.Build.Build_Pwa.outputs['tagSetting.APP_FQIN'] ]
-#     COMMIT_HASH: $[ stageDependencies.Build.Build_Pwa.outputs['gitInfo.COMMIT_HASH'] ]
-#     RELEASE_DIR: '$(deployReleaseRoot)'
-#   jobs:
-#   - job: Deployment
-#     displayName: 'Deploy to Linux host'
-#     pool: 'FX_OSS'
-#     steps:
-#     - checkout: none
+- stage: Deploy
+  displayName: 'Deploy'
+  dependsOn: Build
+  condition: succeeded()
+  variables:
+    BUILD_TAG: $[ stageDependencies.Build.Build_Pwa.outputs['tagSetting.BUILD_TAG'] ]
+    APP_FQIN: $[ stageDependencies.Build.Build_Pwa.outputs['tagSetting.APP_FQIN'] ]
+    COMMIT_HASH: $[ stageDependencies.Build.Build_Pwa.outputs['gitInfo.COMMIT_HASH'] ]
+    RELEASE_DIR: '$(deployReleaseRoot)'
+  jobs:
+  - job: Deployment
+    displayName: 'Deploy to Linux host'
+    pool: 'FX_OSS'
+    steps:
+    - checkout: none
 
-#     # - task: CopyFilesOverSSH@0
-#     #   displayName: 'Sync deploy files to target'
-#     #   inputs:
-#     #     sshEndpoint: 'Sally-PWA'
-#     #     sourceFolder: '$(Build.SourcesDirectory)/deploy'
-#     #     contents: |
-#     #       compose.yaml
-#     #       .env.example
-#     #     targetFolder: '$(RELEASE_DIR)'
-#     #     cleanTargetFolder: false
-#     #     overwrite: true
+    # - task: CopyFilesOverSSH@0
+    #   displayName: 'Sync deploy files to target'
+    #   inputs:
+    #     sshEndpoint: 'Sally-PWA'
+    #     sourceFolder: '$(Build.SourcesDirectory)/deploy'
+    #     contents: |
+    #       compose.yaml
+    #       .env.example
+    #     targetFolder: '$(RELEASE_DIR)'
+    #     cleanTargetFolder: false
+    #     overwrite: true
 
-#     - task: SSH@0
-#       displayName: 'Deployment'
-#       inputs:
-#         sshEndpoint: 'Sally-PWA'
-#         runOptions: 'inline'
-#         failOnStdErr: false
-#         inline: |
-#           set -e
-#           echo "=== BUILD_TAG: $(BUILD_TAG)"
-#           echo "BRANCH: ${{ parameters.BRANCH }}"
-#           echo "COMMIT: $(COMMIT_HASH)"
-#           echo "APP_FQIN: $(APP_FQIN)"
+    - task: SSH@0
+      displayName: 'Deployment'
+      inputs:
+        sshEndpoint: 'Sally-PWA'
+        runOptions: 'inline'
+        failOnStdErr: false
+        inline: |
+          set -e
+          echo "=== BUILD_TAG: $(BUILD_TAG)"
+          echo "BRANCH: ${{ parameters.BRANCH }}"
+          echo "COMMIT: $(COMMIT_HASH)"
+          echo "APP_FQIN: $(APP_FQIN)"
 
-#           RELEASE_DIR="$(RELEASE_DIR)"
-#           mkdir -p "$RELEASE_DIR"
-#           cd "$RELEASE_DIR"
-#           ls -alh
+          RELEASE_DIR="$(RELEASE_DIR)"
+          mkdir -p "$RELEASE_DIR"
+          cd "$RELEASE_DIR"
+          ls -alh
 
-#            # if [ ! -f .env ]; then
-#            #   if [ -f .env.example ]; then
-#            #     cp .env.example .env
-#            #     echo "Created .env from .env.example — review HOST_PORT on the host if needed."
-#            #   else
-#            #     echo ".env is missing on $RELEASE_DIR"
-#            #     exit 1
-#            #   fi
-#            # fi
+           # if [ ! -f .env ]; then
+           #   if [ -f .env.example ]; then
+           #     cp .env.example .env
+           #     echo "Created .env from .env.example — review HOST_PORT on the host if needed."
+           #   else
+           #     echo ".env is missing on $RELEASE_DIR"
+           #     exit 1
+           #   fi
+           # fi
 
-#           # Azure DevOps substitutes these on the agent BEFORE sending to the remote host
-#           echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" -u "$(NEXUS_DOCKER_USERNAME)" --password-stdin 2>/dev/null
+          # Azure DevOps substitutes these on the agent BEFORE sending to the remote host
+          echo "$(NEXUS_DOCKER_PASSWORD)" | docker login "$(DOCKER_REGISTRY)" -u "$(NEXUS_DOCKER_USERNAME)" --password-stdin 2>/dev/null
 
-#           echo "==== updating .env:"
-#           sed -i "s/^BUILD_TAG=.*/BUILD_TAG=$(BUILD_TAG)/" .env
-#           sed -i "s|^APP_FQIN=.*|APP_FQIN=$(APP_FQIN)|" .env
+          echo "==== updating .env:"
+          sed -i "s/^BUILD_TAG=.*/BUILD_TAG=$(BUILD_TAG)/" .env
+          sed -i "s|^APP_FQIN=.*|APP_FQIN=$(APP_FQIN)|" .env
 
-#           echo "Pulling image: $(APP_FQIN)"
-#           docker pull "$(APP_FQIN)" || { echo "docker pull failed. Exiting."; exit 1; }
+          echo "Pulling image: $(APP_FQIN)"
+          docker pull "$(APP_FQIN)" || { echo "docker pull failed. Exiting."; exit 1; }
 
-#           docker compose --env-file .env -f compose.yaml up -d --no-deps pwa
-#           docker compose --env-file .env -f compose.yaml ps
+          docker compose --env-file .env -f compose.yaml up -d --no-deps pwa
+          docker compose --env-file .env -f compose.yaml ps
 
