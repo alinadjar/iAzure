@@ -83,6 +83,7 @@ stages:
     pool: 'FX_OSS'
     steps:
     - checkout: git://SadganErp/Sadgan.Erp.Mobile@${{ parameters.BRANCH }}
+    - checkout: git://SadganErp/Sadgan.Erp.Client.Core@dev
       fetchDepth: 1
     # - checkout: git://Project/Repo@${{ parameters.BRANCH }}
     # - checkout: git://Project/Repo@${{ parameters.BRANCH }}
