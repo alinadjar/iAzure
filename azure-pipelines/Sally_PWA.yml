@@ -145,8 +145,8 @@ stages:
 
     # Override appsettings.json
     - bash: |
-        sourceFile="$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.WebApp/wwwroot/appsettings.pipe.json"
-        destinationFile="$(Build.SourcesDirectory)/SadganApps/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
+        sourceFile="$(Build.SourcesDirectory)/Sadgan.Erp.Mobile/SadganApps/Sadgan.Erp.App.WebApp/wwwroot/appsettings.pipe.json"
+        destinationFile="$(Build.SourcesDirectory)/Sadgan.Erp.Mobile/SadganApps/Sadgan.Erp.App.WebApp/wwwroot/appsettings.json"
 
         ls -l $(Build.SourcesDirectory)
         pwd
