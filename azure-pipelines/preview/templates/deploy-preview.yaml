@@ -23,6 +23,9 @@ parameters:
   - name: DB_TEMPLATE_FILENAME
     type: string
     default: 'backup-template.tar.gz'    
+  - name: Is_Reset_DB
+    type: string     
+    default: 'NO'    
 
 steps:
   - checkout: none
@@ -118,6 +121,20 @@ steps:
           "$src" > "$dst"
       }
 
+      RESTORE_DB() {
+        echo "Restoring ${DB_TEMPLATE_FILENAME} into pg-${WIT_ID} ..."
+        ssh $SSH_OPTS "$REMOTE" \
+          "set -euo pipefail && \
+           cd /mnt/erp/data && \
+           bash restore-streamlined.sh -c 'pg-${WIT_ID}' -u postgres -p 123 -f ${DB_TEMPLATE_FILENAME} --no-globals --drop-existing && \
+           mkdir -p '${DEPLOY_PATH}/metadata' && \
+           touch '${DEPLOY_PATH}/metadata/.db_template_restored'"
+      }
+
+      IS_RESET="${{ parameters.Is_Reset_DB }}"
+      DB_MARKER="${DEPLOY_PATH}/metadata/.db_template_restored"
+
+
       # Defaults for PG tuning:
       PG_MAX_CONNECTIONS="${PG_MAX_CONNECTIONS:-100}"
       PG_SHARED_BUFFERS="${PG_SHARED_BUFFERS:-256MB}"
@@ -157,6 +174,8 @@ steps:
       SSH_OPTS="$SSH_OPTS -i $PREVIEW_SSH_PRIVATE_KEY_PATH"
 
       ssh $SSH_OPTS "$REMOTE" "sudo mkdir -p '${DEPLOY_PATH}' && sudo chown -R '${PREVIEW_SSH_USER}:${PREVIEW_SSH_USER}' '${DEPLOY_PATH}'"
+      # BEFORE rsync
+      MARKER_PRESENT=$(ssh $SSH_OPTS "$REMOTE" "cd '${DEPLOY_PATH}' && test -f 'metadata/.db_template_restored' && echo yes || echo no")
       rsync -avz --delete \
         -e "ssh $SSH_OPTS" \
         "$STAGING/" \
@@ -197,13 +216,27 @@ steps:
            sleep 3; \
          done && \
          sudo docker exec \"\$CONTAINER\" pg_isready -U postgres"
+      
 
-      # ---- Restore the template backup into the per-task Postgres ----
-      echo "Restoring ${DB_TEMPLATE_FILENAME} into pg-${WIT_ID} ..."
-      ssh $SSH_OPTS "$REMOTE" \
-        "set -euo pipefail && \
-         cd /mnt/erp/data && \
-         bash restore-streamlined.sh -c 'pg-${WIT_ID}' -u postgres -p 123 -f ${DB_TEMPLATE_FILENAME} --no-globals --drop-existing"
+      if [ "$IS_RESET" = "YES" ]; then
+        echo "Is_Reset_DB = YES — restoring database template"
+        RESTORE_DB
+      else
+        echo "DB_MARKER=${DB_MARKER}"
+        ssh $SSH_OPTS "$REMOTE" "ls -la '${DEPLOY_PATH}/metadata/' ; test -f '${DB_MARKER}' && echo test_yes || echo test_no"
+        # MARKER_PRESENT=$(ssh $SSH_OPTS "$REMOTE" \
+        #   "test -f '${DB_MARKER}' && echo yes || echo no")
+        # MARKER_REL="metadata/.db_template_restored"
+        # MARKER_PRESENT=$(ssh $SSH_OPTS "$REMOTE" "cd '${DEPLOY_PATH}' && test -f '${MARKER_REL}' && echo yes || echo no")
+        if [ "$MARKER_PRESENT" = "no" ]; then
+          echo "First deployment (no DB marker) — restoring template despite Is_Reset_DB=NO"
+          RESTORE_DB
+        else
+          echo "Is_Reset_DB != YES and DB already initialized — skipping restore"
+          ssh $SSH_OPTS "$REMOTE" "mkdir -p '${DEPLOY_PATH}/metadata' && touch '${DEPLOY_PATH}/metadata/.db_template_restored'"
+        fi
+      fi 
+
 
       ssh $SSH_OPTS "$REMOTE" \
         "set -euo pipefail && \
