@@ -2,15 +2,20 @@ parameters:
 - name: profile
   type: string
   # backend | frontend
+- name: branch
+  type: string
+  default: dev
+  # Used for manual runs and non-PR triggers (CI push to dev, etc.)
 
 steps:
 - bash: |
     set -euo pipefail
 
-    # if [ "$(Build.Reason)" != "PullRequest" ]; then
-    #   echo "This pipeline is for Pull Request validation (Build.Reason=$(Build.Reason))."
-    #   exit 1
-    # fi
+    BUILD_REASON="$(Build.Reason)"
+    IS_PR=false
+    if [ "$BUILD_REASON" = "PullRequest" ]; then
+      IS_PR=true
+    fi
 
     mkdir -p "$GIT_HOME"
     export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
@@ -22,19 +27,22 @@ steps:
     git config --file "$GIT_CONFIG_GLOBAL" --add safe.directory '*'
 
     BASE_URL="http://$(GIT_PAT)@azure.sadgan.int/WebApp"
-    PR_ID="$(System.PullRequest.PullRequestId)"
-    TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}"
     APP_REPO="$(Build.Repository.Name)"
     WORK_ROOT="$(System.DefaultWorkingDirectory)"
+    SHARED_BRANCH="${{ parameters.branch }}"
 
-    echo "PR #$PR_ID → target: $TARGET_BRANCH | app repo: $APP_REPO"
-
-    if [ "$TARGET_BRANCH" != "dev" ] && [[ ! "$TARGET_BRANCH" =~ ^wit/ ]]; then
-      echo "Unsupported PR target branch: $TARGET_BRANCH (expected dev or wit/*)"
-      exit 1
+    if [ "$IS_PR" = true ]; then
+      PR_ID="$(System.PullRequest.PullRequestId)"
+      TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}"
+      echo "PR #$PR_ID → target: $TARGET_BRANCH | triggering repo: $APP_REPO"
+      if [ "$TARGET_BRANCH" != "dev" ] && [[ ! "$TARGET_BRANCH" =~ ^wit/ ]]; then
+        echo "Unsupported PR target branch: $TARGET_BRANCH (expected dev or wit/*)"
+        exit 1
+      fi
+      SHARED_BRANCH="dev"
+    else
+      echo "Non-PR run (Build.Reason=$BUILD_REASON): cloning @ branch $SHARED_BRANCH"
     fi
-
-    SHARED_BRANCH="dev"
 
     clone_shared() {
       local branch_name="$1"
@@ -63,31 +71,49 @@ steps:
       cd "$WORK_ROOT"
     }
 
+    clone_app_branch() {
+      local repo_name="$1"
+      local branch_name="$2"
+      local target_dir="$3"
+
+      echo "Cloning SadganErp/$repo_name @ $branch_name ..."
+      rm -rf "$target_dir"
+      git clone --branch "$branch_name" "$BASE_URL/SadganErp/_git/$repo_name" "$target_dir"
+      echo "App commit under test: $(git -C "$target_dir" rev-parse --short HEAD)"
+    }
+
     clone_shared "$SHARED_BRANCH" "1_Configs" "$WORK_ROOT/SadganShared/1_Configs"
     clone_shared "$SHARED_BRANCH" "2_SharedLibrary" "$WORK_ROOT/SadganShared/2_SharedLibrary"
 
     if [ "${{ parameters.profile }}" = "frontend" ]; then
       clone_shared "$SHARED_BRANCH" "3_ClientLibrary" "$WORK_ROOT/SadganShared/3_ClientLibrary"
       clone_shared "$SHARED_BRANCH" "4_ServerLibrary" "$WORK_ROOT/SadganShared/4_ServerLibrary"
-      clone_app_pr_merge "Sadgan.Erp.Panel" "$WORK_ROOT/SadganErp/Sadgan.Erp.Panel"
+      if [ "$IS_PR" = true ]; then
+        if [ "$APP_REPO" != "Sadgan.Erp.Panel" ]; then
+          echo "Frontend PR test must run from Sadgan.Erp.Panel repository (got $APP_REPO)."
+          exit 1
+        fi
+        clone_app_pr_merge "Sadgan.Erp.Panel" "$WORK_ROOT/SadganErp/Sadgan.Erp.Panel"
+      else
+        clone_app_branch "Sadgan.Erp.Panel" "$SHARED_BRANCH" "$WORK_ROOT/SadganErp/Sadgan.Erp.Panel"
+      fi
       rm -rf "$WORK_ROOT/SadganErp/Sadgan.Erp.Client.Core"
       git clone --branch "$SHARED_BRANCH" "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core" "$WORK_ROOT/SadganErp/Sadgan.Erp.Client.Core"
     else
       clone_shared "$SHARED_BRANCH" "4_ServerLibrary" "$WORK_ROOT/SadganShared/4_ServerLibrary"
-      if [ "$APP_REPO" != "SadganErpApi" ]; then
-        echo "Backend PR test must run from SadganErpApi repository (got $APP_REPO)."
-        exit 1
+      if [ "$IS_PR" = true ]; then
+        if [ "$APP_REPO" != "SadganErpApi" ]; then
+          echo "Backend PR test must run from SadganErpApi repository (got $APP_REPO)."
+          exit 1
+        fi
+        clone_app_pr_merge "SadganErpApi" "$WORK_ROOT/SadganErp/SadganErpApi"
+      else
+        clone_app_branch "SadganErpApi" "$SHARED_BRANCH" "$WORK_ROOT/SadganErp/SadganErpApi"
       fi
-      clone_app_pr_merge "SadganErpApi" "$WORK_ROOT/SadganErp/SadganErpApi"
-    fi
-
-    if [ "${{ parameters.profile }}" = "frontend" ] && [ "$APP_REPO" != "Sadgan.Erp.Panel" ]; then
-      echo "Frontend PR test must run from Sadgan.Erp.Panel repository (got $APP_REPO)."
-      exit 1
     fi
 
     echo "Checkout complete."
-  displayName: 'Clone shared repos and PR merge commit'
+  displayName: 'Clone repos (PR merge or branch tip)'
   env:
     GIT_PAT: $(GIT_PAT)
     GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
