@@ -27,16 +27,30 @@ steps:
     dotnet restore "$TEST_PROJ" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
   displayName: 'Dotnet restore (backend tests)'
 
-- task: DotNetCoreCLI@2
+# - task: DotNetCoreCLI@2
+#   displayName: 'Run backend tests (Gateway HttpApi)'
+#   inputs:
+#     command: test
+#     projects: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj'
+#     arguments: >
+#       --configuration ${{ parameters.buildConfiguration }}
+#       --no-restore
+#       --logger trx
+#     publishTestResults: true
+
+- bash: |
+    set -euo pipefail
+    export PATH="/opt/net_sdk_10:$PATH"
+    export MSBUILDDISABLENODEREUSE=1
+    TEST_PROJ="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj"
+    RESULTS_DIR="$(System.DefaultWorkingDirectory)/TestResults"
+    dotnet test "$TEST_PROJ" \
+      --configuration ${{ parameters.buildConfiguration }} \
+      --no-restore \
+      --logger "trx;LogFileName=backend-gateway.trx" \
+      --results-directory "$RESULTS_DIR"
   displayName: 'Run backend tests (Gateway HttpApi)'
-  inputs:
-    command: test
-    projects: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj'
-    arguments: >
-      --configuration ${{ parameters.buildConfiguration }}
-      --no-restore
-      --logger trx
-    publishTestResults: true
+  
 
 - task: PublishTestResults@2
   displayName: 'Publish test results'
