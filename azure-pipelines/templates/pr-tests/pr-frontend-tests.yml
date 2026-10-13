@@ -24,16 +24,30 @@ steps:
     dotnet restore "$SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
   displayName: 'Dotnet restore (Panel solution)'
 
-- task: DotNetCoreCLI@2
-  displayName: 'Run frontend tests (Panel solution)'
-  inputs:
-    command: test
-    projects: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln'
-    arguments: >
-      --configuration ${{ parameters.buildConfiguration }}
-      --no-restore
-      --logger trx
-    publishTestResults: true
+# - task: DotNetCoreCLI@2
+#   displayName: 'Run frontend tests (Panel solution)'
+#   inputs:
+#     command: test
+#     projects: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln'
+#     arguments: >
+#       --configuration ${{ parameters.buildConfiguration }}
+#       --no-restore
+#       --logger trx
+#     publishTestResults: true
+
+- bash: |
+    set -euo pipefail
+    export PATH="/opt/net_sdk_10:$PATH"
+    export MSBUILDDISABLENODEREUSE=1
+    SLN="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
+    RESULTS_DIR="$(System.DefaultWorkingDirectory)/TestResults"
+    dotnet test "$SLN" \
+      --configuration ${{ parameters.buildConfiguration }} \
+      --no-restore \
+      --logger "trx;LogFileName=panel.trx" \
+      --results-directory "$RESULTS_DIR"
+  displayName: 'Run frontend tests'
+
 
 - task: PublishTestResults@2
   displayName: 'Publish test results'
