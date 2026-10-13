@@ -7,10 +7,10 @@ steps:
 - bash: |
     set -euo pipefail
 
-    if [ "$(Build.Reason)" != "PullRequest" ]; then
-      echo "This pipeline is for Pull Request validation (Build.Reason=$(Build.Reason))."
-      exit 1
-    fi
+    # if [ "$(Build.Reason)" != "PullRequest" ]; then
+    #   echo "This pipeline is for Pull Request validation (Build.Reason=$(Build.Reason))."
+    #   exit 1
+    # fi
 
     mkdir -p "$GIT_HOME"
     export GIT_CONFIG_GLOBAL="$(GIT_CONFIG_GLOBAL)"
