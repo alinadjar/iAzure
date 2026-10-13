@@ -1,0 +1,46 @@
+parameters:
+- name: buildConfiguration
+  type: string
+  default: Release
+
+steps:
+- template: pr-test-clone.yml
+  parameters:
+    profile: frontend
+
+- bash: |
+    set -euo pipefail
+    export PATH="/opt/net_sdk_10:$PATH"
+    export MSBUILDDISABLENODEREUSE=1
+    dotnet --info
+  displayName: 'Verify .NET SDK'
+
+- bash: |
+    set -euo pipefail
+    export PATH="/opt/net_sdk_10:$PATH"
+    export MSBUILDDISABLENODEREUSE=1
+
+    SLN="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
+    dotnet restore "$SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
+  displayName: 'Dotnet restore (Panel solution)'
+
+- task: DotNetCoreCLI@2
+  displayName: 'Run frontend tests (Panel solution)'
+  inputs:
+    command: test
+    projects: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln'
+    arguments: >
+      --configuration ${{ parameters.buildConfiguration }}
+      --no-restore
+      --logger trx
+    publishTestResults: true
+
+- task: PublishTestResults@2
+  displayName: 'Publish test results'
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFiles: '**/TestResults/*.trx'
+    searchFolder: '$(System.DefaultWorkingDirectory)'
+    mergeTestResults: true
+    testRunTitle: 'Sadgan.Erp.Panel PR — Panel Tests'
+    failTaskOnFailedTests: true
