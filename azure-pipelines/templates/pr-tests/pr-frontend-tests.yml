@@ -10,6 +10,7 @@ steps:
 
 - bash: |
     set -euo pipefail
+    export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
     dotnet --info
@@ -17,11 +18,13 @@ steps:
 
 - bash: |
     set -euo pipefail
+    export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
 
     SLN="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
     dotnet restore "$SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
+    dotnet build "$SLN" --configuration ${{ parameters.buildConfiguration }} --no-restore
   displayName: 'Dotnet restore (Panel solution)'
 
 # - task: DotNetCoreCLI@2
@@ -35,26 +38,71 @@ steps:
 #       --logger trx
 #     publishTestResults: true
 
+# - bash: |
+#     set -euo pipefail
+#     export PATH="/opt/net_sdk_10:$PATH"
+#     export MSBUILDDISABLENODEREUSE=1
+#     SLN="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
+#     RESULTS_DIR="$(System.DefaultWorkingDirectory)/TestResults"
+#     dotnet test "$SLN" \
+#       --configuration ${{ parameters.buildConfiguration }} \
+#       --no-restore \
+#       --logger "trx;LogFileName=panel.trx" \
+#       --results-directory "$RESULTS_DIR"
+#   displayName: 'Run frontend tests'
+
+
 - bash: |
-    set -euo pipefail
+    set -uo pipefail
+    export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
-    SLN="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
-    RESULTS_DIR="$(System.DefaultWorkingDirectory)/TestResults"
-    dotnet test "$SLN" \
-      --configuration ${{ parameters.buildConfiguration }} \
-      --no-restore \
-      --logger "trx;LogFileName=panel.trx" \
-      --results-directory "$RESULTS_DIR"
-  displayName: 'Run frontend tests'
+
+    ROOT="$(System.DefaultWorkingDirectory)"
+    CFG="${{ parameters.buildConfiguration }}"
+    RESULTS_DIR="$ROOT/TestResults"
+    mkdir -p "$RESULTS_DIR"
+
+    # MockTests and ServerTests share one folder; build+test each project separately so testhost files are not overwritten.
+    TEST_PROJECTS=(
+      "$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.MockTests.csproj"
+      "$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.ServerTests.csproj"
+      "$ROOT/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.Tests/Sadgan.Erp.Panel.Api.Tests.csproj"
+    )
+
+    FAILED=0
+    for PROJ in "${TEST_PROJECTS[@]}"; do
+      NAME="$(basename "$PROJ" .csproj)"
+      echo "========== $NAME =========="
+      dotnet build "$PROJ" --configuration "$CFG" --no-restore
+      if ! dotnet test "$PROJ" \
+        --configuration "$CFG" \
+        --no-build \
+        --logger "trx;LogFileName=${NAME}.trx" \
+        --results-directory "$RESULTS_DIR"; then
+        echo "##vso[task.logissue type=error]Test project failed: $NAME"
+        FAILED=1
+      fi
+    done
+
+    echo "TRX files produced:"
+    find "$RESULTS_DIR" -name '*.trx' -type f -ls || true
+
+    if [ "$FAILED" -ne 0 ]; then
+      exit 1
+    fi
+  displayName: 'Run frontend tests (per project)'
+
+
+
 
 
 - task: PublishTestResults@2
   displayName: 'Publish test results'
-  condition: succeededOrFailed()
+  condition: always()
   inputs:
-    testResultsFiles: '**/TestResults/*.trx'
-    searchFolder: '$(System.DefaultWorkingDirectory)'
+    testResultsFormat: VSTest
+    testResultsFiles: '$(System.DefaultWorkingDirectory)/TestResults/**/*.trx'
     mergeTestResults: true
     testRunTitle: 'Sadgan.Erp.Panel PR — Panel Tests'
     failTaskOnFailedTests: true
