@@ -10,6 +10,7 @@ steps:
 
 - bash: |
     set -euo pipefail
+    export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
     dotnet --info
@@ -17,6 +18,7 @@ steps:
 
 - bash: |
     set -euo pipefail
+    export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
 
@@ -25,7 +27,8 @@ steps:
 
     dotnet restore "$HOST_PROJ" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
     dotnet restore "$TEST_PROJ" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
-  displayName: 'Dotnet restore (backend tests)'
+    dotnet build "$TEST_PROJ" --configuration ${{ parameters.buildConfiguration }} --no-restore
+  displayName: 'Dotnet restore and build (backend tests)'
 
 # - task: DotNetCoreCLI@2
 #   displayName: 'Run backend tests (Gateway HttpApi)'
@@ -40,13 +43,17 @@ steps:
 
 - bash: |
     set -euo pipefail
+    export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
+
     TEST_PROJ="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj"
     RESULTS_DIR="$(System.DefaultWorkingDirectory)/TestResults"
+    mkdir -p "$RESULTS_DIR"
+
     dotnet test "$TEST_PROJ" \
       --configuration ${{ parameters.buildConfiguration }} \
-      --no-restore \
+      --no-build \
       --logger "trx;LogFileName=backend-gateway.trx" \
       --results-directory "$RESULTS_DIR"
   displayName: 'Run backend tests (Gateway HttpApi)'
@@ -54,10 +61,10 @@ steps:
 
 - task: PublishTestResults@2
   displayName: 'Publish test results'
-  condition: succeededOrFailed()
+  condition: always()
   inputs:
-    testResultsFiles: '**/TestResults/*.trx'
-    searchFolder: '$(System.DefaultWorkingDirectory)'
+    testResultsFormat: VSTest
+    testResultsFiles: '$(System.DefaultWorkingDirectory)/TestResults/**/*.trx'
     mergeTestResults: true
     testRunTitle: 'SadganErpApi PR — Gateway HttpApi Tests'
     failTaskOnFailedTests: true
