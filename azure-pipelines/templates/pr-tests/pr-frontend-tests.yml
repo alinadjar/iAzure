@@ -14,6 +14,9 @@ steps:
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
     dotnet --info
+    whoami
+    echo "nvmdir = $NVM_DIR"
+    node -v
   displayName: 'Verify .NET SDK'
 
 - bash: |
