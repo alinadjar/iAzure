@@ -65,10 +65,10 @@ parameters:
     type: string
     default: '0'
 
-  - name: parallel
-    displayName: "Parallel Execution"
-    type: boolean
-    default: true
+  # - name: parallel
+  #   displayName: "Parallel Execution"
+  #   type: boolean
+  #   default: true
 
 
   - name: screenshot
@@ -230,7 +230,7 @@ jobs:
         BASE_URL_ERP=${{ parameters.baseUrl }}
         HEADLESS=${HEADLESS_VAL}
         SLOW_MO=${{ parameters.slowMo }}
-        PARALLEL=${{ parameters.parallel }}
+        # PARALLEL=${{ parameters.parallel }}
         ACTION_TIMEOUT=10000
         NAVIGATION_TIMEOUT=30000
         USERNAME_ERP=${USERNAME_ERP}
@@ -347,7 +347,7 @@ jobs:
       env:
         CI: 'true'
         SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-        PARALLEL: ${{ parameters.parallel }}
+        # PARALLEL: ${{ parameters.parallel }}
         AZURE_DEVOPS_PROJECT: $(AZURE_DEVOPS_PROJECT)
         AZURE_TEST_PLAN_ID: ${{ parameters.testPlanId }}
         AZURE_TEST_PLAN_NAME: ${{ parameters.testPlanName }}
