@@ -21,11 +21,24 @@ steps:
     export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
+    dotnet --info
 
     SLN="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
     dotnet restore "$SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
+
+    node -v
+    cd $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp
+    rm global.json 2>/dev/null || true
+     # npm i
+    cp -r /opt/node_modules .
+    chmod -R +x node_modules/.bin
+    ls -l node_modules/.bin/tailwindcss
+    # npm run build:css
+    rm $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/global.json 2>/dev/null || true
+
     dotnet build "$SLN" --configuration ${{ parameters.buildConfiguration }} --no-restore
   displayName: 'Dotnet restore (Panel solution)'
+
 
 # - task: DotNetCoreCLI@2
 #   displayName: 'Run frontend tests (Panel solution)'
