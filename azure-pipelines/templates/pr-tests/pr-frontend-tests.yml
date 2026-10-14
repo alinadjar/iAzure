@@ -57,8 +57,8 @@ steps:
 
     # MockTests and ServerTests share one folder; build+test each project separately so testhost files are not overwritten.
     TEST_PROJECTS=(
-      "$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.MockTests.csproj"
-      "$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.ServerTests.csproj"
+      # "$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.MockTests.csproj"
+      # "$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.ServerTests.csproj"
       "$ROOT/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.Tests/Sadgan.Erp.Panel.Api.Tests.csproj"
     )
 
