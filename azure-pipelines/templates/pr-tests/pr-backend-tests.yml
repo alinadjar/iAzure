@@ -22,42 +22,78 @@ steps:
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
 
-    HOST_PROJ="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj"
-    TEST_PROJ="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj"
+    ROOT="$(System.DefaultWorkingDirectory)"
+    API="$ROOT/SadganErp/SadganErpApi"
+    SHARED_LIB="$ROOT/SadganShared/2_SharedLibrary"
+    CFG="${{ parameters.buildConfiguration }}"
+
+    HOST_PROJ="$API/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj"
+    GATEWAY_SLN="$API/4_Gateway/SadganErp.Api.Gateway.sln"
+
+    TEST_PROJECTS=(
+      "$SHARED_LIB/Sadgan.Shared.Tests/Sadgan.Shared.Tests.csproj"
+      "$API/1_Core/test/SadganErp.Api.Core.EntityFrameworkCore.Tests/SadganErp.Api.Core.EntityFrameworkCore.Tests.csproj"
+      "$API/4_Gateway/test/SadganErp.Api.Gateway.Application.Tests/SadganErp.Api.Gateway.Application.Tests.csproj"
+      "$API/4_Gateway/test/SadganErp.Api.Gateway.EntityFrameworkCore.Tests/SadganErp.Api.Gateway.EntityFrameworkCore.Tests.csproj"
+      "$API/4_Gateway/test/SadganErp.Api.Gateway.Domain.Tests/SadganErp.Api.Gateway.Domain.Tests.csproj"
+      "$API/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj"
+    )
 
     dotnet restore "$HOST_PROJ" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
-    dotnet restore "$TEST_PROJ" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
-    dotnet build "$TEST_PROJ" --configuration ${{ parameters.buildConfiguration }} --no-restore
-  displayName: 'Dotnet restore and build (backend tests)'
+    dotnet restore "$GATEWAY_SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
 
-# - task: DotNetCoreCLI@2
-#   displayName: 'Run backend tests (Gateway HttpApi)'
-#   inputs:
-#     command: test
-#     projects: '$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj'
-#     arguments: >
-#       --configuration ${{ parameters.buildConfiguration }}
-#       --no-restore
-#       --logger trx
-#     publishTestResults: true
+    for PROJ in "${TEST_PROJECTS[@]}"; do
+      echo "Restoring $(basename "$PROJ") ..."
+      dotnet restore "$PROJ" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
+    done
+
+    dotnet build "$HOST_PROJ" --configuration "$CFG" --no-restore
+  displayName: 'Dotnet restore and build (backend)'
 
 - bash: |
-    set -euo pipefail
+    set -uo pipefail
     export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
 
-    TEST_PROJ="$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj"
-    RESULTS_DIR="$(System.DefaultWorkingDirectory)/TestResults"
+    ROOT="$(System.DefaultWorkingDirectory)"
+    API="$ROOT/SadganErp/SadganErpApi"
+    SHARED_LIB="$ROOT/SadganShared/2_SharedLibrary"
+    CFG="${{ parameters.buildConfiguration }}"
+    RESULTS_DIR="$ROOT/TestResults"
     mkdir -p "$RESULTS_DIR"
 
-    dotnet test "$TEST_PROJ" \
-      --configuration ${{ parameters.buildConfiguration }} \
-      --no-build \
-      --logger "trx;LogFileName=backend-gateway.trx" \
-      --results-directory "$RESULTS_DIR"
-  displayName: 'Run backend tests (Gateway HttpApi)'
-  
+    TEST_PROJECTS=(
+      "$SHARED_LIB/Sadgan.Shared.Tests/Sadgan.Shared.Tests.csproj"
+      "$API/1_Core/test/SadganErp.Api.Core.EntityFrameworkCore.Tests/SadganErp.Api.Core.EntityFrameworkCore.Tests.csproj"
+      "$API/4_Gateway/test/SadganErp.Api.Gateway.Application.Tests/SadganErp.Api.Gateway.Application.Tests.csproj"
+      "$API/4_Gateway/test/SadganErp.Api.Gateway.EntityFrameworkCore.Tests/SadganErp.Api.Gateway.EntityFrameworkCore.Tests.csproj"
+      "$API/4_Gateway/test/SadganErp.Api.Gateway.Domain.Tests/SadganErp.Api.Gateway.Domain.Tests.csproj"
+      "$API/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj"
+    )
+
+    FAILED=0
+    for PROJ in "${TEST_PROJECTS[@]}"; do
+      NAME="$(basename "$PROJ" .csproj)"
+      echo "========== $NAME =========="
+      dotnet build "$PROJ" --configuration "$CFG" --no-restore
+      if ! dotnet test "$PROJ" \
+        --configuration "$CFG" \
+        --no-build \
+        --logger "trx;LogFileName=${NAME}.trx" \
+        --results-directory "$RESULTS_DIR"; then
+        echo "##vso[task.logissue type=error]Test project failed: $NAME"
+        FAILED=1
+      fi
+    done
+
+    echo "TRX files produced:"
+    find "$RESULTS_DIR" -name '*.trx' -type f -ls || true
+
+    if [ "$FAILED" -ne 0 ]; then
+      exit 1
+    fi
+  displayName: 'Run backend tests (per project)'
 
 - task: PublishTestResults@2
   displayName: 'Publish test results'
@@ -66,5 +102,5 @@ steps:
     testResultsFormat: VSTest
     testResultsFiles: '$(System.DefaultWorkingDirectory)/TestResults/**/*.trx'
     mergeTestResults: true
-    testRunTitle: 'SadganErpApi PR — Gateway HttpApi Tests'
+    testRunTitle: 'SadganErpApi PR — Backend Tests'
     failTaskOnFailedTests: true
