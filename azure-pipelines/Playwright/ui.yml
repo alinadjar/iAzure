@@ -10,12 +10,13 @@ parameters:
   - name: baseUrl
     displayName: 'ERP UI Base URL (BASE_URL_ERP)'
     type: string
-    default: 'https://alpha.fx.sadgan.int'
+    default: 'https://qa.fx.sadgan.int'
     values:
       - 'https://alpha.fx.sadgan.int'
       - 'https://stage.fx.sadgan.int'
       - 'https://dev.fx.sadgan.int'
       - 'https://qa.fx.sadgan.int'      
+      - 'https://uat.fx.sadgan.int/'
       - 'https://48286.local.sadgan.int'
 
   - name: assembly
