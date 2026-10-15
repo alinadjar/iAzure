@@ -19,12 +19,13 @@ parameters:
   - name: baseUrl
     displayName: 'API Base URL'
     type: string
-    default: 'https://alpha.api.fx.sadgan.int'
+    default: 'https://qa.api.fx.sadgan.int'
     values:
       - 'https://alpha.api.fx.sadgan.int'
       - 'https://qa.api.fx.sadgan.int'
       - 'https://stage.api.fx.sadgan.int'
       - 'http://dev.api.fx.sadgan.int'
+      - 'http://uat.api.fx.sadgan.int'
       - 'https://48286-api.local.sadgan.int'
 
   - name: assembly
