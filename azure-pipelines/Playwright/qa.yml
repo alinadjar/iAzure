@@ -24,8 +24,8 @@ parameters:
       - 'https://alpha.api.fx.sadgan.int'
       - 'https://qa.api.fx.sadgan.int'
       - 'https://stage.api.fx.sadgan.int'
-      - 'http://dev.api.fx.sadgan.int'
-      - 'http://uat.api.fx.sadgan.int'
+      - 'https://dev.api.fx.sadgan.int'
+      - 'https://uat.api.fx.sadgan.int'
       - 'https://48286-api.local.sadgan.int'
 
   - name: assembly
