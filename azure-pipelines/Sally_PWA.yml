@@ -214,7 +214,7 @@ stages:
         
         cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
         ls -alh 
-        JS_FILE=service-worker.js
+        JS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/service-worker.js
     
         sed -i "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = '$NEW_VALUE'/" "$JS_FILE"
         echo "Updated CACHE_NAME to $NEW_VALUE in $JS_FILE"
