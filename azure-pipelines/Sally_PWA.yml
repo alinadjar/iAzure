@@ -207,19 +207,37 @@ stages:
       displayName: 'Publish Blazor WASM'
 
 
-    - bash: |
-        # echo "Applying cache busting to all static assets..."
-        COMMIT_HASH="$(gitInfo.COMMIT_HASH)"
-        NEW_VALUE="fx-pwa-cache-v$COMMIT_HASH"
+    # - bash: |
+    #     # echo "Applying cache busting to all static assets..."
+    #     COMMIT_HASH="$(gitInfo.COMMIT_HASH)"
+    #     NEW_VALUE="fx-pwa-cache-v$COMMIT_HASH"
         
-        cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
-        ls -alh 
-        JS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/service-worker.js
+    #     cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+    #     ls -alh 
+    #     JS_FILE=$(Build.ArtifactStagingDirectory)/publish/wwwroot/service-worker.js
     
-        sed -i "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = '$NEW_VALUE'/" "$JS_FILE"
-        echo "Updated CACHE_NAME to $NEW_VALUE in $JS_FILE"
+    #     sed -i "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = '$NEW_VALUE'/" "$JS_FILE"
+    #     echo "Updated CACHE_NAME to $NEW_VALUE in $JS_FILE"
     
-        cat $(Build.ArtifactStagingDirectory)/publish/wwwroot/service-worker.js
+    #     cat $(Build.ArtifactStagingDirectory)/publish/wwwroot/service-worker.js
+    #   displayName: 'Cache Busting'
+    #   condition: succeeded()
+
+    - bash: |
+        set -euo pipefail
+        COMMIT_HASH="$(gitInfo.COMMIT_HASH)"
+        NEW_VALUE="fx-pwa-cache-v${COMMIT_HASH}"
+        JS_FILE="$(Build.ArtifactStagingDirectory)/publish/wwwroot/service-worker.js"
+    
+        echo "New CACHE_NAME: ${NEW_VALUE}"
+        echo "Before:"
+        grep -n "CACHE_NAME" "$JS_FILE"
+    
+        sed -i -E "s|(const[[:space:]]+CACHE_NAME[[:space:]]*=[[:space:]]*)(['\"])[^'\"]*['\"]|\1\2${NEW_VALUE}\2|" "$JS_FILE"
+    
+        echo "After:"
+        grep -n "CACHE_NAME" "$JS_FILE"
+        grep -q "CACHE_NAME *= *['\"]${NEW_VALUE}['\"]" "$JS_FILE"
       displayName: 'Cache Busting'
       condition: succeeded()
 
