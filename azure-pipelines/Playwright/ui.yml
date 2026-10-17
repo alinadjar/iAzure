@@ -17,7 +17,7 @@ parameters:
       - 'https://dev.fx.sadgan.int'
       - 'https://qa.fx.sadgan.int'      
       - 'https://uat.fx.sadgan.int/'
-      - 'https://sale.api.fx.sadgan.int/'
+      - 'https://sale.fx.sadgan.int/'
       - 'https://48286.local.sadgan.int'
 
   - name: assembly
