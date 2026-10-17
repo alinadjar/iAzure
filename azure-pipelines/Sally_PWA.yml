@@ -206,6 +206,23 @@ stages:
           -m:1
       displayName: 'Publish Blazor WASM'
 
+
+    - bash: |
+        # echo "Applying cache busting to all static assets..."
+        COMMIT_HASH="$(gitInfo.COMMIT_HASH)"
+        NEW_VALUE="fx-pwa-cache-v$COMMIT_HASH"
+        
+        cd $(Build.ArtifactStagingDirectory)/publish/wwwroot/
+        ls -alh 
+        JS_FILE=assets/js/service-worker.js
+    
+        sed -i "s/const CACHE_NAME = '[^']*'/const CACHE_NAME = '$NEW_VALUE'/" "$JS_FILE"
+        echo "Updated CACHE_NAME to $NEW_VALUE in $JS_FILE"
+    
+        cat $(Build.ArtifactStagingDirectory)/publish/wwwroot/assets/js/service-worker.js
+      displayName: 'Cache Busting'
+      condition: succeeded()
+
     - bash: |
         set -e
         STAGING="$(Build.ArtifactStagingDirectory)"
