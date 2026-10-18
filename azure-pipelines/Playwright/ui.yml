@@ -345,11 +345,16 @@ jobs:
         CI: 'true'
         SYSTEM_ACCESSTOKEN: $(System.AccessToken)
         AZURE_DEVOPS_PROJECT: $(AZURE_DEVOPS_PROJECT)
-        #------
+        #---------------------------------------------------------------------------------------------------------
+        
         # برای رفع خطای "ConfigrationFiles.pytest.api.integrations.azure_client.AzureClientError: Test plan '(none)' was not found in project SadganQEHeadquarter."
         # AZURE_TEST_PLAN_ID: ${{ parameters.testPlanId }}
         # AZURE_TEST_PLAN_NAME: ${{ parameters.testPlanName }}
-        #------
+
+        AZURE_TEST_PLAN_ID: ${{ eq(parameters.testPlanId, '(none)') && '' || parameters.testPlanId }}
+        AZURE_TEST_PLAN_NAME: ${{ eq(parameters.testPlanName, '(none)') && '' || parameters.testPlanName }}
+        #---------------------------------------------------------------------------------------------------------
+
         AZURE_TEST_PLAN_TARGET: 'UI'
         AZURE_VERIFY_SSL: false
         ASSEMBLY: ${{ parameters.assembly }}
