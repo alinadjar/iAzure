@@ -1923,6 +1923,19 @@ stages:
             printf '%s' "$1" | sed 's/|/\\|/g' | tr '\n\r' '  '
           }
 
+          # Mattermost default MaxPostSize is 16383; stay under for JSON + mention line
+          MM_MAX_MESSAGE=15800
+          MM_TITLE_MAX_LEN=120
+
+          truncate_str() {
+            local s="$1" max="${2:-$MM_TITLE_MAX_LEN}"
+            if [ "${#s}" -le "$max" ]; then
+              printf '%s' "$s"
+              return 0
+            fi
+            printf '%s…' "${s:0:$((max - 1))}"
+          }
+
           extract_reporter_tags() {
             local tags="$1"
             local matched
@@ -2023,7 +2036,7 @@ stages:
             local icon type_cell title_cell state_label="" reporter_cell portal_cell
             icon=$(wi_type_icon "$wi_type")
             type_cell=$(printf '%s %s' "$icon" "$(wi_type_short "$wi_type")")
-            title_cell=$(escape_md_cell "$wi_title")
+            title_cell=$(escape_md_cell "$(truncate_str "$wi_title")")
             if [ -n "$title_cell" ]; then
               title_cell=$(rtl_text "$title_cell")
               if [ -n "$wi_url" ]; then
@@ -2128,6 +2141,44 @@ stages:
           if [ -n "$MM_USER" ] && echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
             MM_TEXT="${MM_TEXT}"$'\n\n'"@${MM_USER}"
           fi
+
+          mm_build_text() {
+            local table_body="$1" omitted="$2"
+            local body
+            body=$(printf '%b' "**Branch promotion:** \`${SOURCE_BRANCH}\` → \`${TARGET_BRANCH}\`  ·  **Tag:** \`${BACKEND_TAG}\`  ·  [Build #${BUILD_NUMBER}](${BUILD_URL})\n_${NOTIFY_DT}_\n\n${table_body}")
+            if [ -n "$omitted" ] && [ "$omitted" -gt 0 ] 2>/dev/null; then
+              body="${body}"$'\n\n'"_… and ${omitted} more work item(s) — see [build #${BUILD_NUMBER}](${BUILD_URL})_"
+            fi
+            if [ -n "$MM_USER" ] && echo "$MM_WEBHOOK_URL" | grep -qiE '/api/v4/'; then
+              body="${body}"$'\n\n'"@${MM_USER}"
+            fi
+            printf '%s' "$body"
+          }
+
+          wi_total=$(echo "$wi_json_array" | jq 'length')
+          if [ "${#MM_TEXT}" -gt "$MM_MAX_MESSAGE" ] && [ "$wi_total" -gt 0 ]; then
+            echo "Mattermost message is ${#MM_TEXT} chars (max ${MM_MAX_MESSAGE}) — trimming table..." >&2
+            keep="$wi_total"
+            while [ "$keep" -ge 1 ]; do
+              omitted=$((wi_total - keep))
+              wi_table_trimmed=$(echo "$wi_json_array" | jq -r --argjson n "$keep" '
+                "| | Title | State | ID | reporter | portalCode |",
+                "|:--:|:--|:-:|:-:|:--|:-:|",
+                (.[0:$n][] | .line)
+              ')
+              MM_TEXT=$(mm_build_text "$wi_table_trimmed" "$omitted")
+              if [ "${#MM_TEXT}" -le "$MM_MAX_MESSAGE" ]; then
+                break
+              fi
+              keep=$((keep - 1))
+            done
+          fi
+
+          if [ "${#MM_TEXT}" -gt "$MM_MAX_MESSAGE" ]; then
+            echo "Mattermost message still ${#MM_TEXT} chars — hard truncating body." >&2
+            MM_TEXT="${MM_TEXT:0:$((MM_MAX_MESSAGE - 120))}"$'\n\n'"_…(message truncated — see [build #${BUILD_NUMBER}](${BUILD_URL}))_"
+          fi
+          echo "Mattermost message length: ${#MM_TEXT} chars" >&2
 
           # Route target for incoming webhooks (channel name or @username)
           MM_TARGET=""
