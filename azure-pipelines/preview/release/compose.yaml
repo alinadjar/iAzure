@@ -35,6 +35,9 @@ services:
       Redis__Configuration: "${REDIS_HOST}"
       Redis__Port: 6379
       Redis__Password: "${REDIS_PASSWORD}"
+      HelpDesk__BaseUrl: "https://dev.api.portal.sadgan.int/"
+      HelpDesk__UserName: "rahbarian"
+      HelpDesk__Password: "1q2w3E*"
       JWT__AccessTokenExpirationSeconds: 600
       JWT__RefreshTokenExpirationSeconds: 86400
       DocumentDbConnectionStrings__Default: "mongodb://admin:admin@${MONGO_HOST}:27017"
