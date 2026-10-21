@@ -348,7 +348,7 @@ steps:
       projectKey: 'SadganErp_Sadgan.Erp.Panel_fc9a9514-f178-476b-bdfb-745f4c5375e5'
       projectName: 'Sadgan.Erp.Panel'  
       extraProperties: |
-        sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json
+        sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json,**/*.yaml,**/*.ps1
 
 
 - bash: |
