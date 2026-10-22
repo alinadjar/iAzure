@@ -1,0 +1,37 @@
+parameters:
+- name: buildConfiguration
+  type: string
+  default: Release
+- name: nodeVersion
+  type: string
+  default: '20.20.2'
+
+steps:
+- template: pr-test-clone.yml
+  parameters:
+    profile: frontend
+
+- bash: |
+    set -euo pipefail
+    export DOTNET_ROOT=/opt/net_sdk_10
+    export PATH="/opt/net_sdk_10:$PATH"
+    export MSBUILDDISABLENODEREUSE=1
+    dotnet --info
+  displayName: 'Verify .NET SDK'
+
+- template: dotnet-frontend-tests.yml
+  parameters:
+    buildConfiguration: ${{ parameters.buildConfiguration }}
+    collectCoverage: 'false'
+    runNodeSetup: 'true'
+    nodeVersion: ${{ parameters.nodeVersion }}
+
+- task: PublishTestResults@2
+  displayName: 'Publish test results'
+  condition: always()
+  inputs:
+    testResultsFormat: VSTest
+    testResultsFiles: '$(System.DefaultWorkingDirectory)/TestResults/**/*.trx'
+    mergeTestResults: true
+    testRunTitle: 'Sadgan.Erp.Panel PR — Panel Tests'
+    failTaskOnFailedTests: true
