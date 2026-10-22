@@ -9,11 +9,7 @@ parameters:
 steps:
 - template: pr-test-clone.yml
   parameters:
-    profile: frontend
-
-- template: pr-frontend-node-setup.yml
-  parameters:
-    nodeVersion: ${{ parameters.nodeVersion }}    
+    profile: frontend   
 
 - bash: |
     set -euo pipefail
