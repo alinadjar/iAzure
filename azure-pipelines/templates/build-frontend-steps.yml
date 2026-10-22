@@ -348,6 +348,7 @@ steps:
       projectKey: 'SadganErp_Sadgan.Erp.Panel_fc9a9514-f178-476b-bdfb-745f4c5375e5'
       projectName: 'Sadgan.Erp.Panel'  
       extraProperties: |
+        sonar.javascript.node.maxspace=8192
         sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json,**/*.yaml,**/*.ps1
 
 
@@ -380,6 +381,7 @@ steps:
     env:
       PATH: $(DOTNET_PATH)
       DOTNET_ROOT: /opt/net_sdk_10
+      NODE_OPTIONS: --max-old-space-size=8192
     inputs:
       SonarQube: 'SonarQube-Sadgan'
 
