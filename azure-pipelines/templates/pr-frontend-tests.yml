@@ -30,6 +30,17 @@ steps:
     runNodeSetup: 'true'
     nodeVersion: ${{ parameters.nodeVersion }}
 
+
+- ${{ if or(eq(parameters.publishCodeCoverage, 'true'), eq(parameters.publishCodeCoverage, 'True')) }}:
+  - task: PublishCodeCoverageResults@2
+    displayName: 'Publish code coverage'
+    condition: succeededOrFailed()
+    inputs:
+      summaryFileLocation: '$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.cobertura.xml'
+      pathToSources: '$(System.DefaultWorkingDirectory)'
+      failIfCoverageEmpty: false  
+
+
 - task: PublishTestResults@2
   displayName: 'Publish test results'
   condition: always()
@@ -39,12 +50,4 @@ steps:
     mergeTestResults: true
     testRunTitle: 'Sadgan.Erp.Panel PR — Panel Tests'
     failTaskOnFailedTests: true
-
-- ${{ if or(eq(parameters.publishCodeCoverage, 'true'), eq(parameters.publishCodeCoverage, 'True')) }}:
-  - task: PublishCodeCoverageResults@2
-    displayName: 'Publish code coverage'
-    condition: succeededOrFailed()
-    inputs:
-      summaryFileLocation: '$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.cobertura.xml'
-      pathToSources: '$(System.DefaultWorkingDirectory)'
-      failIfCoverageEmpty: false    
+  
