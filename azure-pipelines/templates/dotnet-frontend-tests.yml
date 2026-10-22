@@ -5,6 +5,10 @@ parameters:
 - name: collectCoverage
   type: string
   default: 'false'
+- name: coverageFormat
+  type: string
+  default: 'opencover'  
+ # opencover → Sonar (coverage.opencover.xml); cobertura → Azure DevOps (coverage.cobertura.xml)  
 - name: runNodeSetup
   type: string
   default: 'true'
@@ -48,6 +52,7 @@ steps:
     CFG="${{ parameters.buildConfiguration }}"
     RESULTS_DIR="$ROOT/TestResults"
     COVERAGE="${{ parameters.collectCoverage }}"
+    COVER_FORMAT="${{ parameters.coverageFormat }}"
     mkdir -p "$RESULTS_DIR"
 
     TEST_PROJECTS=(
@@ -68,15 +73,25 @@ steps:
         --logger "trx;LogFileName=${NAME}.trx"
         --results-directory "$RESULTS_DIR"
       )
+      # if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
+      #   COVER_OUT="$RESULTS_DIR/coverage/$NAME/"
+      #   mkdir -p "$COVER_OUT"
+      #   TEST_ARGS+=(
+      #     /p:CollectCoverage=true
+      #     /p:CoverletOutputFormat=opencover
+      #     /p:CoverletOutput="$COVER_OUT"
+      #   )
+      # fi
       if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
         COVER_OUT="$RESULTS_DIR/coverage/$NAME/"
         mkdir -p "$COVER_OUT"
         TEST_ARGS+=(
           /p:CollectCoverage=true
-          /p:CoverletOutputFormat=opencover
+          "/p:CoverletOutputFormat=${COVER_FORMAT}"
           /p:CoverletOutput="$COVER_OUT"
         )
       fi
+
 
       if ! dotnet test "$PROJ" "${TEST_ARGS[@]}"; then
         echo "##vso[task.logissue type=error]Test project failed: $NAME"
@@ -87,7 +102,8 @@ steps:
     echo "TRX files:"
     find "$RESULTS_DIR" -name '*.trx' -type f -ls || true
     if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
-      find "$RESULTS_DIR/coverage" -name 'coverage.opencover.xml' -type f -ls || true
+      # find "$RESULTS_DIR/coverage" -name 'coverage.opencover.xml' -type f -ls || true
+      find "$RESULTS_DIR/coverage" -name 'coverage.*.xml' -type f -ls || true
     fi
 
     if [ "$FAILED" -ne 0 ]; then
