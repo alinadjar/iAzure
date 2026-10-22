@@ -5,6 +5,9 @@ parameters:
 - name: nodeVersion
   type: string
   default: '20.20.2'
+- name: publishCodeCoverage
+  type: string
+  default: 'false'
 
 steps:
 - template: pr-test-clone.yml
@@ -22,7 +25,8 @@ steps:
 - template: dotnet-frontend-tests.yml
   parameters:
     buildConfiguration: ${{ parameters.buildConfiguration }}
-    collectCoverage: 'true'
+    collectCoverage: ${{ parameters.publishCodeCoverage }}
+    coverageFormat: cobertura
     runNodeSetup: 'true'
     nodeVersion: ${{ parameters.nodeVersion }}
 
@@ -35,3 +39,12 @@ steps:
     mergeTestResults: true
     testRunTitle: 'Sadgan.Erp.Panel PR — Panel Tests'
     failTaskOnFailedTests: true
+
+- ${{ if or(eq(parameters.publishCodeCoverage, 'true'), eq(parameters.publishCodeCoverage, 'True')) }}:
+  - task: PublishCodeCoverageResults@2
+    displayName: 'Publish code coverage'
+    condition: succeededOrFailed()
+    inputs:
+      summaryFileLocation: '$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.cobertura.xml'
+      pathToSources: '$(System.DefaultWorkingDirectory)'
+      failIfCoverageEmpty: false    
