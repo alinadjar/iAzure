@@ -22,7 +22,7 @@ steps:
 - template: dotnet-frontend-tests.yml
   parameters:
     buildConfiguration: ${{ parameters.buildConfiguration }}
-    collectCoverage: 'false'
+    collectCoverage: 'true'
     runNodeSetup: 'true'
     nodeVersion: ${{ parameters.nodeVersion }}
 
