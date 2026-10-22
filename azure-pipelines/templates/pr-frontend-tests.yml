@@ -36,9 +36,10 @@ steps:
     displayName: 'Publish code coverage'
     condition: succeededOrFailed()
     inputs:
+      codeCoverageTool: Cobertura
       summaryFileLocation: '$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.cobertura.xml'
       pathToSources: '$(System.DefaultWorkingDirectory)'
-      failIfCoverageEmpty: false  
+      # failIfCoverageEmpty: false  
 
 
 - task: PublishTestResults@2
