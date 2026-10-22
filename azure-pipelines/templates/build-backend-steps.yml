@@ -263,6 +263,8 @@ steps:
       projectName: 'SadganErpApi'
       extraProperties: |
         sonar.javascript.node.maxspace=8192
+        sonar.cs.opencover.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.opencover.xml
+        sonar.cs.vstest.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/**/*.trx
         sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json,**/*.yaml,**/*.ps1
 
 
@@ -295,6 +297,11 @@ steps:
     MSBUILDDISABLENODEREUSE: '1'
 
 - ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:
+  - template: dotnet-backend-tests.yml
+    parameters:
+      buildConfiguration: $(buildConfiguration)
+      collectCoverage: 'true'
+      
   - task: SonarQubeAnalyze@8
     displayName: 'SonarQube Analyze (Backend)'
     condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
