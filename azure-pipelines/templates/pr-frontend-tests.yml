@@ -11,6 +11,10 @@ steps:
   parameters:
     profile: frontend
 
+- template: pr-frontend-node-setup.yml
+  parameters:
+    nodeVersion: ${{ parameters.nodeVersion }}    
+
 - bash: |
     set -euo pipefail
     export DOTNET_ROOT=/opt/net_sdk_10
