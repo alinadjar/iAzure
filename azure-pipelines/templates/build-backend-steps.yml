@@ -300,7 +300,7 @@ steps:
   - template: dotnet-backend-tests.yml
     parameters:
       buildConfiguration: $(buildConfiguration)
-      collectCoverage: 'true'
+      collectCoverage: 'false'
       
   - task: SonarQubeAnalyze@8
     displayName: 'SonarQube Analyze (Backend)'
