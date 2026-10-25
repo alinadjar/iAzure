@@ -48,14 +48,42 @@ steps:
     displayName: 'Locate Cobertura coverage file'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
 
+  
+  - bash: |
+      set -euo pipefail
+      export DOTNET_ROOT=/opt/net_sdk_10
+      export PATH="/opt/net_sdk_10:$PATH"
+      ROOT="$(System.DefaultWorkingDirectory)/TestResults"
+      REPORT_DIR="$ROOT/CoverageReport"
+      rm -rf "$REPORT_DIR"
+      mkdir -p "$REPORT_DIR"
+      TOOL_DIR="$(Agent.TempDirectory)/reportgenerator"
+      mkdir -p "$TOOL_DIR"
+      dotnet tool install dotnet-reportgenerator-globaltool --tool-path "$TOOL_DIR" --version 5.4.4
+      "$TOOL_DIR/reportgenerator" \
+        "-reports:${ROOT}/**/coverage.cobertura.xml" \
+        "-targetdir:${REPORT_DIR}" \
+        "-reporttypes:HtmlInline_AzurePipelines"
+      if [ ! -f "$REPORT_DIR/index.html" ] && [ ! -f "$REPORT_DIR/index.htm" ]; then
+        echo "##vso[task.logissue type=error]ReportGenerator did not produce index.html under $REPORT_DIR"
+        ls -la "$REPORT_DIR" || true
+        exit 1
+      fi
+      echo "##vso[task.setvariable variable=coverageReportDir]$REPORT_DIR"
+    displayName: 'Generate coverage HTML report'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
+
   - task: PublishCodeCoverageResults@1
     displayName: 'Publish code coverage'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
+    env:
+      DOTNET_ROOT: /opt/net_sdk_10
+      PATH: /opt/net_sdk_10:$(PATH)
     inputs:
       codeCoverageTool: Cobertura
       summaryFileLocation: '$(coberturaSummaryFile)'
+      reportDirectory: '$(coverageReportDir)'
       pathToSources: '$(System.DefaultWorkingDirectory)'
-      # failIfCoverageEmpty: false  
 
 
 - task: PublishTestResults@2
