@@ -40,6 +40,7 @@ steps:
 
 - bash: |
     set -uo pipefail
+    echo "##vso[task.setvariable variable=dotnetTestsExecuted]true"
     export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
@@ -50,6 +51,7 @@ steps:
     CFG="${{ parameters.buildConfiguration }}"
     RESULTS_DIR="$ROOT/TestResults"
     COVERAGE="${{ parameters.collectCoverage }}"
+    rm -rf "$RESULTS_DIR"
     mkdir -p "$RESULTS_DIR"
 
     TEST_PROJECTS=(
