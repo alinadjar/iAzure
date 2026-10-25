@@ -32,12 +32,28 @@ steps:
 
 
 - ${{ if or(eq(parameters.publishCodeCoverage, 'true'), eq(parameters.publishCodeCoverage, 'True')) }}:
+  - bash: |
+      set -euo pipefail
+      ROOT="$(System.DefaultWorkingDirectory)/TestResults"
+      echo "Searching for Cobertura under $ROOT ..."
+      find "$ROOT" -type f \( -name 'coverage.cobertura.xml' -o -name '*.cobertura.xml' \) -ls || true
+      mapfile -t FILES < <(find "$ROOT" -type f -name 'coverage.cobertura.xml' 2>/dev/null || true)
+      if [ "${#FILES[@]}" -eq 0 ]; then
+        echo "##vso[task.logissue type=error]No coverage.cobertura.xml found. Enable collectCoverage and check dotnet test logs for XPlat Code Coverage."
+        exit 1
+      fi
+      # PublishCodeCoverageResults@1 on Server 2022 matches one path; use first file (merge in ADO if multiple).
+      echo "##vso[task.setvariable variable=coberturaSummaryFile]${FILES[0]}"
+      echo "Using summary file: ${FILES[0]}"
+    displayName: 'Locate Cobertura coverage file'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
+
   - task: PublishCodeCoverageResults@1
     displayName: 'Publish code coverage'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
     inputs:
       codeCoverageTool: Cobertura
-      summaryFileLocation: '$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.cobertura.xml'
+      summaryFileLocation: '$(coberturaSummaryFile)'
       pathToSources: '$(System.DefaultWorkingDirectory)'
       # failIfCoverageEmpty: false  
 
