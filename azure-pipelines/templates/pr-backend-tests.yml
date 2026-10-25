@@ -23,7 +23,7 @@ steps:
 
 - task: PublishTestResults@2
   displayName: 'Publish test results'
-  condition: always()
+  condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
   inputs:
     testResultsFormat: VSTest
     testResultsFiles: '$(System.DefaultWorkingDirectory)/TestResults/**/*.trx'
