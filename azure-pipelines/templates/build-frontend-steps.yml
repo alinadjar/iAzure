@@ -386,7 +386,7 @@ steps:
       
   - task: SonarQubeAnalyze@8
     displayName: 'SonarQube Analyze (Frontend)'
-    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'))
     env:
       PATH: $(DOTNET_PATH)
       DOTNET_ROOT: /opt/net_sdk_10
@@ -396,7 +396,7 @@ steps:
 
   - task: SonarQubePublish@8
     displayName: 'SonarQube Publish (Frontend)'
-    condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'))
     env:
       PATH: $(DOTNET_PATH)
       DOTNET_ROOT: /opt/net_sdk_10
