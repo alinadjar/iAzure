@@ -49,6 +49,7 @@ steps:
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
 
   
+  
   - bash: |
       set -euo pipefail
       export DOTNET_ROOT=/opt/net_sdk_10
@@ -59,18 +60,24 @@ steps:
       mkdir -p "$REPORT_DIR"
       TOOL_DIR="$(Agent.TempDirectory)/reportgenerator"
       mkdir -p "$TOOL_DIR"
-      dotnet tool install dotnet-reportgenerator-globaltool --tool-path "$TOOL_DIR" --version 5.4.4
+      if [ ! -x "$TOOL_DIR/reportgenerator" ]; then
+        dotnet tool install dotnet-reportgenerator-globaltool --tool-path "$TOOL_DIR" --version 5.4.4
+      fi
+      # HtmlSummary: small index.html for the Azure Coverage tab. Avoid HtmlInline_AzurePipelines — it
+      # inlines every covered source file and can use many GB on a large solution.
       "$TOOL_DIR/reportgenerator" \
-        "-reports:${ROOT}/**/coverage.cobertura.xml" \
+        "-reports:$(coberturaSummaryFile)" \
         "-targetdir:${REPORT_DIR}" \
-        "-reporttypes:HtmlInline_AzurePipelines"
+        "-reporttypes:HtmlSummary" \
+        "-filefilters:-*;+*/Sadgan.Erp.Panel/*"
       if [ ! -f "$REPORT_DIR/index.html" ] && [ ! -f "$REPORT_DIR/index.htm" ]; then
         echo "##vso[task.logissue type=error]ReportGenerator did not produce index.html under $REPORT_DIR"
         ls -la "$REPORT_DIR" || true
         exit 1
       fi
+      du -sh "$REPORT_DIR" "$(coberturaSummaryFile)" 2>/dev/null || true
       echo "##vso[task.setvariable variable=coverageReportDir]$REPORT_DIR"
-    displayName: 'Generate coverage HTML report'
+    displayName: 'Generate coverage HTML report (summary)'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
 
   - task: PublishCodeCoverageResults@1
@@ -83,7 +90,13 @@ steps:
       codeCoverageTool: Cobertura
       summaryFileLocation: '$(coberturaSummaryFile)'
       reportDirectory: '$(coverageReportDir)'
-      pathToSources: '$(System.DefaultWorkingDirectory)'
+      pathToSources: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel'
+
+  - bash: |
+      set -euo pipefail
+      rm -rf "$(System.DefaultWorkingDirectory)/TestResults/CoverageReport"
+    displayName: 'Remove local coverage HTML (free agent disk)'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
 
 
 - task: PublishTestResults@2
@@ -96,3 +109,4 @@ steps:
     testRunTitle: 'Sadgan.Erp.Panel PR — Panel Tests'
     failTaskOnFailedTests: true
   
+
