@@ -65,21 +65,41 @@ steps:
       fi
       echo "Cobertura summary file:"
       ls -lh "$SRC" || true
-      # Publish the original Cobertura XML (filefilters on a regen Cobertura.xml emptied the report → 0 of 0, no tab).
-      # HtmlSummary only for reportDirectory; Azure expects index.html (ReportGenerator writes summary.html).
+      SRC_ROOT="$(System.DefaultWorkingDirectory)"
+      # Server browse API needs HtmlInline_AzurePipelines index.html (summary.html → index.html → HTTP 400).
+      # Scope with assembly filters; path filters like */Sadgan.Erp.Panel/* miss SadganErp/ on disk and emptied Cobertura.
       "$TOOL_DIR/reportgenerator" \
         "-reports:${SRC}" \
         "-targetdir:${PUB_DIR}" \
-        "-reporttypes:HtmlSummary"
-      if [ -f "$PUB_DIR/summary.html" ]; then
-        cp -f "$PUB_DIR/summary.html" "$PUB_DIR/index.html"
+        "-reporttypes:Cobertura;HtmlInline_AzurePipelines" \
+        "-assemblyfilters:+Sadgan.Erp.Panel*;+Sadgan.Erp.Client.Core*" \
+        "-sourcedirs:${SRC_ROOT}"
+      FILTERED_COB="$PUB_DIR/Cobertura.xml"
+      LINES_VALID=0
+      if [ -f "$FILTERED_COB" ]; then
+        LINES_VALID="$(grep -oE 'lines-valid="[0-9]+"' "$FILTERED_COB" | head -1 | grep -oE '[0-9]+' || true)"
+        LINES_VALID="${LINES_VALID:-0}"
+      fi
+      echo "Filtered Cobertura lines-valid: ${LINES_VALID}"
+      if [ "$LINES_VALID" -eq 0 ]; then
+        echo "##vso[task.logissue type=warning]Assembly filters produced empty Cobertura; publishing full report HTML (larger)."
+        rm -rf "$PUB_DIR"/*
+        "$TOOL_DIR/reportgenerator" \
+          "-reports:${SRC}" \
+          "-targetdir:${PUB_DIR}" \
+          "-reporttypes:HtmlInline_AzurePipelines" \
+          "-sourcedirs:${SRC_ROOT}"
+        SUMMARY_FOR_PUBLISH="$SRC"
+      else
+        SUMMARY_FOR_PUBLISH="$FILTERED_COB"
       fi
       if [ ! -f "$PUB_DIR/index.html" ] && [ ! -f "$PUB_DIR/index.htm" ]; then
-        echo "##vso[task.logissue type=error]Coverage HTML index not found under $PUB_DIR"
+        echo "##vso[task.logissue type=error]HtmlInline_AzurePipelines index.html not found under $PUB_DIR"
         ls -la "$PUB_DIR" || true
         exit 1
       fi
-      du -sh "$PUB_DIR" "$SRC" 2>/dev/null || true
+      du -sh "$PUB_DIR" "$SRC" "$SUMMARY_FOR_PUBLISH" 2>/dev/null || true
+      echo "##vso[task.setvariable variable=coberturaSummaryFile]${SUMMARY_FOR_PUBLISH}"
       echo "##vso[task.setvariable variable=coverageReportDir]$PUB_DIR"
       echo "##vso[task.setvariable variable=disable.coverage.autogenerate]true"
     displayName: 'Prepare coverage HTML for publish'
