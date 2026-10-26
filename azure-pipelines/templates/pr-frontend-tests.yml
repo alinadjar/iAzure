@@ -50,10 +50,66 @@ steps:
     displayName: 'Locate Cobertura coverage file'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
 
-  - task: PublishCodeCoverageResults@1
-    displayName: 'Publish code coverage (Cobertura summary)'
+  - bash: |
+      set -euo pipefail
+      export DOTNET_ROOT=/opt/net_sdk_10
+      export PATH="/opt/net_sdk_10:$PATH"
+      MAX_COBERTURA_MB=35
+      MAX_HTML_MB=500
+      SRC="$(coberturaSummaryFile)"
+      SRC_ROOT="$(System.DefaultWorkingDirectory)"
+      HTML_DIR="$(Agent.TempDirectory)/coverage-html"
+      rm -rf "$HTML_DIR"
+      mkdir -p "$HTML_DIR"
+      echo "##vso[task.setvariable variable=publishCoverageWithHtml]false"
+
+      COB_MB="$(du -m "$SRC" 2>/dev/null | awk '{print $1}')"
+      COB_MB="${COB_MB:-999}"
+      echo "Cobertura size: ${COB_MB} MB (HTML only if <= ${MAX_COBERTURA_MB} MB)"
+
+      if [ "$COB_MB" -gt "$MAX_COBERTURA_MB" ]; then
+        echo "##vso[task.logissue type=warning]Cobertura too large for PR HTML report; Azure tab will show summary-only message. Ensure Coverlet excludes **/*.razor."
+        exit 0
+      fi
+
+      TOOL_DIR="$(Agent.TempDirectory)/reportgenerator"
+      mkdir -p "$TOOL_DIR"
+      if [ ! -x "$TOOL_DIR/reportgenerator" ]; then
+        dotnet tool install dotnet-reportgenerator-globaltool --tool-path "$TOOL_DIR" --version 5.4.4
+      fi
+      "$TOOL_DIR/reportgenerator" \
+        "-reports:${SRC}" \
+        "-targetdir:${HTML_DIR}" \
+        "-reporttypes:HtmlInline_AzurePipelines" \
+        "-sourcedirs:${SRC_ROOT}"
+      HTML_MB="$(du -sm "$HTML_DIR" 2>/dev/null | awk '{print $1}')"
+      HTML_MB="${HTML_MB:-999}"
+      echo "HtmlInline_AzurePipelines size: ${HTML_MB} MB"
+      if [ ! -f "$HTML_DIR/index.html" ] || [ "$HTML_MB" -gt "$MAX_HTML_MB" ]; then
+        echo "##vso[task.logissue type=warning]Coverage HTML missing or too large (${HTML_MB} MB); publishing Cobertura summary only."
+        rm -rf "$HTML_DIR"
+        exit 0
+      fi
+      echo "##vso[task.setvariable variable=publishCoverageWithHtml]true"
+      echo "##vso[task.setvariable variable=coverageReportDir]$HTML_DIR"
+    displayName: 'Prepare small coverage HTML (optional)'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
-    # No reportDirectory and no dotnet on PATH — ReportGenerator on the 80MB+ Cobertura file fills agent disk.
+
+  - task: PublishCodeCoverageResults@1
+    displayName: 'Publish code coverage (summary + HTML)'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'), eq(variables['publishCoverageWithHtml'], 'true'))
+    env:
+      DISABLE_COVERAGE_AUTOGENERATE: 'true'
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    inputs:
+      codeCoverageTool: Cobertura
+      summaryFileLocation: '$(coberturaSummaryFile)'
+      reportDirectory: '$(coverageReportDir)'
+      pathToSources: '$(System.DefaultWorkingDirectory)'
+
+  - task: PublishCodeCoverageResults@1
+    displayName: 'Publish code coverage (summary only)'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'), ne(variables['publishCoverageWithHtml'], 'true'))
     env:
       DISABLE_COVERAGE_AUTOGENERATE: 'true'
       PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -62,9 +118,9 @@ steps:
       summaryFileLocation: '$(coberturaSummaryFile)'
       pathToSources: '$(System.DefaultWorkingDirectory)'
 
-
   - bash: |
       set -euo pipefail
+      rm -rf "$(Agent.TempDirectory)/coverage-html"
       rm -rf "$(System.DefaultWorkingDirectory)/TestResults/coverage"
     displayName: 'Free agent disk after coverage publish'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
@@ -78,5 +134,5 @@ steps:
     testResultsFiles: '$(System.DefaultWorkingDirectory)/TestResults/**/*.trx'
     mergeTestResults: true
     testRunTitle: 'Sadgan.Erp.Panel PR — Panel Tests'
-    failTaskOnFailedTests: true      
+    failTaskOnFailedTests: true
 
