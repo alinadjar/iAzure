@@ -93,8 +93,6 @@ steps:
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
     # PublishCodeCoverageResults@1 runs ReportGenerator HtmlInline_AzurePipelines when dotnet is on PATH
     # (tens of GB on large solutions). Use our small reportDirectory instead.
-    variables:
-      disable.coverage.autogenerate: 'true'
     env:
       DISABLE_COVERAGE_AUTOGENERATE: 'true'
     inputs:
