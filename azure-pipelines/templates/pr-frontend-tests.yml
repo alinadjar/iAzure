@@ -63,29 +63,25 @@ steps:
       if [ ! -x "$TOOL_DIR/reportgenerator" ]; then
         dotnet tool install dotnet-reportgenerator-globaltool --tool-path "$TOOL_DIR" --version 5.4.4
       fi
-      echo "Raw Cobertura size:"
+      echo "Cobertura summary file:"
       ls -lh "$SRC" || true
-      # Filter to app sources + small HtmlSummary for the Coverage tab. Do not use HtmlInline_AzurePipelines.
+      # Publish the original Cobertura XML (filefilters on a regen Cobertura.xml emptied the report → 0 of 0, no tab).
+      # HtmlSummary only for reportDirectory; Azure expects index.html (ReportGenerator writes summary.html).
       "$TOOL_DIR/reportgenerator" \
         "-reports:${SRC}" \
         "-targetdir:${PUB_DIR}" \
-        "-reporttypes:Cobertura;HtmlSummary" \
-        "-filefilters:-*;+*/Sadgan.Erp.Panel/*;+*/Sadgan.Erp.Client.Core/*"
-      FILTERED="$PUB_DIR/Cobertura.xml"
-      if [ ! -f "$FILTERED" ]; then
-        echo "##vso[task.logissue type=error]Filtered Cobertura.xml not found under $PUB_DIR"
-        ls -la "$PUB_DIR" || true
-        exit 1
+        "-reporttypes:HtmlSummary"
+      if [ -f "$PUB_DIR/summary.html" ]; then
+        cp -f "$PUB_DIR/summary.html" "$PUB_DIR/index.html"
       fi
       if [ ! -f "$PUB_DIR/index.html" ] && [ ! -f "$PUB_DIR/index.htm" ]; then
-        echo "##vso[task.logissue type=error]HtmlSummary index.html not found under $PUB_DIR"
+        echo "##vso[task.logissue type=error]Coverage HTML index not found under $PUB_DIR"
         ls -la "$PUB_DIR" || true
         exit 1
       fi
-      du -sh "$PUB_DIR" "$SRC" "$FILTERED" 2>/dev/null || true
-      echo "##vso[task.setvariable variable=coberturaSummaryFile]$FILTERED"
+      du -sh "$PUB_DIR" "$SRC" 2>/dev/null || true
       echo "##vso[task.setvariable variable=coverageReportDir]$PUB_DIR"
-    displayName: 'Prepare filtered coverage for publish'
+    displayName: 'Prepare coverage HTML for publish'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
 
   - task: PublishCodeCoverageResults@1
@@ -93,21 +89,21 @@ steps:
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
     # PublishCodeCoverageResults@1 runs ReportGenerator HtmlInline_AzurePipelines when dotnet is on PATH
     # (tens of GB on large solutions). Use our small reportDirectory instead.
+    variables:
+      disable.coverage.autogenerate: 'true'
     env:
       DISABLE_COVERAGE_AUTOGENERATE: 'true'
     inputs:
       codeCoverageTool: Cobertura
       summaryFileLocation: '$(coberturaSummaryFile)'
       reportDirectory: '$(coverageReportDir)'
-      pathToSources: '$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src'
+      pathToSources: '$(System.DefaultWorkingDirectory)'
 
   - bash: |
       set -euo pipefail
       rm -rf "$(Agent.TempDirectory)/coverage-publish"
     displayName: 'Remove local coverage publish folder'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
-
-
 
 
 - task: PublishTestResults@2
