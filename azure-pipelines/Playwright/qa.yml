@@ -83,6 +83,7 @@ parameters:
       - sales_invoices
       - purchase_invoices
       - group_payment_types
+      - group_payment
 
   # ── CSV / tag marker (-m) ────────────────────────────────────
   - name: tagMarker
@@ -130,6 +131,7 @@ parameters:
       - tests/sales_invoices/
       - tests/purchase_invoices/
       - tests/group_payment_types/
+      - tests/group_payment
 
   # ── Scenario name filter (-k) ────────────────────────────────
   # Use '(none)' — empty default '' is treated as required by Azure DevOps UI
