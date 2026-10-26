@@ -108,6 +108,10 @@ steps:
             /p:CollectCoverage=true
             /p:CoverletOutputFormat=cobertura
             /p:CoverletOutput="$COVER_OUT"
+            '/p:Include=[Sadgan.Erp*]*'
+            '/p:Exclude=[*.Tests]*,[Sadgan.Shared*]*'
+            '/p:ExcludeByFile=**/obj/**'
+            '/p:ExcludeByFile=**/bin/**'
           )
         else
           TEST_ARGS+=(
