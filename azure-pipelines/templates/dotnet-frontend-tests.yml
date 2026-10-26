@@ -109,7 +109,9 @@ steps:
             /p:CoverletOutputFormat=cobertura
             /p:CoverletOutput="$COVER_OUT"
             # Comma inside /p:Exclude= is treated as an extra MSBuild switch — use Include only.            
-            '/p:Include=[Sadgan.Erp*]*'            
+            '/p:Include=[Sadgan.Erp*]*'  
+            # .razor / Views dominate Cobertura size and blow up HTML reports on PR agents.
+            '/p:ExcludeByFile=**/*.razor'          
           )
         else
           TEST_ARGS+=(
