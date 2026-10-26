@@ -54,62 +54,86 @@ steps:
       set -euo pipefail
       export DOTNET_ROOT=/opt/net_sdk_10
       export PATH="/opt/net_sdk_10:$PATH"
+      MAX_HTML_MB=300
       SRC="$(coberturaSummaryFile)"
-      PUB_DIR="$(Agent.TempDirectory)/coverage-publish"
-      rm -rf "$PUB_DIR"
-      mkdir -p "$PUB_DIR"
+      SRC_ROOT="$(System.DefaultWorkingDirectory)"
+      COB_DIR="$(Agent.TempDirectory)/coverage-cobertura"
+      HTML_DIR="$(Agent.TempDirectory)/coverage-html"
+      rm -rf "$COB_DIR" "$HTML_DIR"
+      mkdir -p "$COB_DIR"
       TOOL_DIR="$(Agent.TempDirectory)/reportgenerator"
       mkdir -p "$TOOL_DIR"
       if [ ! -x "$TOOL_DIR/reportgenerator" ]; then
         dotnet tool install dotnet-reportgenerator-globaltool --tool-path "$TOOL_DIR" --version 5.4.4
       fi
-      echo "Cobertura summary file:"
+      echo "Raw Cobertura:"
       ls -lh "$SRC" || true
-      SRC_ROOT="$(System.DefaultWorkingDirectory)"
-      # Server browse API needs HtmlInline_AzurePipelines index.html (summary.html → index.html → HTTP 400).
-      # Scope with assembly filters; path filters like */Sadgan.Erp.Panel/* miss SadganErp/ on disk and emptied Cobertura.
+      echo "##vso[task.setvariable variable=publishCoverageWithHtml]false"
+      echo "##vso[task.setvariable variable=disable.coverage.autogenerate]true"
+
+      read_lines_valid() {
+        local file="$1"
+        if [ ! -f "$file" ]; then
+          echo 0
+          return
+        fi
+        local v
+        v="$(grep -oE 'lines-valid="[0-9]+"' "$file" | head -1 | grep -oE '[0-9]+' || true)"
+        echo "${v:-0}"
+      }
+
+      # Never use HtmlInline_AzurePipelines on PR agents (can fill disk). Shrink Cobertura only.
       "$TOOL_DIR/reportgenerator" \
         "-reports:${SRC}" \
-        "-targetdir:${PUB_DIR}" \
-        "-reporttypes:Cobertura;HtmlInline_AzurePipelines" \
-        "-assemblyfilters:+Sadgan.Erp.Panel*;+Sadgan.Erp.Client.Core*" \
-        "-sourcedirs:${SRC_ROOT}"
-      FILTERED_COB="$PUB_DIR/Cobertura.xml"
-      LINES_VALID=0
-      if [ -f "$FILTERED_COB" ]; then
-        LINES_VALID="$(grep -oE 'lines-valid="[0-9]+"' "$FILTERED_COB" | head -1 | grep -oE '[0-9]+' || true)"
-        LINES_VALID="${LINES_VALID:-0}"
-      fi
-      echo "Filtered Cobertura lines-valid: ${LINES_VALID}"
+        "-targetdir:${COB_DIR}" \
+        "-reporttypes:Cobertura" \
+        "-assemblyfilters:+Sadgan.Erp.Panel*;+Sadgan.Erp.Client.Core*"
+      FILTERED_COB="$COB_DIR/Cobertura.xml"
+      LINES_VALID="$(read_lines_valid "$FILTERED_COB")"
+      echo "After assembly filter, lines-valid: ${LINES_VALID}"
+
       if [ "$LINES_VALID" -eq 0 ]; then
-        echo "##vso[task.logissue type=warning]Assembly filters produced empty Cobertura; publishing full report HTML (larger)."
-        rm -rf "$PUB_DIR"/*
+        rm -rf "$COB_DIR"/*
         "$TOOL_DIR/reportgenerator" \
           "-reports:${SRC}" \
-          "-targetdir:${PUB_DIR}" \
-          "-reporttypes:HtmlInline_AzurePipelines" \
-          "-sourcedirs:${SRC_ROOT}"
+          "-targetdir:${COB_DIR}" \
+          "-reporttypes:Cobertura" \
+          "-filefilters:-*;+*/SadganErp/Sadgan.Erp.Panel/*;+*/SadganErp/Sadgan.Erp.Client.Core/*"
+        LINES_VALID="$(read_lines_valid "$FILTERED_COB")"
+        echo "After path filter, lines-valid: ${LINES_VALID}"
+      fi
+
+      if [ "$LINES_VALID" -eq 0 ]; then
+        echo "##vso[task.logissue type=warning]Could not shrink Cobertura; publishing raw XML summary only (no HTML browse)."
         SUMMARY_FOR_PUBLISH="$SRC"
       else
         SUMMARY_FOR_PUBLISH="$FILTERED_COB"
+        ls -lh "$SUMMARY_FOR_PUBLISH" || true
+        mkdir -p "$HTML_DIR"
+        "$TOOL_DIR/reportgenerator" \
+          "-reports:${SUMMARY_FOR_PUBLISH}" \
+          "-targetdir:${HTML_DIR}" \
+          "-reporttypes:Html" \
+          "-sourcedirs:${SRC_ROOT}"
+        HTML_SIZE_MB="$(du -sm "$HTML_DIR" | awk '{print $1}')"
+        echo "Multi-file Html report size: ${HTML_SIZE_MB} MB"
+        if [ -f "$HTML_DIR/index.html" ] && [ "$HTML_SIZE_MB" -le "$MAX_HTML_MB" ]; then
+          echo "##vso[task.setvariable variable=publishCoverageWithHtml]true"
+          echo "##vso[task.setvariable variable=coverageReportDir]$HTML_DIR"
+        else
+          echo "##vso[task.logissue type=warning]Skipping coverage HTML (size ${HTML_SIZE_MB} MB > ${MAX_HTML_MB} MB or missing index.html)."
+          rm -rf "$HTML_DIR"
+        fi
       fi
-      if [ ! -f "$PUB_DIR/index.html" ] && [ ! -f "$PUB_DIR/index.htm" ]; then
-        echo "##vso[task.logissue type=error]HtmlInline_AzurePipelines index.html not found under $PUB_DIR"
-        ls -la "$PUB_DIR" || true
-        exit 1
-      fi
-      du -sh "$PUB_DIR" "$SRC" "$SUMMARY_FOR_PUBLISH" 2>/dev/null || true
+
+      du -sh "$COB_DIR" "$HTML_DIR" "$SRC" "$SUMMARY_FOR_PUBLISH" 2>/dev/null || true
       echo "##vso[task.setvariable variable=coberturaSummaryFile]${SUMMARY_FOR_PUBLISH}"
-      echo "##vso[task.setvariable variable=coverageReportDir]$PUB_DIR"
-      echo "##vso[task.setvariable variable=disable.coverage.autogenerate]true"
-    displayName: 'Prepare coverage HTML for publish'
+    displayName: 'Prepare Cobertura for publish'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
 
   - task: PublishCodeCoverageResults@1
-    displayName: 'Publish code coverage'
-    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
-    # PublishCodeCoverageResults@1 runs ReportGenerator HtmlInline_AzurePipelines when dotnet is on PATH
-    # (tens of GB on large solutions). disable.coverage.autogenerate is set in the prepare step (Server 2022 has no step-level variables).
+    displayName: 'Publish code coverage (summary + HTML)'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'), eq(variables['publishCoverageWithHtml'], 'true'))
     env:
       DISABLE_COVERAGE_AUTOGENERATE: 'true'
     inputs:
@@ -118,10 +142,21 @@ steps:
       reportDirectory: '$(coverageReportDir)'
       pathToSources: '$(System.DefaultWorkingDirectory)'
 
+  - task: PublishCodeCoverageResults@1
+    displayName: 'Publish code coverage (summary only)'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'), ne(variables['publishCoverageWithHtml'], 'true'))
+    env:
+      DISABLE_COVERAGE_AUTOGENERATE: 'true'
+    inputs:
+      codeCoverageTool: Cobertura
+      summaryFileLocation: '$(coberturaSummaryFile)'
+      pathToSources: '$(System.DefaultWorkingDirectory)'
+
   - bash: |
       set -euo pipefail
-      rm -rf "$(Agent.TempDirectory)/coverage-publish"
-    displayName: 'Remove local coverage publish folder'
+      rm -rf "$(Agent.TempDirectory)/coverage-cobertura" "$(Agent.TempDirectory)/coverage-html"
+      rm -rf "$(System.DefaultWorkingDirectory)/TestResults/coverage"
+    displayName: 'Free agent disk after coverage publish'
     condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
 
 
