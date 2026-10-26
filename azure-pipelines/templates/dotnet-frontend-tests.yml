@@ -108,10 +108,8 @@ steps:
             /p:CollectCoverage=true
             /p:CoverletOutputFormat=cobertura
             /p:CoverletOutput="$COVER_OUT"
-            '/p:Include=[Sadgan.Erp*]*'
-            '/p:Exclude=[*.Tests]*,[Sadgan.Shared*]*'
-            '/p:ExcludeByFile=**/obj/**'
-            '/p:ExcludeByFile=**/bin/**'
+            # Comma inside /p:Exclude= is treated as an extra MSBuild switch — use Include only.            
+            '/p:Include=[Sadgan.Erp*]*'            
           )
         else
           TEST_ARGS+=(
