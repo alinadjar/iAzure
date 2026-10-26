@@ -63,7 +63,7 @@ steps:
       pathToSources: '$(System.DefaultWorkingDirectory)'
 
 
-    - bash: |
+  - bash: |
       set -euo pipefail
       rm -rf "$(System.DefaultWorkingDirectory)/TestResults/coverage"
     displayName: 'Free agent disk after coverage publish'
