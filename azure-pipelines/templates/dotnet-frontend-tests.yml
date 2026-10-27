@@ -109,19 +109,20 @@ steps:
       #   )
       # fi
       if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
+        COVER_OUT="$RESULTS_DIR/coverage/$NAME/"
+        mkdir -p "$COVER_OUT"
         if [ "$COVER_FORMAT" = "cobertura" ]; then
-          COVER_OUT="$RESULTS_DIR/coverage/$NAME/"
-          mkdir -p "$COVER_OUT"
           TEST_ARGS+=(
             /p:CollectCoverage=true
             /p:CoverletOutputFormat=cobertura
             /p:CoverletOutput="$COVER_OUT"
-            # Include/ExcludeByFile live in Sadgan.Erp.Panel.Api.Tests.csproj (avoid /p:Include overriding with [Sadgan.Erp*]*).
           )
         else
+          # MSBuild coverlet → TestResults/coverage/<project>/ (Sonar opencover glob). Also emit Cobertura for Azure DevOps publish on CI.
           TEST_ARGS+=(
-            --collect:"XPlat Code Coverage"
-            --settings "$RUNSETTINGS"
+            /p:CollectCoverage=true
+            /p:CoverletOutputFormat=opencover,cobertura
+            /p:CoverletOutput="$COVER_OUT"
           )
         fi
       fi
