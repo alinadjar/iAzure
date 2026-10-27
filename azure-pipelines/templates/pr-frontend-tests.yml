@@ -54,7 +54,8 @@ steps:
       set -euo pipefail
       export DOTNET_ROOT=/opt/net_sdk_10
       export PATH="/opt/net_sdk_10:$PATH"
-      MAX_COBERTURA_MB=35
+      MAX_INLINE_COB_MB=45
+      MAX_COBERTURA_MB=100
       MAX_HTML_MB=500
       SRC="$(coberturaSummaryFile)"
       SRC_ROOT="$(System.DefaultWorkingDirectory)"
@@ -65,10 +66,10 @@ steps:
 
       COB_MB="$(du -m "$SRC" 2>/dev/null | awk '{print $1}')"
       COB_MB="${COB_MB:-999}"
-      echo "Cobertura size: ${COB_MB} MB (HTML only if <= ${MAX_COBERTURA_MB} MB)"
+      echo "Cobertura size: ${COB_MB} MB (inline HTML if <= ${MAX_INLINE_COB_MB} MB, else multi-file Html)"
 
       if [ "$COB_MB" -gt "$MAX_COBERTURA_MB" ]; then
-        echo "##vso[task.logissue type=warning]Cobertura too large for PR HTML report; Azure tab will show summary-only message. Ensure Coverlet excludes **/*.razor."
+        echo "##vso[task.logissue type=warning]Cobertura > ${MAX_COBERTURA_MB} MB — no HTML. Tighten Coverlet Include in Panel.Api.Tests.csproj."
         exit 0
       fi
 
@@ -77,14 +78,24 @@ steps:
       if [ ! -x "$TOOL_DIR/reportgenerator" ]; then
         dotnet tool install dotnet-reportgenerator-globaltool --tool-path "$TOOL_DIR" --version 5.4.4
       fi
+      if [ "$COB_MB" -le "$MAX_INLINE_COB_MB" ]; then
+        RG_TYPE="HtmlInline_AzurePipelines"
+        RG_EXTRA=()
+      else
+        RG_TYPE="Html"
+        RG_EXTRA=(
+          "-assemblyfilters:+Sadgan.Erp.Panel.ViewModels*;+Sadgan.Erp.Panel.Models*;+Sadgan.Erp.Client.Core.ViewModels*;+Sadgan.Erp.Client.Core.Models*"
+        )
+      fi
       "$TOOL_DIR/reportgenerator" \
         "-reports:${SRC}" \
         "-targetdir:${HTML_DIR}" \
-        "-reporttypes:HtmlInline_AzurePipelines" \
-        "-sourcedirs:${SRC_ROOT}"
+        "-reporttypes:${RG_TYPE}" \
+        "-sourcedirs:${SRC_ROOT}" \
+        "${RG_EXTRA[@]}"
       HTML_MB="$(du -sm "$HTML_DIR" 2>/dev/null | awk '{print $1}')"
       HTML_MB="${HTML_MB:-999}"
-      echo "HtmlInline_AzurePipelines size: ${HTML_MB} MB"
+      echo "Coverage HTML (${RG_TYPE}) size: ${HTML_MB} MB"
       if [ ! -f "$HTML_DIR/index.html" ] || [ "$HTML_MB" -gt "$MAX_HTML_MB" ]; then
         echo "##vso[task.logissue type=warning]Coverage HTML missing or too large (${HTML_MB} MB); publishing Cobertura summary only."
         rm -rf "$HTML_DIR"
