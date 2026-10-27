@@ -15,27 +15,33 @@ steps:
 
     ROOT="$(System.DefaultWorkingDirectory)"
     API="$ROOT/SadganErp/SadganErpApi"
-    SHARED_LIB="$ROOT/SadganShared/2_SharedLibrary"
+    API_SLN="$API/SadganErp.Api.sln"
     CFG="${{ parameters.buildConfiguration }}"
 
-    HOST_PROJ="$API/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/SadganErp.Api.Gateway.HttpApi.Host.csproj"
-    GATEWAY_SLN="$API/4_Gateway/SadganErp.Api.Gateway.sln"
+    if [ ! -f "$API_SLN" ]; then
+      echo "##vso[task.logissue type=error]Solution not found: $API_SLN"
+      exit 1
+    fi
 
-    TEST_PROJECTS=(
-      "$SHARED_LIB/Sadgan.Shared.Tests/Sadgan.Shared.Tests.csproj"
-      "$API/1_Core/test/SadganErp.Api.Core.EntityFrameworkCore.Tests/SadganErp.Api.Core.EntityFrameworkCore.Tests.csproj"
-      "$API/4_Gateway/test/SadganErp.Api.Gateway.Application.Tests/SadganErp.Api.Gateway.Application.Tests.csproj"
-      "$API/4_Gateway/test/SadganErp.Api.Gateway.EntityFrameworkCore.Tests/SadganErp.Api.Gateway.EntityFrameworkCore.Tests.csproj"
-      "$API/4_Gateway/test/SadganErp.Api.Gateway.Domain.Tests/SadganErp.Api.Gateway.Domain.Tests.csproj"
-      "$API/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj"
+    # All *Tests.csproj entries in SadganErp.Api.sln (add new test projects to the sln only).
+    mapfile -t TEST_PROJECTS < <(
+      grep -E '\.Tests\.csproj"' "$API_SLN" \
+        | sed -E 's/.*", "([^"]+\.Tests\.csproj)".*/\1/' \
+        | tr '\\' '/' \
+        | while read -r rel; do realpath -m "$API/$rel"; done \
+        | sort -u
     )
 
-    dotnet restore "$HOST_PROJ" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
-    dotnet restore "$GATEWAY_SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
-    for PROJ in "${TEST_PROJECTS[@]}"; do
-      dotnet restore "$PROJ" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
-    done
-    dotnet build "$HOST_PROJ" --configuration "$CFG" --no-restore
+    if [ "${#TEST_PROJECTS[@]}" -eq 0 ]; then
+      echo "##vso[task.logissue type=error]No *Tests.csproj projects found in $API_SLN"
+      exit 1
+    fi
+
+    echo "Test projects from solution (${#TEST_PROJECTS[@]}):"
+    printf '  %s\n' "${TEST_PROJECTS[@]}"
+
+    dotnet restore "$API_SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
+    dotnet build "$API_SLN" --configuration "$CFG" --no-restore
   displayName: 'Dotnet restore and build (backend tests)'
 
 - bash: |
@@ -47,27 +53,30 @@ steps:
 
     ROOT="$(System.DefaultWorkingDirectory)"
     API="$ROOT/SadganErp/SadganErpApi"
-    SHARED_LIB="$ROOT/SadganShared/2_SharedLibrary"
+    API_SLN="$API/SadganErp.Api.sln"
     CFG="${{ parameters.buildConfiguration }}"
     RESULTS_DIR="$ROOT/TestResults"
     COVERAGE="${{ parameters.collectCoverage }}"
     rm -rf "$RESULTS_DIR"
     mkdir -p "$RESULTS_DIR"
 
-    TEST_PROJECTS=(
-      "$SHARED_LIB/Sadgan.Shared.Tests/Sadgan.Shared.Tests.csproj"
-      "$API/1_Core/test/SadganErp.Api.Core.EntityFrameworkCore.Tests/SadganErp.Api.Core.EntityFrameworkCore.Tests.csproj"
-      "$API/4_Gateway/test/SadganErp.Api.Gateway.Application.Tests/SadganErp.Api.Gateway.Application.Tests.csproj"
-      "$API/4_Gateway/test/SadganErp.Api.Gateway.EntityFrameworkCore.Tests/SadganErp.Api.Gateway.EntityFrameworkCore.Tests.csproj"
-      "$API/4_Gateway/test/SadganErp.Api.Gateway.Domain.Tests/SadganErp.Api.Gateway.Domain.Tests.csproj"
-      "$API/4_Gateway/test/SadganErp.Api.Gateway.HttpApi.Tests/SadganErp.Api.Gateway.HttpApi.Tests.csproj"
+    mapfile -t TEST_PROJECTS < <(
+      grep -E '\.Tests\.csproj"' "$API_SLN" \
+        | sed -E 's/.*", "([^"]+\.Tests\.csproj)".*/\1/' \
+        | tr '\\' '/' \
+        | while read -r rel; do realpath -m "$API/$rel"; done \
+        | sort -u
     )
 
     FAILED=0
     for PROJ in "${TEST_PROJECTS[@]}"; do
       NAME="$(basename "$PROJ" .csproj)"
       echo "========== $NAME =========="
-      dotnet build "$PROJ" --configuration "$CFG" --no-restore
+      if [ ! -f "$PROJ" ]; then
+        echo "##vso[task.logissue type=error]Missing test project (listed in sln): $PROJ"
+        FAILED=1
+        continue
+      fi
 
       EXTRA_ARGS=()
       if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
