@@ -382,7 +382,52 @@ steps:
     parameters:
       buildConfiguration: $(buildConfiguration)
       collectCoverage: 'true'
+      coverageFormat: opencover
       runNodeSetup: 'false'
+
+  - task: PublishTestResults@2
+    displayName: 'Publish test results (Frontend CI)'
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'), eq(variables['dotnetTestsExecuted'], 'true'))
+    inputs:
+      testResultsFormat: VSTest
+      testResultsFiles: '$(System.DefaultWorkingDirectory)/TestResults/**/*.trx'
+      mergeTestResults: true
+      testRunTitle: 'Sadgan.Erp.Panel CI — Panel Tests'
+      failTaskOnFailedTests: true
+
+  - bash: |
+      set -euo pipefail
+      ROOT="$(System.DefaultWorkingDirectory)/TestResults"
+      mapfile -t FILES < <(find "$ROOT" -type f -name 'coverage.cobertura.xml' 2>/dev/null || true)
+      if [ "${#FILES[@]}" -eq 0 ]; then
+        echo "##vso[task.logissue type=warning]No coverage.cobertura.xml for Azure — Code Coverage tab will be empty."
+        echo "##vso[task.setvariable variable=publishCiCodeCoverage]false"
+        exit 0
+      fi
+      echo "##vso[task.setvariable variable=coberturaSummaryFile]${FILES[0]}"
+      echo "##vso[task.setvariable variable=disable.coverage.autogenerate]true"
+      echo "##vso[task.setvariable variable=publishCiCodeCoverage]true"
+      ls -lh "${FILES[0]}" || true
+    displayName: 'Locate Cobertura (Frontend CI)'
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'), eq(variables['dotnetTestsExecuted'], 'true'))
+
+  - task: PublishCodeCoverageResults@1
+    displayName: 'Publish code coverage (Frontend CI summary)'
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'), eq(variables['dotnetTestsExecuted'], 'true'), eq(variables['publishCiCodeCoverage'], 'true'))
+    env:
+      DISABLE_COVERAGE_AUTOGENERATE: 'true'
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    inputs:
+      codeCoverageTool: Cobertura
+      summaryFileLocation: '$(coberturaSummaryFile)'
+      pathToSources: '$(System.DefaultWorkingDirectory)'
+
+  - bash: |
+      set -euo pipefail
+      rm -rf "$(System.DefaultWorkingDirectory)/TestResults/coverage"
+    displayName: 'Free agent disk after coverage publish (Frontend CI)'
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'), eq(variables['dotnetTestsExecuted'], 'true'))
+
       
   - task: SonarQubeAnalyze@8
     displayName: 'SonarQube Analyze (Frontend)'
