@@ -162,7 +162,7 @@ steps:
       render_file "$STAGING/compose.override.yaml" "$STAGING/compose.override.yaml.rendered"
       mv "$STAGING/compose.override.yaml.rendered" "$STAGING/compose.override.yaml"
 
-      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
       REMOTE="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
 
       # if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
@@ -171,7 +171,18 @@ steps:
       #   chmod 600 "$KEY_FILE"
       #   SSH_OPTS="$SSH_OPTS -i $KEY_FILE"
       # fi
-      SSH_OPTS="$SSH_OPTS -i $PREVIEW_SSH_PRIVATE_KEY_PATH"
+
+      # SSH_OPTS="$SSH_OPTS -i $PREVIEW_SSH_PRIVATE_KEY_PATH"
+
+      KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key_$(Build.BuildId)"
+      if [ -z "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
+        echo "##[error]PREVIEW_SSH_PRIVATE_KEY is empty. Set it in the pipeline variable group (secret, full PEM including newlines)."
+        exit 1
+      fi
+      umask 077
+      printf '%s\n' "$PREVIEW_SSH_PRIVATE_KEY" > "$KEY_FILE"
+      chmod 600 "$KEY_FILE"
+      SSH_OPTS="$SSH_OPTS -i $KEY_FILE"
 
       ssh $SSH_OPTS "$REMOTE" "sudo mkdir -p '${DEPLOY_PATH}' && sudo chown -R '${PREVIEW_SSH_USER}:${PREVIEW_SSH_USER}' '${DEPLOY_PATH}'"
       # BEFORE rsync
