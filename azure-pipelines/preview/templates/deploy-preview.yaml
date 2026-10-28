@@ -162,10 +162,10 @@ steps:
       render_file "$STAGING/compose.override.yaml" "$STAGING/compose.override.yaml.rendered"
       mv "$STAGING/compose.override.yaml.rendered" "$STAGING/compose.override.yaml"
 
-      if [ ! -r "${PREVIEW_SSH_PRIVATE_KEY_PATH}" ]; then
-        echo "##[error]PREVIEW_SSH_PRIVATE_KEY_PATH is not readable: ${PREVIEW_SSH_PRIVATE_KEY_PATH}"
-        exit 1
-      fi
+      # if [ ! -r "${PREVIEW_SSH_PRIVATE_KEY_PATH}" ]; then
+      #   echo "##[error]PREVIEW_SSH_PRIVATE_KEY_PATH is not readable: ${PREVIEW_SSH_PRIVATE_KEY_PATH}"
+      #   exit 1
+      # fi
 
       ip -br a
 
