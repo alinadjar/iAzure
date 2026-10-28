@@ -167,10 +167,12 @@ steps:
         exit 1
       fi
 
+      ip -br a
+
       SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i ${PREVIEW_SSH_PRIVATE_KEY_PATH}"
       REMOTE="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
       ip -br a
-      
+
 
       # if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
       #   KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key"
