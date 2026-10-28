@@ -10,7 +10,6 @@ trigger:
       - wit/*
 
 pool:
-  # name: 'WEB-1'
   name: 'FX_WIT_PREVIEW'
 
 parameters:
