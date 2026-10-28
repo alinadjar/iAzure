@@ -162,7 +162,7 @@ steps:
       render_file "$STAGING/compose.override.yaml" "$STAGING/compose.override.yaml.rendered"
       mv "$STAGING/compose.override.yaml.rendered" "$STAGING/compose.override.yaml"
 
-      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
+      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
       REMOTE="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
 
       # if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
