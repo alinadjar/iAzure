@@ -162,7 +162,12 @@ steps:
       render_file "$STAGING/compose.override.yaml" "$STAGING/compose.override.yaml.rendered"
       mv "$STAGING/compose.override.yaml.rendered" "$STAGING/compose.override.yaml"
 
-      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes"
+      if [ ! -r "${PREVIEW_SSH_PRIVATE_KEY_PATH}" ]; then
+        echo "##[error]PREVIEW_SSH_PRIVATE_KEY_PATH is not readable: ${PREVIEW_SSH_PRIVATE_KEY_PATH}"
+        exit 1
+      fi
+
+      SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o BatchMode=yes -i ${PREVIEW_SSH_PRIVATE_KEY_PATH}"
       REMOTE="${PREVIEW_SSH_USER}@${PREVIEW_HOST}"
 
       # if [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
@@ -171,47 +176,10 @@ steps:
       #   chmod 600 "$KEY_FILE"
       #   SSH_OPTS="$SSH_OPTS -i $KEY_FILE"
       # fi
-      materialize_deploy_key() {
-        local dest="$1"
-        umask 077
-        local key="${PREVIEW_SSH_PRIVATE_KEY}"
-        key="${key//$'\r'/}"
-        # ADO secrets are often stored as one line with literal \n — expand to real PEM lines
-        if [[ "$key" != *$'\n'* ]] && [[ "$key" == *'\\n'* ]]; then
-          key="$(printf '%b' "$(echo "$key" | sed 's/\\n/\n/g')")"
-        fi
-        printf '%s\n' "$key" > "$dest"
-        sed -i 's/\r$//' "$dest"
-        chmod 600 "$dest"
-      }
+
 
       # SSH_OPTS="$SSH_OPTS -i $PREVIEW_SSH_PRIVATE_KEY_PATH"
-      # KEY_FILE=""
-      KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key_$(Build.BuildId)"
-      if [ -n "${PREVIEW_SSH_PRIVATE_KEY_PATH:-}" ] && [ -r "${PREVIEW_SSH_PRIVATE_KEY_PATH}" ]; then
-        # KEY_FILE="${PREVIEW_SSH_PRIVATE_KEY_PATH}"
-        # sed -i 's/\r$//' "$KEY_FILE" 2>/dev/null || true
-        umask 077
-        cp "${PREVIEW_SSH_PRIVATE_KEY_PATH}" "$KEY_FILE"
-        sed -i 's/\r$//' "$KEY_FILE"
-        chmod 600 "$KEY_FILE"
-      elif [ -n "${PREVIEW_SSH_PRIVATE_KEY:-}" ]; then
-        KEY_FILE="$(Agent.TempDirectory)/preview_deploy_key_$(Build.BuildId)"
-        materialize_deploy_key "$KEY_FILE"
-      else
-        echo "##[error]Set pipeline secret PREVIEW_SSH_PRIVATE_KEY (PEM) or agent file path PREVIEW_SSH_PRIVATE_KEY_PATH."
-        exit 1
-      fi
-      if grep -q 'ENCRYPTED' "$KEY_FILE"; then
-        echo "##[error]Deploy SSH key must not use a passphrase (remove with: ssh-keygen -p -f key -N '')."
-        exit 1
-      fi
-      if ! ssh-keygen -y -f "$KEY_FILE" >/dev/null 2>&1; then
-        echo "##[error]Invalid deploy SSH private key (libcrypto/ssh-keygen). Fix PREVIEW_SSH_PRIVATE_KEY: full PEM with BEGIN/END lines, or a readable PREVIEW_SSH_PRIVATE_KEY_PATH on the agent."
-        exit 1
-      fi
-      echo "Using deploy SSH key: ${KEY_FILE} (pub fingerprint: $(ssh-keygen -lf "$KEY_FILE" 2>/dev/null | awk '{print $2}'))"
-      SSH_OPTS="$SSH_OPTS -i ${KEY_FILE}"
+      # KEY_FILE=""      
 
 
       ssh $SSH_OPTS "$REMOTE" "sudo mkdir -p '${DEPLOY_PATH}' && sudo chown -R '${PREVIEW_SSH_USER}:${PREVIEW_SSH_USER}' '${DEPLOY_PATH}'"
@@ -313,7 +281,7 @@ steps:
     name: deployPreview
     env:
       GIT_PAT: $(GIT_PAT)
-      PREVIEW_SSH_PRIVATE_KEY: $(PREVIEW_SSH_PRIVATE_KEY)
+      # PREVIEW_SSH_PRIVATE_KEY: $(PREVIEW_SSH_PRIVATE_KEY)
       PREVIEW_SSH_PRIVATE_KEY_PATH: $(PREVIEW_SSH_PRIVATE_KEY_PATH)
       PREVIEW_POSTGRES_PASSWORD: $(PREVIEW_POSTGRES_PASSWORD)
       PREVIEW_POSTGRES_RO_PASSWORD: $(PREVIEW_POSTGRES_RO_PASSWORD)
