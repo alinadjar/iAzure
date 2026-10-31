@@ -348,6 +348,7 @@ steps:
       projectKey: 'SadganErp_Sadgan.Erp.Panel_fc9a9514-f178-476b-bdfb-745f4c5375e5'
       projectName: 'Sadgan.Erp.Panel'  
       extraProperties: |
+        sonar.branch.name=${{ parameters.BRANCH }}
         sonar.javascript.node.maxspace=8192
         sonar.cs.opencover.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.opencover.xml
         sonar.cs.vstest.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/**/*.trx
