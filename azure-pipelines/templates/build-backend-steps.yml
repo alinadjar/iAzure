@@ -265,7 +265,7 @@ steps:
         sonar.javascript.node.maxspace=8192
         sonar.cs.opencover.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.opencover.xml
         sonar.cs.vstest.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/**/*.trx
-        sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json,**/*.yaml,**/*.yml,**/*.ps1,**/Sadgan.Erp.Panel/**,**/Sadgan.Erp.Client.Core/**
+        sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json,**/*.yaml,**/*.yml,**/*.ps1,**/Sadgan.Erp.Panel/**,**/Sadgan.Erp.Client.Core/**,**/bin/**,**/obj/**,**/Migrations/SeedSnapshots/**,**/SeedSnapshots/**
 
 
 # - bash: |
