@@ -15,6 +15,10 @@ parameters:
 - name: nodeVersion
   type: string
   default: '20.20.2'
+- name: emitCoberturaForAzure
+  type: string
+  default: 'false'
+  # CI (opencover for Sonar): set true for a second test pass that writes Cobertura for Azure DevOps.  
 
 steps:
 - ${{ if or(eq(parameters.runNodeSetup, 'true'), eq(parameters.runNodeSetup, 'True')) }}:
@@ -38,6 +42,10 @@ steps:
     command -v npm >/dev/null && npm -v || echo "WARNING: npm not on PATH"
 
     SLN="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
+    if [ -z "${NUGET_CONFIG_PATH:-}" ] || [ ! -f "$(NUGET_CONFIG_PATH)" ]; then
+      echo "##vso[task.logissue type=error]NUGET_CONFIG_PATH is not set. Run Create NuGet.Config before dotnet-frontend-tests."
+      exit 1
+    fi
     dotnet restore "$SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
     dotnet build "$SLN" --configuration ${{ parameters.buildConfiguration }} --no-restore
   displayName: 'Dotnet build (Panel tests)'
@@ -54,6 +62,7 @@ steps:
     RESULTS_DIR="$ROOT/TestResults"
     COVERAGE="${{ parameters.collectCoverage }}"
     COVER_FORMAT="${{ parameters.coverageFormat }}"
+    EMIT_COBERTURA_AZURE="${{ parameters.emitCoberturaForAzure }}"
 
     rm -rf "$RESULTS_DIR"
     mkdir -p "$RESULTS_DIR"
@@ -93,44 +102,47 @@ steps:
       echo "========== $NAME =========="
       dotnet build "$PROJ" --configuration "$CFG" --no-restore
 
-      TEST_ARGS=(
-        --configuration "$CFG"
-        --no-build
-        --logger "trx;LogFileName=${NAME}.trx"
-        --results-directory "$RESULTS_DIR"
-      )
-      # if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
-      #   COVER_OUT="$RESULTS_DIR/coverage/$NAME/"
-      #   mkdir -p "$COVER_OUT"
-      #   TEST_ARGS+=(
-      #     /p:CollectCoverage=true
-      #     /p:CoverletOutputFormat=opencover
-      #     /p:CoverletOutput="$COVER_OUT"
-      #   )
-      # fi
-      if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
-        COVER_OUT="$RESULTS_DIR/coverage/$NAME/"
-        mkdir -p "$COVER_OUT"
-        if [ "$COVER_FORMAT" = "cobertura" ]; then
-          TEST_ARGS+=(
+      run_dotnet_test() {
+        local cover_fmt="$1"
+        local write_trx="$2"
+        local -a args=(
+          "$PROJ"
+          --configuration "$CFG"
+          --no-build
+          --results-directory "$RESULTS_DIR"
+        )
+        if [ "$write_trx" = "true" ]; then
+          args+=(--logger "trx;LogFileName=${NAME}.trx")
+        fi
+
+        if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
+          local cover_out="$RESULTS_DIR/coverage/$NAME/"
+          mkdir -p "$cover_out"
+          args+=(
             /p:CollectCoverage=true
-            /p:CoverletOutputFormat=cobertura
-            /p:CoverletOutput="$COVER_OUT"
-          )
-        else
-          # MSBuild coverlet → TestResults/coverage/<project>/ (Sonar opencover glob). Also emit Cobertura for Azure DevOps publish on CI.
-          TEST_ARGS+=(
-            /p:CollectCoverage=true
-            /p:CoverletOutputFormat=opencover,cobertura
-            /p:CoverletOutput="$COVER_OUT"
+            /p:CoverletOutputFormat="$cover_fmt"
+            /p:CoverletOutput="$cover_out"
           )
         fi
-      fi
+        echo "dotnet test (${cover_fmt}, trx=${write_trx}) ..."
+        dotnet test "${args[@]}"
+      }
 
+      PRIMARY_COVER="$COVER_FORMAT"
 
-      if ! dotnet test "$PROJ" "${TEST_ARGS[@]}"; then
+      if ! run_dotnet_test "$PRIMARY_COVER" true; then
         echo "##vso[task.logissue type=error]Test project failed: $NAME"
         FAILED=1
+        continue
+      fi
+      if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; } \
+        && [ "$PRIMARY_COVER" = "opencover" ] \
+        && { [ "$EMIT_COBERTURA_AZURE" = "true" ] || [ "$EMIT_COBERTURA_AZURE" = "True" ]; }; then
+        echo "Second pass: Cobertura for Azure DevOps (no extra TRX) ..."
+        if ! run_dotnet_test "cobertura" false; then
+          echo "##vso[task.logissue type=error]Cobertura pass failed: $NAME"
+          FAILED=1
+        fi
       fi
     done
 
@@ -140,14 +152,71 @@ steps:
       # find "$RESULTS_DIR/coverage" -name 'coverage.opencover.xml' -type f -ls || true
       # find "$RESULTS_DIR/coverage" -name 'coverage.*.xml' -type f -ls || true
       echo "Coverage files:"
-      find "$RESULTS_DIR" -name "coverage.${COVER_FORMAT}.xml" -type f -ls || true
-      find "$RESULTS_DIR/coverage" -name "coverage.${COVER_FORMAT}.xml" -type f -ls 2>/dev/null || true
-      if ! find "$RESULTS_DIR" \( -name "coverage.${COVER_FORMAT}.xml" -o -path "*/coverage/*" -name "coverage.${COVER_FORMAT}.xml" \) -type f | grep -q .; then
-        echo "##vso[task.logissue type=warning]No coverage.${COVER_FORMAT}.xml files found — Sonar/Azure coverage will stay empty."
+      find "$RESULTS_DIR/coverage" -name 'coverage.*.xml' -type f -ls 2>/dev/null || true
+      if ! find "$RESULTS_DIR/coverage" -name 'coverage.*.xml' -type f 2>/dev/null | grep -q .; then
+        echo "##vso[task.logissue type=warning]No coverage XML under TestResults/coverage — Sonar/Azure coverage will stay empty."
       fi
     fi
 
     if [ "$FAILED" -ne 0 ]; then
       exit 1
     fi
+
+    #   TEST_ARGS=(
+    #     --configuration "$CFG"
+    #     --no-build
+    #     --logger "trx;LogFileName=${NAME}.trx"
+    #     --results-directory "$RESULTS_DIR"
+    #   )
+    #   # if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
+    #   #   COVER_OUT="$RESULTS_DIR/coverage/$NAME/"
+    #   #   mkdir -p "$COVER_OUT"
+    #   #   TEST_ARGS+=(
+    #   #     /p:CollectCoverage=true
+    #   #     /p:CoverletOutputFormat=opencover
+    #   #     /p:CoverletOutput="$COVER_OUT"
+    #   #   )
+    #   # fi
+    #   if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
+    #     COVER_OUT="$RESULTS_DIR/coverage/$NAME/"
+    #     mkdir -p "$COVER_OUT"
+    #     if [ "$COVER_FORMAT" = "cobertura" ]; then
+    #       TEST_ARGS+=(
+    #         /p:CollectCoverage=true
+    #         /p:CoverletOutputFormat=cobertura
+    #         /p:CoverletOutput="$COVER_OUT"
+    #       )
+    #     else
+    #       # MSBuild coverlet → TestResults/coverage/<project>/ (Sonar opencover glob). Also emit Cobertura for Azure DevOps publish on CI.
+    #       TEST_ARGS+=(
+    #         /p:CollectCoverage=true
+    #         /p:CoverletOutputFormat=opencover,cobertura
+    #         /p:CoverletOutput="$COVER_OUT"
+    #       )
+    #     fi
+    #   fi
+
+
+    #   if ! dotnet test "$PROJ" "${TEST_ARGS[@]}"; then
+    #     echo "##vso[task.logissue type=error]Test project failed: $NAME"
+    #     FAILED=1
+    #   fi
+    # done
+
+    # echo "TRX files:"
+    # find "$RESULTS_DIR" -name '*.trx' -type f -ls || true
+    # if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
+    #   # find "$RESULTS_DIR/coverage" -name 'coverage.opencover.xml' -type f -ls || true
+    #   # find "$RESULTS_DIR/coverage" -name 'coverage.*.xml' -type f -ls || true
+    #   echo "Coverage files:"
+    #   find "$RESULTS_DIR" -name "coverage.${COVER_FORMAT}.xml" -type f -ls || true
+    #   find "$RESULTS_DIR/coverage" -name "coverage.${COVER_FORMAT}.xml" -type f -ls 2>/dev/null || true
+    #   if ! find "$RESULTS_DIR" \( -name "coverage.${COVER_FORMAT}.xml" -o -path "*/coverage/*" -name "coverage.${COVER_FORMAT}.xml" \) -type f | grep -q .; then
+    #     echo "##vso[task.logissue type=warning]No coverage.${COVER_FORMAT}.xml files found — Sonar/Azure coverage will stay empty."
+    #   fi
+    # fi
+
+    # if [ "$FAILED" -ne 0 ]; then
+    #   exit 1
+    # fi
   displayName: 'Run frontend tests'
