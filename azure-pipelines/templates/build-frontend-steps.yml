@@ -351,39 +351,14 @@ steps:
         sonar.javascript.node.maxspace=8192
         sonar.cs.opencover.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.opencover.xml
         sonar.cs.vstest.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/**/*.trx
-        sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json,**/*.yaml,**/*.yml,**/*.ps1,**/node_modules/**,**/_framework/**,**/_content/**,**/wwwroot/assets/plugins/**,**/wwwroot/lib/**,**/wwwroot/**/*.json,**/*.min.js,**/*.min.css,**/*.map,**/*.woff2,**/*.svg,**/SadganErpApi/**,**/4_ServerLibrary/**,**/Sadgan.Erp.Panel/**,**/Sadgan.Erp.Client.Core/**,**/bin/**,**/obj/**,**/Migrations/SeedSnapshots/**,**/SeedSnapshots/**
+        sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json,**/*.yaml,**/*.yml,**/*.ps1,**/node_modules/**,**/_framework/**,**/_content/**,**/wwwroot/assets/plugins/**,**/wwwroot/lib/**,**/wwwroot/**/*.json,**/*.min.js,**/*.min.css,**/*.map,**/*.woff2,**/*.svg,**/SadganErpApi/**,**/4_ServerLibrary/**,**/bin/**,**/obj/**
         
-
-
-
-- bash: |
-    set -e
-    export PATH="/opt/net_sdk_10:$PATH"
-    export MSBUILDDISABLENODEREUSE=1
-    export DOTNET_CLI_TELEMETRY_OPTOUT=1
-    mkdir -p "$(Build.ArtifactStagingDirectory)/publish"
-    dotnet publish "$(solution)" \
-      --no-restore \
-      --configuration $(buildConfiguration) \
-      --output "$(Build.ArtifactStagingDirectory)/publish" \
-      --disable-parallel \
-      -p:BuildInParallel=false \
-      -p:NodeReuse=false \
-      -m:1
-
-    cp "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json" "$(Build.ArtifactStagingDirectory)/publish/wwwroot/"
-  displayName: 'Publish Solution (Frontend)'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
-  env:
-    MSBUILDDISABLENODEREUSE: '1'
-
-
-- ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:
   - template: dotnet-frontend-tests.yml
     parameters:
       buildConfiguration: $(buildConfiguration)
       collectCoverage: 'true'
       coverageFormat: opencover
+      emitCoberturaForAzure: 'true'
       runNodeSetup: 'false'
 
   - task: PublishTestResults@2
@@ -423,13 +398,30 @@ steps:
       summaryFileLocation: '$(coberturaSummaryFile)'
       pathToSources: '$(System.DefaultWorkingDirectory)'
 
-  - bash: |
-      set -euo pipefail
-      rm -rf "$(System.DefaultWorkingDirectory)/TestResults/coverage"
-    displayName: 'Free agent disk after coverage publish (Frontend CI)'
-    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'), eq(variables['dotnetTestsExecuted'], 'true'))
 
-      
+- bash: |
+    set -e
+    export PATH="/opt/net_sdk_10:$PATH"
+    export MSBUILDDISABLENODEREUSE=1
+    export DOTNET_CLI_TELEMETRY_OPTOUT=1
+    mkdir -p "$(Build.ArtifactStagingDirectory)/publish"
+    dotnet publish "$(solution)" \
+      --no-restore \
+      --configuration $(buildConfiguration) \
+      --output "$(Build.ArtifactStagingDirectory)/publish" \
+      --disable-parallel \
+      -p:BuildInParallel=false \
+      -p:NodeReuse=false \
+      -m:1
+
+    cp "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json" "$(Build.ArtifactStagingDirectory)/publish/wwwroot/"
+  displayName: 'Publish Solution (Frontend)'
+  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  env:
+    MSBUILDDISABLENODEREUSE: '1'
+
+
+- ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:        
   - task: SonarQubeAnalyze@8
     displayName: 'SonarQube Analyze (Frontend)'
     condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'))
@@ -451,6 +443,12 @@ steps:
       pollingTimeoutSec: '300'
 
 
+  - bash: |
+      set -euo pipefail
+      rm -rf "$(System.DefaultWorkingDirectory)/TestResults/coverage"
+    displayName: 'Free agent disk after coverage publish (Frontend CI)'
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'), eq(variables['dotnetTestsExecuted'], 'true'))
+    
 # Cache Busting (Frontend only)
 # - bash: |
 #     echo "Applying cache busting to all static assets..."
