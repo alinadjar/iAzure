@@ -5,6 +5,9 @@ parameters:
 - name: collectCoverage
   type: string
   default: 'false'
+- name: emitCoberturaForAzure
+  type: string
+  default: 'false'
 
 steps:
 - bash: |
