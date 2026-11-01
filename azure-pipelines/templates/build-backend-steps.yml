@@ -268,6 +268,49 @@ steps:
         sonar.cs.vstest.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/**/*.trx
         sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json,**/*.yaml,**/*.yml,**/*.ps1,**/Sadgan.Erp.Panel/**,**/Sadgan.Erp.Client.Core/**,**/bin/**,**/obj/**,**/SeedSnapshots/**,**/Migrations/**,**/Designer.cs
 
+  - template: dotnet-backend-tests.yml
+    parameters:
+      buildConfiguration: $(buildConfiguration)
+      collectCoverage: 'true'
+      emitCoberturaForAzure: 'true'
+
+  - task: PublishTestResults@2
+    displayName: 'Publish test results (Backend CI)'
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'), eq(variables['dotnetTestsExecuted'], 'true'))
+    inputs:
+      testResultsFormat: VSTest
+      testResultsFiles: '$(System.DefaultWorkingDirectory)/TestResults/**/*.trx'
+      mergeTestResults: true
+      testRunTitle: 'SadganErpApi CI — Backend Tests'
+      failTaskOnFailedTests: true
+
+  - bash: |
+      set -euo pipefail
+      ROOT="$(System.DefaultWorkingDirectory)/TestResults"
+      mapfile -t FILES < <(find "$ROOT" -type f -name 'coverage.cobertura.xml' 2>/dev/null || true)
+      if [ "${#FILES[@]}" -eq 0 ]; then
+        echo "##vso[task.logissue type=warning]No coverage.cobertura.xml for Azure — Code Coverage tab will be empty."
+        echo "##vso[task.setvariable variable=publishCiCodeCoverage]false"
+        exit 0
+      fi
+      echo "##vso[task.setvariable variable=coberturaSummaryFile]${FILES[0]}"
+      echo "##vso[task.setvariable variable=disable.coverage.autogenerate]true"
+      echo "##vso[task.setvariable variable=publishCiCodeCoverage]true"
+      ls -lh "${FILES[0]}" || true
+    displayName: 'Locate Cobertura (Backend CI)'
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'), eq(variables['dotnetTestsExecuted'], 'true'))
+
+  - task: PublishCodeCoverageResults@1
+    displayName: 'Publish code coverage (Backend CI summary)'
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'), eq(variables['dotnetTestsExecuted'], 'true'), eq(variables['publishCiCodeCoverage'], 'true'))
+    env:
+      DISABLE_COVERAGE_AUTOGENERATE: 'true'
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    inputs:
+      codeCoverageTool: Cobertura
+      summaryFileLocation: '$(coberturaSummaryFile)'
+      pathToSources: '$(System.DefaultWorkingDirectory)'
+
 
 # - bash: |
 #     export PATH="/opt/net_sdk_10:$PATH"
@@ -297,12 +340,7 @@ steps:
   env:
     MSBUILDDISABLENODEREUSE: '1'
 
-- ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:
-  - template: dotnet-backend-tests.yml
-    parameters:
-      buildConfiguration: $(buildConfiguration)
-      collectCoverage: 'false'
-      
+- ${{ if eq(parameters.RUN_SONARQUBE, 'YES') }}:      
   - task: SonarQubeAnalyze@8
     displayName: 'SonarQube Analyze (Backend)'
     # Run analysis even when tests failed (job may still end Failed)
@@ -323,6 +361,12 @@ steps:
     inputs:
       SonarQube: 'SonarQube-Sadgan'
       pollingTimeoutSec: '300'    
+
+  - bash: |
+      set -euo pipefail
+      rm -rf "$(System.DefaultWorkingDirectory)/TestResults/coverage"
+    displayName: 'Free agent disk after Sonar (Backend CI)'
+    condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'))
     
 
 - bash: |
