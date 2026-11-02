@@ -41,6 +41,7 @@ services:
       JWT__AccessTokenExpirationSeconds: 600
       JWT__RefreshTokenExpirationSeconds: 86400
       DocumentDbConnectionStrings__Default: "mongodb://admin:admin@${MONGO_HOST}:27017"
+      UpdateService__UpdateServerUrl: "http://sidecar:3000"
     command: >
       sh -c '
         sed -i "
