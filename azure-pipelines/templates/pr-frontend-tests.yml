@@ -29,6 +29,7 @@ steps:
     coverageFormat: cobertura
     runNodeSetup: 'true'
     nodeVersion: ${{ parameters.nodeVersion }}
+    includeSadganSharedTests: 'true'
 
 
 - ${{ if or(eq(parameters.publishCodeCoverage, 'true'), eq(parameters.publishCodeCoverage, 'True')) }}:
