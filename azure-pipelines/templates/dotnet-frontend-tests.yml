@@ -65,6 +65,8 @@ steps:
     export MSBUILDDISABLENODEREUSE=1
 
     ROOT="$(System.DefaultWorkingDirectory)"
+    SLN="$ROOT/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
+    PANEL_DIR="$ROOT/SadganErp/Sadgan.Erp.Panel"
     CFG="${{ parameters.buildConfiguration }}"
     RESULTS_DIR="$ROOT/TestResults"
     COVERAGE="${{ parameters.collectCoverage }}"
@@ -73,6 +75,18 @@ steps:
 
     rm -rf "$RESULTS_DIR"
     mkdir -p "$RESULTS_DIR"
+
+    mapfile -t TEST_PROJECTS < <(
+      grep -E '\.Tests\.csproj"' "$SLN" \
+        | sed -E 's/.*", "([^"]+\.Tests\.csproj)".*/\1/' \
+        | tr '\\' '/' \
+        | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done \
+        | sort -u
+    )
+    if [ "${#TEST_PROJECTS[@]}" -eq 0 ]; then
+      echo "##vso[task.logissue type=error]No *Tests.csproj projects found in $SLN"
+      exit 1
+    fi
 
     RUNSETTINGS="$(Agent.TempDirectory)/coverlet.runsettings"
     if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
@@ -97,17 +111,16 @@ steps:
       cat "$RUNSETTINGS"
     fi
 
-    TEST_PROJECTS=(
-    #   "$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.MockTests.csproj"
-    #   "$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.ServerTests.csproj"
-      "$ROOT/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.Tests/Sadgan.Erp.Panel.Api.Tests.csproj"
-    )
-
     FAILED=0
     for PROJ in "${TEST_PROJECTS[@]}"; do
       NAME="$(basename "$PROJ" .csproj)"
       echo "========== $NAME =========="
-      # Test project is already built via Sadgan.Erp.Panel.sln; skip per-project build (Static Web Assets file locks).
+      if [ ! -f "$PROJ" ]; then
+        echo "##vso[task.logissue type=error]Missing test project (listed in sln): $PROJ"
+        FAILED=1
+        continue
+      fi
+      # Already built via Sadgan.Erp.Panel.sln; skip per-project build (Static Web Assets file locks).
 
       run_dotnet_test() {
         local cover_fmt="$1"
