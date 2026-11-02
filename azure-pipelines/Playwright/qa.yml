@@ -85,6 +85,7 @@ parameters:
       - group_payment_types
       - group_payment
       - internal_payment_entries
+      - journal_entries
 
   # ── CSV / tag marker (-m) ────────────────────────────────────
   - name: tagMarker
@@ -134,6 +135,7 @@ parameters:
       - tests/group_payment_types/
       - tests/group_payment
       - tests/internal_payment_entries
+      - tests/journal_entries
 
   # ── Scenario name filter (-k) ────────────────────────────────
   # Use '(none)' — empty default '' is treated as required by Azure DevOps UI
