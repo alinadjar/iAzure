@@ -8,6 +8,9 @@ parameters:
 - name: publishCodeCoverage
   type: string
   default: 'false'
+- name: includeSadganSharedTests
+  type: string
+  default: 'false'
 
 steps:
 - template: pr-test-clone.yml
@@ -29,7 +32,7 @@ steps:
     coverageFormat: cobertura
     runNodeSetup: 'true'
     nodeVersion: ${{ parameters.nodeVersion }}
-    includeSadganSharedTests: 'true'
+    includeSadganSharedTests: ${{ parameters.includeSadganSharedTests }}
 
 
 - ${{ if or(eq(parameters.publishCodeCoverage, 'true'), eq(parameters.publishCodeCoverage, 'True')) }}:
