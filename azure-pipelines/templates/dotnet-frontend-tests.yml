@@ -1,413 +1,154 @@
 parameters:
-
 - name: buildConfiguration
-
   type: string
-
   default: Release
-
 - name: collectCoverage
-
   type: string
-
   default: 'false'
-
 - name: coverageFormat
-
   type: string
-
   default: 'opencover'
-
-  # opencover → Sonar (coverage.opencover.xml); cobertura → Azure DevOps (coverage.cobertura.xml)
-
+  # opencover -> Sonar; cobertura -> Azure DevOps
 - name: runNodeSetup
-
   type: string
-
   default: 'true'
-
 - name: nodeVersion
-
   type: string
-
   default: '20.20.2'
-
 - name: emitCoberturaForAzure
-
   type: string
-
   default: 'false'
-
-  # CI (opencover for Sonar): set true for a second test pass that writes Cobertura for Azure DevOps.
-
 - name: includeSadganSharedTests
-
   type: string
-
   default: 'false'
-
-  # Sadgan.Shared.Tests (Roslyn) is in Panel.sln but is slow; enable explicitly when needed.
-
-
 
 steps:
-
 - ${{ if or(eq(parameters.runNodeSetup, 'true'), eq(parameters.runNodeSetup, 'True')) }}:
-
   - template: pr-frontend-node-setup.yml
-
     parameters:
-
       nodeVersion: ${{ parameters.nodeVersion }}
 
-
-
 - bash: |
-
     set -euo pipefail
-
     export DOTNET_ROOT=/opt/net_sdk_10
-
     export PATH="/opt/net_sdk_10:$PATH"
-
     export MSBUILDDISABLENODEREUSE=1
-
-
-
     cp -r /opt/node_modules .
-
     chmod -R +x node_modules/.bin
-
     ls -l node_modules/.bin/tailwindcss
-
-    # npm run build:css
-
-    rm $(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/global.json 2>/dev/null || true
-
-
-
+    rm "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/global.json" 2>/dev/null || true
     command -v node >/dev/null && node -v || echo "WARNING: node not on PATH"
-
     command -v npm >/dev/null && npm -v || echo "WARNING: npm not on PATH"
-
-
-
     SLN="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
-
     if [ -z "${NUGET_CONFIG_PATH:-}" ] || [ ! -f "$(NUGET_CONFIG_PATH)" ]; then
-
       echo "##vso[task.logissue type=error]NUGET_CONFIG_PATH is not set. Run Create NuGet.Config before dotnet-frontend-tests."
-
       exit 1
-
     fi
-
     dotnet restore "$SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
-
   displayName: 'Dotnet restore (Panel tests)'
 
-
-
 - bash: |
-
     set -uo pipefail
-
     echo "##vso[task.setvariable variable=dotnetTestsExecuted]true"
-
     export DOTNET_ROOT=/opt/net_sdk_10
-
     export PATH="/opt/net_sdk_10:$PATH"
-
     export MSBUILDDISABLENODEREUSE=1
-
-
-
     ROOT="$(System.DefaultWorkingDirectory)"
-
     SLN="$ROOT/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
-
     PANEL_DIR="$ROOT/SadganErp/Sadgan.Erp.Panel"
-
     CFG="${{ parameters.buildConfiguration }}"
-
     RESULTS_DIR="$ROOT/TestResults"
-
     COVERAGE="${{ parameters.collectCoverage }}"
-
     COVER_FORMAT="${{ parameters.coverageFormat }}"
-
     EMIT_COBERTURA_AZURE="${{ parameters.emitCoberturaForAzure }}"
-
     INCLUDE_SHARED="${{ parameters.includeSadganSharedTests }}"
-
-
-
     rm -rf "$RESULTS_DIR"
-
     mkdir -p "$RESULTS_DIR"
-
-
-
-    # Panel.sln includes *Tests.csproj, *MockTests.csproj, and *ServerTests.csproj — not only *.Tests.csproj.
-
-    mapfile -t DISCOVERED < <(
-
-      grep -E '(MockTests|ServerTests|\.Tests)\.csproj"' "$SLN" \
-
-        | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' \
-
-        | tr '\\' '/' \
-
-        | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done \
-
-        | sort -u
-
-    )
-
+    mapfile -t DISCOVERED < <(grep -E '(MockTests|ServerTests|\.Tests)\.csproj"' "$SLN" | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' | tr '\\' '/' | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done | sort -u)
     if [ "${#DISCOVERED[@]}" -eq 0 ]; then
-
       echo "##vso[task.logissue type=error]No test projects found in $SLN"
-
       exit 1
-
     fi
-
-
-
-    # MockTests + ServerTests share the same output folder — never dotnet build the whole sln; build/test each project.
-
-    PREFERRED_BASENAMES=(
-
-      Sadgan.Shared.Client.MockTests.csproj
-
-      Sadgan.Shared.Client.ServerTests.csproj
-
-      Sadgan.Erp.Panel.Api.Tests.csproj
-
-      Sadgan.Shared.Tests.csproj
-
-    )
-
-
-
+    PREFERRED_BASENAMES=(Sadgan.Shared.Client.MockTests.csproj Sadgan.Shared.Client.ServerTests.csproj Sadgan.Erp.Panel.Api.Tests.csproj Sadgan.Shared.Tests.csproj)
     TEST_PROJECTS=()
-
     for base in "${PREFERRED_BASENAMES[@]}"; do
-
-      if [ "$base" = "Sadgan.Shared.Tests.csproj" ] \
-
-        && { [ "$INCLUDE_SHARED" != "true" ] && [ "$INCLUDE_SHARED" != "True" ]; }; then
-
+      if [ "$base" = "Sadgan.Shared.Tests.csproj" ] && [ "$INCLUDE_SHARED" != "true" ] && [ "$INCLUDE_SHARED" != "True" ]; then
         continue
-
       fi
-
       for p in "${DISCOVERED[@]}"; do
-
         if [ "$(basename "$p")" = "$base" ]; then
-
           TEST_PROJECTS+=("$p")
-
           break
-
         fi
-
       done
-
     done
-
     for p in "${DISCOVERED[@]}"; do
-
       found=0
-
       for q in "${TEST_PROJECTS[@]}"; do
-
-        [ "$p" = "$q" ] && found=1 && break
-
+        if [ "$p" = "$q" ]; then found=1; break; fi
       done
-
-      [ "$found" -eq 0 ] && TEST_PROJECTS+=("$p")
-
+      if [ "$found" -eq 0 ]; then TEST_PROJECTS+=("$p"); fi
     done
-
-
-
     echo "Test projects (${#TEST_PROJECTS[@]}):"
-
     printf '  %s\n' "${TEST_PROJECTS[@]}"
-
-
-
     clear_static_web_asset_cache() {
-
       find "$ROOT/SadganErp" -path '*/obj/*' -name 'rpswa.dswa.cache.json' -delete 2>/dev/null || true
-
     }
-
-
-
     FAILED=0
-
     for PROJ in "${TEST_PROJECTS[@]}"; do
-
       NAME="$(basename "$PROJ" .csproj)"
-
       echo "========== $NAME =========="
-
       if [ ! -f "$PROJ" ]; then
-
         echo "##vso[task.logissue type=error]Missing test project (listed in sln): $PROJ"
-
         FAILED=1
-
         continue
-
       fi
-
-
-
       clear_static_web_asset_cache
-
       echo "dotnet build (single test project) ..."
-
-      if ! dotnet build "$PROJ" \
-
-        --configuration "$CFG" \
-
-        --no-restore \
-
-        -m:1 \
-
-        --disable-parallel \
-
-        -p:BuildInParallel=false; then
-
+      if ! dotnet build "$PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false; then
         echo "##vso[task.logissue type=error]Build failed: $NAME"
-
         FAILED=1
-
         continue
-
       fi
-
-
-
       run_dotnet_test() {
-
         local cover_fmt="$1"
-
         local write_trx="$2"
-
-        local -a args=(
-
-          "$PROJ"
-
-          --configuration "$CFG"
-
-          --no-build
-
-          --results-directory "$RESULTS_DIR"
-
-        )
-
+        local -a args=("$PROJ" --configuration "$CFG" --no-build --results-directory "$RESULTS_DIR")
         if [ "$write_trx" = "true" ]; then
-
           args+=(--logger "trx;LogFileName=${NAME}.trx")
-
         fi
-
-
-
         if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
-
           local cover_out="$RESULTS_DIR/coverage/$NAME/"
-
           mkdir -p "$cover_out"
-
-          args+=(
-
-            /p:CollectCoverage=true
-
-            /p:CoverletOutputFormat="$cover_fmt"
-
-            /p:CoverletOutput="$cover_out"
-
-            /p:Include="[Sadgan*]*"
-
-          )
-
+          args+=(/p:CollectCoverage=true /p:CoverletOutputFormat="$cover_fmt" /p:CoverletOutput="$cover_out" '/p:Include=[Sadgan*]*')
         fi
-
         echo "dotnet test (${cover_fmt}, trx=${write_trx}) ..."
-
         dotnet test "${args[@]}"
-
       }
-
-
-
       PRIMARY_COVER="$COVER_FORMAT"
-
-
-
       if ! run_dotnet_test "$PRIMARY_COVER" true; then
-
         echo "##vso[task.logissue type=error]Test project failed: $NAME"
-
         FAILED=1
-
         continue
-
       fi
-
-      if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; } \
-
-        && [ "$PRIMARY_COVER" = "opencover" ] \
-
-        && { [ "$EMIT_COBERTURA_AZURE" = "true" ] || [ "$EMIT_COBERTURA_AZURE" = "True" ]; }; then
-
+      if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; } && [ "$PRIMARY_COVER" = "opencover" ] && { [ "$EMIT_COBERTURA_AZURE" = "true" ] || [ "$EMIT_COBERTURA_AZURE" = "True" ]; }; then
         echo "Second pass: Cobertura for Azure DevOps (no extra TRX) ..."
-
         if ! run_dotnet_test "cobertura" false; then
-
           echo "##vso[task.logissue type=error]Cobertura pass failed: $NAME"
-
           FAILED=1
-
         fi
-
       fi
-
     done
-
-
-
     echo "TRX files:"
-
     find "$RESULTS_DIR" -name '*.trx' -type f -ls || true
-
     if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
-
       echo "Coverage files:"
-
       find "$RESULTS_DIR/coverage" -name 'coverage.*.xml' -type f -ls 2>/dev/null || true
-
       if ! find "$RESULTS_DIR/coverage" -name 'coverage.*.xml' -type f 2>/dev/null | grep -q .; then
-
-        echo "##vso[task.logissue type=warning]No coverage XML under TestResults/coverage — Sonar/Azure coverage will stay empty."
-
+        echo "##vso[task.logissue type=warning]No coverage XML under TestResults/coverage."
       fi
-
     fi
-
-
-
     if [ "$FAILED" -ne 0 ]; then
-
       exit 1
-
     fi
-
   displayName: 'Run frontend tests'
-
-
