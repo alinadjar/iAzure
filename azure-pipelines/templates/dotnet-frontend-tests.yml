@@ -113,27 +113,46 @@ steps:
       run_dotnet_test() {
         local cover_fmt="$1"
         local write_trx="$2"
+        local collect="$3"
         local -a args=("$PROJ" --configuration "$CFG" --no-build --results-directory "$RESULTS_DIR")
         if [ "$write_trx" = "true" ]; then
           args+=(--logger "trx;LogFileName=${NAME}.trx")
         fi
-        if [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; then
+        # Panel pulls in huge Razor/Views graphs; Shared.Tests is Roslyn-heavy — full [Sadgan*]* cobertura can run for hours.
+        if { [ "$collect" = "true" ] || [ "$collect" = "True" ]; } && { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; }; then
           local cover_out="$RESULTS_DIR/coverage/$NAME/"
           mkdir -p "$cover_out"
-          args+=(/p:CollectCoverage=true /p:CoverletOutputFormat="$cover_fmt" /p:CoverletOutput="$cover_out" '/p:Include=[Sadgan*]*')
+          args+=(/p:CollectCoverage=true /p:CoverletOutputFormat="$cover_fmt" /p:CoverletOutput="$cover_out")
+          if [ "$NAME" = "Sadgan.Erp.Panel.Api.Tests" ]; then
+            args+=('/p:Include=[Sadgan.Erp.Panel*]*' '/p:Exclude=[Sadgan.Erp.Panel.Views]*' '/p:Exclude=[Sadgan.Erp.Client.Core.Views]*' '/p:ExcludeByFile=**/wwwroot/**%2C**/obj/**')
+          elif [ "$NAME" = "Sadgan.Shared.Tests" ]; then
+            args+=('/p:Include=[Sadgan.Shared*]*')
+          else
+            args+=('/p:Include=[Sadgan*]*')
+          fi
         fi
-        echo "dotnet test (${cover_fmt}, trx=${write_trx}) ..."
+        if [ "$NAME" = "Sadgan.Erp.Panel.Api.Tests" ]; then
+          args+=(--blame-hang-timeout 15m -- RunConfiguration.TestSessionTimeout=900000)
+        fi
+        echo "dotnet test (${cover_fmt}, trx=${write_trx}, coverage=${collect}) ..."
         dotnet test "${args[@]}"
       }
+      collect_coverage=true
+      if [ "$NAME" = "Sadgan.Shared.Tests" ]; then
+        collect_coverage=false
+        if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; }; then
+          echo "Skipping Coverlet on Sadgan.Shared.Tests (Roslyn suite); tests still run for TRX."
+        fi
+      fi
       PRIMARY_COVER="$COVER_FORMAT"
-      if ! run_dotnet_test "$PRIMARY_COVER" true; then
+      if ! run_dotnet_test "$PRIMARY_COVER" true "$collect_coverage"; then
         echo "##vso[task.logissue type=error]Test project failed: $NAME"
         FAILED=1
         continue
       fi
-      if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; } && [ "$PRIMARY_COVER" = "opencover" ] && { [ "$EMIT_COBERTURA_AZURE" = "true" ] || [ "$EMIT_COBERTURA_AZURE" = "True" ]; }; then
+      if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; } && [ "$PRIMARY_COVER" = "opencover" ] && { [ "$EMIT_COBERTURA_AZURE" = "true" ] || [ "$EMIT_COBERTURA_AZURE" = "True" ]; } && [ "$collect_coverage" = "true" ]; then
         echo "Second pass: Cobertura for Azure DevOps (no extra TRX) ..."
-        if ! run_dotnet_test "cobertura" false; then
+        if ! run_dotnet_test "cobertura" false true; then
           echo "##vso[task.logissue type=error]Cobertura pass failed: $NAME"
           FAILED=1
         fi
