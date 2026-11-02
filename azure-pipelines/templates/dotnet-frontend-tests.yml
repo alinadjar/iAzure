@@ -104,8 +104,13 @@ steps:
         continue
       fi
       clear_static_web_asset_cache
+      EXTRA_BUILD=()
+      if [ "$NAME" = "Sadgan.Shared.Client.ServerTests" ]; then
+        EXTRA_BUILD=(/p:UseMockHttp=true)
+        echo "ServerTests: /p:UseMockHttp=true on PR agent (avoid localhost:5050)."
+      fi
       echo "dotnet build (single test project) ..."
-      if ! dotnet build "$PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false; then
+      if ! dotnet build "$PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false "${EXTRA_BUILD[@]}"; then
         echo "##vso[task.logissue type=error]Build failed: $NAME"
         FAILED=1
         continue
@@ -115,6 +120,9 @@ steps:
         local write_trx="$2"
         local collect="$3"
         local -a args=("$PROJ" --configuration "$CFG" --no-build --results-directory "$RESULTS_DIR")
+        if [ "$NAME" = "Sadgan.Shared.Client.ServerTests" ]; then
+          args+=(/p:UseMockHttp=true)
+        fi
         if [ "$write_trx" = "true" ]; then
           args+=(--logger "trx;LogFileName=${NAME}.trx")
         fi
