@@ -14,8 +14,8 @@ parameters:
   type: string
   default: 'sandbox'
   displayName: "Select Branch"
-  values:
-    - 'sandbox'
+  # values:
+  #   - 'sandbox'
 - name: BUILD_COMPONENTS
   type: string
   default: 'both'
