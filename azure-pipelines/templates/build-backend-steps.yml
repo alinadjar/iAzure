@@ -404,7 +404,7 @@ steps:
       docker push "$(tagSetting.FQIN)"      
     fi
   displayName: 'Build & Push Image (Backend)'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'))
   env:
     NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
     NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
