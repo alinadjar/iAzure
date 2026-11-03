@@ -420,7 +420,7 @@ steps:
 
     cp "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.WebApp/wwwroot/appsettings.json" "$(Build.ArtifactStagingDirectory)/publish/wwwroot/"
   displayName: 'Publish Solution (Frontend)'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'))
   env:
     MSBUILDDISABLENODEREUSE: '1'
 
@@ -521,7 +521,7 @@ steps:
 
     cat $(Build.ArtifactStagingDirectory)/publish/wwwroot/assets/js/service-worker.js
   displayName: 'Cache Busting'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'))
 
 - bash: |
     mkdir -p $(Build.ArtifactStagingDirectory)/docker
@@ -552,7 +552,7 @@ steps:
       docker push "$(tagSetting.FQIN)"      
     fi
   displayName: 'Build & Push Image (Frontend)'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'))
   env:
     NEXUS_DOCKER_USERNAME: $(NEXUS_DOCKER_USERNAME)
     NEXUS_DOCKER_PASSWORD: $(NEXUS_DOCKER_PASSWORD)
