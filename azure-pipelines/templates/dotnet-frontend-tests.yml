@@ -20,11 +20,13 @@ parameters:
   default: 'false'
 - name: testProjects
   type: string
-  default: panel-only
-  # panel-only | client-and-panel | sln
+  default: sln
+  # sln = discover test csproj from Sadgan.Erp.Panel.sln (default)
+  # panel-only | client-and-panel
 - name: includeSadganSharedTests
   type: string
   default: 'false'
+  # sln only: set true to also run Sadgan.Shared.Tests from the solution
 
 steps:
 - ${{ if or(eq(parameters.runNodeSetup, 'true'), eq(parameters.runNodeSetup, 'True')) }}:
@@ -57,6 +59,7 @@ steps:
     export DOTNET_ROOT=/opt/net_sdk_10
     export PATH="/opt/net_sdk_10:$PATH"
     export MSBUILDDISABLENODEREUSE=1
+    export SADGAN_DISABLE_SIGNALR=1
     ROOT="$(System.DefaultWorkingDirectory)"
     SLN="$ROOT/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
     PANEL_DIR="$ROOT/SadganErp/Sadgan.Erp.Panel"
@@ -96,6 +99,7 @@ steps:
         TEST_PROJECTS=("$MOCK_PROJ" "$SERVER_PROJ" "$PANEL_PROJ")
         ;;
       sln|Sln|SLN)
+        # All MockTests / ServerTests / *Tests.csproj entries in Sadgan.Erp.Panel.sln (add projects in sln only).
         mapfile -t DISCOVERED < <(grep -E '(MockTests|ServerTests|\.Tests)\.csproj"' "$SLN" | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' | tr '\\' '/' | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done | sort -u)
         if [ "${#DISCOVERED[@]}" -eq 0 ]; then
           echo "##vso[task.logissue type=error]No test projects found in $SLN"
