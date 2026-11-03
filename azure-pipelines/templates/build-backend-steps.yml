@@ -338,7 +338,7 @@ steps:
       -m:1
     cp "$(System.DefaultWorkingDirectory)/SadganErp/SadganErpApi/4_Gateway/src/SadganErp.Api.Gateway.HttpApi.Host/appsettings.json" "$(Build.ArtifactStagingDirectory)/publish/"
   displayName: 'Publish Solution (Backend)'
-  condition: and(succeeded(), eq(variables['isTagDuplicate'], 'false'))
+  condition: and(succeededOrFailed(), eq(variables['isTagDuplicate'], 'false'))
   env:
     MSBUILDDISABLENODEREUSE: '1'
 
