@@ -67,6 +67,21 @@ steps:
     EMIT_COBERTURA_AZURE="${{ parameters.emitCoberturaForAzure }}"
     INCLUDE_SHARED="${{ parameters.includeSadganSharedTests }}"
     TEST_SCOPE="${{ parameters.testProjects }}"
+    XUNIT_SETTINGS="$(Agent.TempDirectory)/xunit-serial.runsettings.xml"
+    cat > "$XUNIT_SETTINGS" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <TestSessionTimeout>900000</TestSessionTimeout>
+    <MaxCpuCount>1</MaxCpuCount>
+  </RunConfiguration>
+  <XUnit>
+    <ParallelizeAssembly>false</ParallelizeAssembly>
+    <ParallelizeTestCollections>false</ParallelizeTestCollections>
+    <MaxParallelThreads>1</MaxParallelThreads>
+  </XUnit>
+</RunSettings>
+EOF
     rm -rf "$RESULTS_DIR"
     mkdir -p "$RESULTS_DIR"
     PANEL_PROJ="$ROOT/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.Tests/Sadgan.Erp.Panel.Api.Tests.csproj"
@@ -114,6 +129,13 @@ steps:
     echo "testProjects scope: $TEST_SCOPE"
     echo "Test projects (${#TEST_PROJECTS[@]}):"
     printf '  %s\n' "${TEST_PROJECTS[@]}"
+    if [ "$TEST_SCOPE" = "panel-only" ] || [ "$TEST_SCOPE" = "Panel-Only" ] || [ "$TEST_SCOPE" = "PANEL-ONLY" ]; then
+      echo "panel-only: build MockTests dependency first (WireMock BaseFixture in Sadgan.Shared.Client.MockTests.dll) ..."
+      if ! dotnet build "$MOCK_PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false; then
+        echo "##vso[task.logissue type=error]Build failed: Sadgan.Shared.Client.MockTests (Panel dependency)"
+        exit 1
+      fi
+    fi
     clear_static_web_asset_cache() {
       find "$ROOT/SadganErp" -path '*/obj/*' -name 'rpswa.dswa.cache.json' -delete 2>/dev/null || true
     }
@@ -148,6 +170,9 @@ steps:
         fi
         if [ "$write_trx" = "true" ]; then
           args+=(--logger "trx;LogFileName=${NAME}.trx")
+        fi
+        if [ "$NAME" = "Sadgan.Erp.Panel.Api.Tests" ]; then
+          args+=(--settings "$XUNIT_SETTINGS" --blame-hang-timeout 10m --logger "console;verbosity=normal")
         fi
         if { [ "$collect" = "true" ] || [ "$collect" = "True" ]; } && { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; }; then
           local cover_out="$RESULTS_DIR/coverage/$NAME/"
