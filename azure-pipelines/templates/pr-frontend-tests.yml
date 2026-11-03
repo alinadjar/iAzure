@@ -11,6 +11,10 @@ parameters:
 - name: includeSadganSharedTests
   type: string
   default: 'false'
+- name: testProjects
+  type: string
+  default: panel-only
+  # panel-only | client-and-panel (for publishCodeCoverage) | sln
 
 steps:
 - template: pr-test-clone.yml
@@ -33,6 +37,7 @@ steps:
     runNodeSetup: 'true'
     nodeVersion: ${{ parameters.nodeVersion }}
     includeSadganSharedTests: ${{ parameters.includeSadganSharedTests }}
+    testProjects: ${{ parameters.testProjects }}
 
 
 - ${{ if or(eq(parameters.publishCodeCoverage, 'true'), eq(parameters.publishCodeCoverage, 'True')) }}:
@@ -43,9 +48,11 @@ steps:
       find "$ROOT" -type f \( -name 'coverage.cobertura.xml' -o -name '*.cobertura.xml' \) -ls || true
       mapfile -t FILES < <(find "$ROOT" -type f -name 'coverage.cobertura.xml' 2>/dev/null || true)
       if [ "${#FILES[@]}" -eq 0 ]; then
-        echo "##vso[task.logissue type=error]No coverage.cobertura.xml found. Enable collectCoverage and check dotnet test logs for XPlat Code Coverage."
-        exit 1
+        echo "##vso[task.logissue type=warning]No coverage.cobertura.xml found. Use testProjects: client-and-panel when publishCodeCoverage is true."
+        echo "##vso[task.setvariable variable=publishPrCodeCoverage]false"
+        exit 0
       fi
+      echo "##vso[task.setvariable variable=publishPrCodeCoverage]true"
       # PublishCodeCoverageResults@1 on Server 2022 matches one path; use first file (merge in ADO if multiple).
       echo "##vso[task.setvariable variable=coberturaSummaryFile]${FILES[0]}"
       echo "##vso[task.setvariable variable=disable.coverage.autogenerate]true"
@@ -56,7 +63,7 @@ steps:
 
   - task: PublishCodeCoverageResults@1
     displayName: 'Publish code coverage (Cobertura summary)'
-    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'), eq(variables['publishPrCodeCoverage'], 'true'))
     # PR agents: never run ReportGenerator / reportDirectory (disk). Server 2022 tab shows summary + HTML notice.
     env:
       DISABLE_COVERAGE_AUTOGENERATE: 'true'
