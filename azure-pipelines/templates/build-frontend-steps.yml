@@ -363,7 +363,7 @@ steps:
       coverageFormat: opencover
       emitCoberturaForAzure: 'true'
       runNodeSetup: 'false'
-      testProjects: client-and-panel
+      testProjects: sln
 
   - task: PublishTestResults@2
     displayName: 'Publish test results (Frontend CI)'
