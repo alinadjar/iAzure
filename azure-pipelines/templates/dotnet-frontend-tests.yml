@@ -45,13 +45,12 @@ steps:
     rm "$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/global.json" 2>/dev/null || true
     command -v node >/dev/null && node -v || echo "WARNING: node not on PATH"
     command -v npm >/dev/null && npm -v || echo "WARNING: npm not on PATH"
-    SLN="$(System.DefaultWorkingDirectory)/SadganErp/Sadgan.Erp.Panel/Sadgan.Erp.Panel.sln"
     if [ -z "${NUGET_CONFIG_PATH:-}" ] || [ ! -f "$(NUGET_CONFIG_PATH)" ]; then
       echo "##vso[task.logissue type=error]NUGET_CONFIG_PATH is not set. Run Create NuGet.Config before dotnet-frontend-tests."
       exit 1
     fi
-    dotnet restore "$SLN" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
-  displayName: 'Dotnet restore (Panel tests)'
+    echo "Each test csproj is restored on its own in the next step."
+  displayName: 'Prepare frontend test agent'
 
 - bash: |
     set -uo pipefail
@@ -132,99 +131,96 @@ steps:
         ;;
     esac
     echo "testProjects scope: $TEST_SCOPE"
-    echo "Test projects (${#TEST_PROJECTS[@]}):"
+    echo "Test projects (${#TEST_PROJECTS[@]}), each restored, built, and tested separately:"
     printf '  %s\n' "${TEST_PROJECTS[@]}"
-    restore_test_project() {
-      local proj="$1"
-      echo "dotnet restore (single test project) ..."
-      dotnet restore "$proj" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
-    }
-    if [ "$TEST_SCOPE" = "panel-only" ] || [ "$TEST_SCOPE" = "Panel-Only" ] || [ "$TEST_SCOPE" = "PANEL-ONLY" ]; then
-      echo "panel-only: build MockTests dependency first (WireMock BaseFixture in Sadgan.Shared.Client.MockTests.dll) ..."
-      if ! restore_test_project "$MOCK_PROJ"; then
-        echo "##vso[task.logissue type=error]Restore failed: Sadgan.Shared.Client.MockTests (Panel dependency)"
-        exit 1
-      fi
-      if ! dotnet build "$MOCK_PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false; then
-        echo "##vso[task.logissue type=error]Build failed: Sadgan.Shared.Client.MockTests (Panel dependency)"
-        exit 1
-      fi
-    fi
     clear_static_web_asset_cache() {
       find "$ROOT/SadganErp" -path '*/obj/*' -name 'rpswa.dswa.cache.json' -delete 2>/dev/null || true
     }
-    FAILED=0
-    for PROJ in "${TEST_PROJECTS[@]}"; do
-      NAME="$(basename "$PROJ" .csproj)"
-      echo "========== $NAME =========="
-      if [ ! -f "$PROJ" ]; then
-        echo "##vso[task.logissue type=error]Missing test project: $PROJ"
-        FAILED=1
-        continue
+    invoke_dotnet_test() {
+      local proj_path="$1"
+      local test_name="$2"
+      local cover_fmt="$3"
+      local write_trx="$4"
+      local collect="$5"
+      shift 5
+      local -a args=("$proj_path" --configuration "$CFG" --no-build --results-directory "$RESULTS_DIR" "$@")
+      if [ "$write_trx" = "true" ]; then
+        args+=(--logger "trx;LogFileName=${test_name}.trx")
+      fi
+      if [ "$test_name" = "Sadgan.Erp.Panel.Api.Tests" ]; then
+        args+=(--settings "$XUNIT_SETTINGS" --blame-hang-timeout 10m --logger "console;verbosity=normal")
+      fi
+      if { [ "$collect" = "true" ] || [ "$collect" = "True" ]; } && { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; }; then
+        local cover_out="$RESULTS_DIR/coverage/$test_name/"
+        mkdir -p "$cover_out"
+        args+=(/p:CollectCoverage=true /p:CoverletOutputFormat="$cover_fmt" /p:CoverletOutput="$cover_out" '/p:Include=[Sadgan*]*')
+      fi
+      echo "dotnet test $test_name (${cover_fmt}, trx=${write_trx}, coverage=${collect}) ..."
+      dotnet test "${args[@]}"
+    }
+    # mode is "test" or "build". ServerTests is the only project that receives UseMockHttp.
+    # Panel.Api.Tests rebuilds MockTests first so that project reference does not reuse ServerTests' assets file.
+    run_one_project() {
+      local proj="$1"
+      local mode="$2"
+      local name
+      local -a extra=()
+      name="$(basename "$proj" .csproj)"
+      if [ "$name" = "Sadgan.Erp.Panel.Api.Tests" ] && [ "$mode" = "test" ]; then
+        echo "Panel.Api.Tests references MockTests. Restore and build MockTests before Panel."
+        run_one_project "$MOCK_PROJ" build || return 1
+      fi
+      echo "========== $name ($mode) =========="
+      if [ ! -f "$proj" ]; then
+        echo "##vso[task.logissue type=error]Missing test project: $proj"
+        return 1
+      fi
+      if [ "$name" = "Sadgan.Shared.Client.ServerTests" ]; then
+        extra=(/p:UseMockHttp=true)
+        echo "ServerTests: /p:UseMockHttp=true on this project only (avoid localhost:5050)."
       fi
       clear_static_web_asset_cache
-      EXTRA_BUILD=()
-      if [ "$NAME" = "Sadgan.Shared.Client.ServerTests" ]; then
-        EXTRA_BUILD=(/p:UseMockHttp=true)
-        echo "ServerTests: /p:UseMockHttp=true on agent (avoid localhost:5050)."
+      echo "dotnet restore $name ..."
+      if ! dotnet restore "$proj" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel; then
+        echo "##vso[task.logissue type=error]Restore failed: $name"
+        return 1
       fi
-      if ! restore_test_project "$PROJ"; then
-        echo "##vso[task.logissue type=error]Restore failed: $NAME"
-        FAILED=1
-        continue
+      echo "dotnet build $name ..."
+      if ! dotnet build "$proj" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false "${extra[@]}"; then
+        echo "##vso[task.logissue type=error]Build failed: $name"
+        return 1
       fi
-      echo "dotnet build (single test project) ..."
-      if ! dotnet build "$PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false "${EXTRA_BUILD[@]}"; then
-        echo "##vso[task.logissue type=error]Build failed: $NAME"
-        FAILED=1
-        continue
+      if [ "$mode" != "test" ]; then
+        return 0
       fi
-      run_dotnet_test() {
-        local cover_fmt="$1"
-        local write_trx="$2"
-        local collect="$3"
-        local -a args=("$PROJ" --configuration "$CFG" --no-build --results-directory "$RESULTS_DIR")
-        if [ "$NAME" = "Sadgan.Shared.Client.ServerTests" ]; then
-          args+=(/p:UseMockHttp=true)
-        fi
-        if [ "$write_trx" = "true" ]; then
-          args+=(--logger "trx;LogFileName=${NAME}.trx")
-        fi
-        if [ "$NAME" = "Sadgan.Erp.Panel.Api.Tests" ]; then
-          args+=(--settings "$XUNIT_SETTINGS" --blame-hang-timeout 10m --logger "console;verbosity=normal")
-        fi
-        if { [ "$collect" = "true" ] || [ "$collect" = "True" ]; } && { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; }; then
-          local cover_out="$RESULTS_DIR/coverage/$NAME/"
-          mkdir -p "$cover_out"
-          args+=(/p:CollectCoverage=true /p:CoverletOutputFormat="$cover_fmt" /p:CoverletOutput="$cover_out" '/p:Include=[Sadgan*]*')
-        fi
-        echo "dotnet test (${cover_fmt}, trx=${write_trx}, coverage=${collect}) ..."
-        dotnet test "${args[@]}"
-      }
-      collect_coverage=true
-      if [ "$NAME" = "Sadgan.Erp.Panel.Api.Tests" ]; then
+      local collect_coverage=true
+      if [ "$name" = "Sadgan.Erp.Panel.Api.Tests" ]; then
         collect_coverage=false
         if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; }; then
           echo "Skipping Coverlet on Panel.Api.Tests; TRX only. Use client-and-panel for ADO Cobertura from Mock/Server."
         fi
-      elif [ "$NAME" = "Sadgan.Shared.Tests" ]; then
+      elif [ "$name" = "Sadgan.Shared.Tests" ]; then
         collect_coverage=false
         if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; }; then
           echo "Skipping Coverlet on Sadgan.Shared.Tests; TRX only."
         fi
       fi
-      PRIMARY_COVER="$COVER_FORMAT"
-      if ! run_dotnet_test "$PRIMARY_COVER" true "$collect_coverage"; then
-        echo "##vso[task.logissue type=error]Test project failed: $NAME"
-        FAILED=1
-        continue
+      if ! invoke_dotnet_test "$proj" "$name" "$COVER_FORMAT" true "$collect_coverage" "${extra[@]}"; then
+        echo "##vso[task.logissue type=error]Test project failed: $name"
+        return 1
       fi
-      if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; } && [ "$PRIMARY_COVER" = "opencover" ] && { [ "$EMIT_COBERTURA_AZURE" = "true" ] || [ "$EMIT_COBERTURA_AZURE" = "True" ]; } && [ "$collect_coverage" = "true" ]; then
+      if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; } && [ "$COVER_FORMAT" = "opencover" ] && { [ "$EMIT_COBERTURA_AZURE" = "true" ] || [ "$EMIT_COBERTURA_AZURE" = "True" ]; } && [ "$collect_coverage" = "true" ]; then
         echo "Second pass: Cobertura for Azure DevOps (no extra TRX) ..."
-        if ! run_dotnet_test "cobertura" false true; then
-          echo "##vso[task.logissue type=error]Cobertura pass failed: $NAME"
-          FAILED=1
+        if ! invoke_dotnet_test "$proj" "$name" "cobertura" false true "${extra[@]}"; then
+          echo "##vso[task.logissue type=error]Cobertura pass failed: $name"
+          return 1
         fi
+      fi
+    }
+    FAILED=0
+    for PROJ in "${TEST_PROJECTS[@]}"; do
+      if ! run_one_project "$PROJ" test; then
+        FAILED=1
       fi
     done
     echo "TRX files:"
