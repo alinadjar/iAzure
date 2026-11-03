@@ -18,6 +18,10 @@ parameters:
 - name: emitCoberturaForAzure
   type: string
   default: 'false'
+- name: testProjects
+  type: string
+  default: panel-only
+  # panel-only | client-and-panel | sln
 - name: includeSadganSharedTests
   type: string
   default: 'false'
@@ -62,33 +66,52 @@ steps:
     COVER_FORMAT="${{ parameters.coverageFormat }}"
     EMIT_COBERTURA_AZURE="${{ parameters.emitCoberturaForAzure }}"
     INCLUDE_SHARED="${{ parameters.includeSadganSharedTests }}"
+    TEST_SCOPE="${{ parameters.testProjects }}"
     rm -rf "$RESULTS_DIR"
     mkdir -p "$RESULTS_DIR"
-    mapfile -t DISCOVERED < <(grep -E '(MockTests|ServerTests|\.Tests)\.csproj"' "$SLN" | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' | tr '\\' '/' | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done | sort -u)
-    if [ "${#DISCOVERED[@]}" -eq 0 ]; then
-      echo "##vso[task.logissue type=error]No test projects found in $SLN"
-      exit 1
-    fi
-    PREFERRED_BASENAMES=(Sadgan.Shared.Client.MockTests.csproj Sadgan.Shared.Client.ServerTests.csproj Sadgan.Erp.Panel.Api.Tests.csproj Sadgan.Shared.Tests.csproj)
+    PANEL_PROJ="$ROOT/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.Tests/Sadgan.Erp.Panel.Api.Tests.csproj"
+    MOCK_PROJ="$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.MockTests.csproj"
+    SERVER_PROJ="$ROOT/SadganShared/3_ClientLibrary/src/Sadgan.Shared.Client.Tests/Sadgan.Shared.Client.ServerTests.csproj"
     TEST_PROJECTS=()
-    for base in "${PREFERRED_BASENAMES[@]}"; do
-      if [ "$base" = "Sadgan.Shared.Tests.csproj" ] && [ "$INCLUDE_SHARED" != "true" ] && [ "$INCLUDE_SHARED" != "True" ]; then
-        continue
-      fi
-      for p in "${DISCOVERED[@]}"; do
-        if [ "$(basename "$p")" = "$base" ]; then
-          TEST_PROJECTS+=("$p")
-          break
+    case "$TEST_SCOPE" in
+      panel-only|Panel-Only|PANEL-ONLY)
+        TEST_PROJECTS=("$PANEL_PROJ")
+        ;;
+      client-and-panel|Client-And-Panel|CLIENT-AND-PANEL)
+        TEST_PROJECTS=("$MOCK_PROJ" "$SERVER_PROJ" "$PANEL_PROJ")
+        ;;
+      sln|Sln|SLN)
+        mapfile -t DISCOVERED < <(grep -E '(MockTests|ServerTests|\.Tests)\.csproj"' "$SLN" | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' | tr '\\' '/' | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done | sort -u)
+        if [ "${#DISCOVERED[@]}" -eq 0 ]; then
+          echo "##vso[task.logissue type=error]No test projects found in $SLN"
+          exit 1
         fi
-      done
-    done
-    for p in "${DISCOVERED[@]}"; do
-      found=0
-      for q in "${TEST_PROJECTS[@]}"; do
-        if [ "$p" = "$q" ]; then found=1; break; fi
-      done
-      if [ "$found" -eq 0 ]; then TEST_PROJECTS+=("$p"); fi
-    done
+        PREFERRED_BASENAMES=(Sadgan.Shared.Client.MockTests.csproj Sadgan.Shared.Client.ServerTests.csproj Sadgan.Erp.Panel.Api.Tests.csproj Sadgan.Shared.Tests.csproj)
+        for base in "${PREFERRED_BASENAMES[@]}"; do
+          if [ "$base" = "Sadgan.Shared.Tests.csproj" ] && [ "$INCLUDE_SHARED" != "true" ] && [ "$INCLUDE_SHARED" != "True" ]; then
+            continue
+          fi
+          for p in "${DISCOVERED[@]}"; do
+            if [ "$(basename "$p")" = "$base" ]; then
+              TEST_PROJECTS+=("$p")
+              break
+            fi
+          done
+        done
+        for p in "${DISCOVERED[@]}"; do
+          found=0
+          for q in "${TEST_PROJECTS[@]}"; do
+            if [ "$p" = "$q" ]; then found=1; break; fi
+          done
+          if [ "$found" -eq 0 ]; then TEST_PROJECTS+=("$p"); fi
+        done
+        ;;
+      *)
+        echo "##vso[task.logissue type=error]Unknown testProjects scope: $TEST_SCOPE (use panel-only, client-and-panel, or sln)"
+        exit 1
+        ;;
+    esac
+    echo "testProjects scope: $TEST_SCOPE"
     echo "Test projects (${#TEST_PROJECTS[@]}):"
     printf '  %s\n' "${TEST_PROJECTS[@]}"
     clear_static_web_asset_cache() {
@@ -99,7 +122,7 @@ steps:
       NAME="$(basename "$PROJ" .csproj)"
       echo "========== $NAME =========="
       if [ ! -f "$PROJ" ]; then
-        echo "##vso[task.logissue type=error]Missing test project (listed in sln): $PROJ"
+        echo "##vso[task.logissue type=error]Missing test project: $PROJ"
         FAILED=1
         continue
       fi
@@ -107,7 +130,7 @@ steps:
       EXTRA_BUILD=()
       if [ "$NAME" = "Sadgan.Shared.Client.ServerTests" ]; then
         EXTRA_BUILD=(/p:UseMockHttp=true)
-        echo "ServerTests: /p:UseMockHttp=true on PR agent (avoid localhost:5050)."
+        echo "ServerTests: /p:UseMockHttp=true on agent (avoid localhost:5050)."
       fi
       echo "dotnet build (single test project) ..."
       if ! dotnet build "$PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false "${EXTRA_BUILD[@]}"; then
@@ -138,13 +161,12 @@ steps:
       if [ "$NAME" = "Sadgan.Erp.Panel.Api.Tests" ]; then
         collect_coverage=false
         if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; }; then
-          echo "Skipping Coverlet on Sadgan.Erp.Panel.Api.Tests (coverlet.msbuild hangs with Blazor/Views); tests still run for TRX."
-          echo "Use MockTests/ServerTests Cobertura/OpenCover under TestResults/coverage/ for ADO/Sonar."
+          echo "Skipping Coverlet on Panel.Api.Tests; TRX only. Use client-and-panel for ADO Cobertura from Mock/Server."
         fi
       elif [ "$NAME" = "Sadgan.Shared.Tests" ]; then
         collect_coverage=false
         if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; }; then
-          echo "Skipping Coverlet on Sadgan.Shared.Tests (Roslyn suite); tests still run for TRX."
+          echo "Skipping Coverlet on Sadgan.Shared.Tests; TRX only."
         fi
       fi
       PRIMARY_COVER="$COVER_FORMAT"
