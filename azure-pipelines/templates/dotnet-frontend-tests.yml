@@ -134,18 +134,32 @@ steps:
     echo "testProjects scope: $TEST_SCOPE"
     echo "Test projects (${#TEST_PROJECTS[@]}):"
     printf '  %s\n' "${TEST_PROJECTS[@]}"
+    # MockTests and ServerTests share one directory. Solution restore keeps a single
+    # obj/project.assets.json, and the project built second overwrites the first.
+    # Pass these only on the CI commands so local/solution builds keep the default bin/obj.
+    isolation_args_for() {
+      local name
+      name="$(basename "$1" .csproj)"
+      case "$name" in
+        Sadgan.Shared.Client.MockTests|Sadgan.Shared.Client.ServerTests)
+          printf '%s\n' "-p:BaseIntermediateOutputPath=obj/${name}/" "-p:BaseOutputPath=bin/${name}/"
+          ;;
+      esac
+    }
     restore_test_project() {
       local proj="$1"
+      shift
       echo "dotnet restore (single test project) ..."
-      dotnet restore "$proj" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
+      dotnet restore "$proj" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel "$@"
     }
     if [ "$TEST_SCOPE" = "panel-only" ] || [ "$TEST_SCOPE" = "Panel-Only" ] || [ "$TEST_SCOPE" = "PANEL-ONLY" ]; then
       echo "panel-only: build MockTests dependency first (WireMock BaseFixture in Sadgan.Shared.Client.MockTests.dll) ..."
-      if ! restore_test_project "$MOCK_PROJ"; then
+      mapfile -t MOCK_ISOLATION < <(isolation_args_for "$MOCK_PROJ")
+      if ! restore_test_project "$MOCK_PROJ" ${MOCK_ISOLATION[@]+"${MOCK_ISOLATION[@]}"}; then
         echo "##vso[task.logissue type=error]Restore failed: Sadgan.Shared.Client.MockTests (Panel dependency)"
         exit 1
       fi
-      if ! dotnet build "$MOCK_PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false; then
+      if ! dotnet build "$MOCK_PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false ${MOCK_ISOLATION[@]+"${MOCK_ISOLATION[@]}"}; then
         echo "##vso[task.logissue type=error]Build failed: Sadgan.Shared.Client.MockTests (Panel dependency)"
         exit 1
       fi
@@ -163,18 +177,22 @@ steps:
         continue
       fi
       clear_static_web_asset_cache
+      mapfile -t ISOLATION < <(isolation_args_for "$PROJ")
+      if [ "${#ISOLATION[@]}" -gt 0 ]; then
+        echo "Separate obj/bin for $NAME (this directory also contains the other client test project)."
+      fi
       EXTRA_BUILD=()
       if [ "$NAME" = "Sadgan.Shared.Client.ServerTests" ]; then
         EXTRA_BUILD=(/p:UseMockHttp=true)
         echo "ServerTests: /p:UseMockHttp=true on agent (avoid localhost:5050)."
       fi
-      if ! restore_test_project "$PROJ"; then
+      if ! restore_test_project "$PROJ" ${ISOLATION[@]+"${ISOLATION[@]}"}; then
         echo "##vso[task.logissue type=error]Restore failed: $NAME"
         FAILED=1
         continue
       fi
       echo "dotnet build (single test project) ..."
-      if ! dotnet build "$PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false "${EXTRA_BUILD[@]}"; then
+      if ! dotnet build "$PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false "${EXTRA_BUILD[@]}" ${ISOLATION[@]+"${ISOLATION[@]}"}; then
         echo "##vso[task.logissue type=error]Build failed: $NAME"
         FAILED=1
         continue
@@ -183,7 +201,7 @@ steps:
         local cover_fmt="$1"
         local write_trx="$2"
         local collect="$3"
-        local -a args=("$PROJ" --configuration "$CFG" --no-build --results-directory "$RESULTS_DIR")
+        local -a args=("$PROJ" --configuration "$CFG" --no-build --results-directory "$RESULTS_DIR" ${ISOLATION[@]+"${ISOLATION[@]}"})
         if [ "$NAME" = "Sadgan.Shared.Client.ServerTests" ]; then
           args+=(/p:UseMockHttp=true)
         fi
