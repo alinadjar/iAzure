@@ -69,19 +69,19 @@ steps:
     TEST_SCOPE="${{ parameters.testProjects }}"
     XUNIT_SETTINGS="$(Agent.TempDirectory)/xunit-serial.runsettings.xml"
     cat > "$XUNIT_SETTINGS" <<'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<RunSettings>
-  <RunConfiguration>
-    <TestSessionTimeout>900000</TestSessionTimeout>
-    <MaxCpuCount>1</MaxCpuCount>
-  </RunConfiguration>
-  <XUnit>
-    <ParallelizeAssembly>false</ParallelizeAssembly>
-    <ParallelizeTestCollections>false</ParallelizeTestCollections>
-    <MaxParallelThreads>1</MaxParallelThreads>
-  </XUnit>
-</RunSettings>
-EOF
+  <?xml version="1.0" encoding="utf-8"?>
+  <RunSettings>
+    <RunConfiguration>
+      <TestSessionTimeout>900000</TestSessionTimeout>
+      <MaxCpuCount>1</MaxCpuCount>
+    </RunConfiguration>
+    <XUnit>
+      <ParallelizeAssembly>false</ParallelizeAssembly>
+      <ParallelizeTestCollections>false</ParallelizeTestCollections>
+      <MaxParallelThreads>1</MaxParallelThreads>
+    </XUnit>
+  </RunSettings>
+  EOF
     rm -rf "$RESULTS_DIR"
     mkdir -p "$RESULTS_DIR"
     PANEL_PROJ="$ROOT/SadganErp/Sadgan.Erp.Panel/src/Sadgan.Erp.Panel.Tests/Sadgan.Erp.Panel.Api.Tests.csproj"
