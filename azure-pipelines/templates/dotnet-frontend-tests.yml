@@ -100,6 +100,7 @@ steps:
         ;;
       sln|Sln|SLN)
         # All MockTests / ServerTests / *Tests.csproj entries in Sadgan.Erp.Panel.sln (add projects in sln only).
+        # Sadgan.Erp.Panel.WebApp.UITest is a Blazor host (UITest.csproj), not an xUnit project, so it is not matched.
         mapfile -t DISCOVERED < <(grep -E '(MockTests|ServerTests|\.Tests)\.csproj"' "$SLN" | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' | tr '\\' '/' | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done | sort -u)
         if [ "${#DISCOVERED[@]}" -eq 0 ]; then
           echo "##vso[task.logissue type=error]No test projects found in $SLN"
@@ -133,8 +134,17 @@ steps:
     echo "testProjects scope: $TEST_SCOPE"
     echo "Test projects (${#TEST_PROJECTS[@]}):"
     printf '  %s\n' "${TEST_PROJECTS[@]}"
+    restore_test_project() {
+      local proj="$1"
+      echo "dotnet restore (single test project) ..."
+      dotnet restore "$proj" --configfile "$(NUGET_CONFIG_PATH)" --disable-parallel
+    }
     if [ "$TEST_SCOPE" = "panel-only" ] || [ "$TEST_SCOPE" = "Panel-Only" ] || [ "$TEST_SCOPE" = "PANEL-ONLY" ]; then
       echo "panel-only: build MockTests dependency first (WireMock BaseFixture in Sadgan.Shared.Client.MockTests.dll) ..."
+      if ! restore_test_project "$MOCK_PROJ"; then
+        echo "##vso[task.logissue type=error]Restore failed: Sadgan.Shared.Client.MockTests (Panel dependency)"
+        exit 1
+      fi
       if ! dotnet build "$MOCK_PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false; then
         echo "##vso[task.logissue type=error]Build failed: Sadgan.Shared.Client.MockTests (Panel dependency)"
         exit 1
@@ -157,6 +167,11 @@ steps:
       if [ "$NAME" = "Sadgan.Shared.Client.ServerTests" ]; then
         EXTRA_BUILD=(/p:UseMockHttp=true)
         echo "ServerTests: /p:UseMockHttp=true on agent (avoid localhost:5050)."
+      fi
+      if ! restore_test_project "$PROJ"; then
+        echo "##vso[task.logissue type=error]Restore failed: $NAME"
+        FAILED=1
+        continue
       fi
       echo "dotnet build (single test project) ..."
       if ! dotnet build "$PROJ" --configuration "$CFG" --no-restore -m:1 --disable-parallel -p:BuildInParallel=false "${EXTRA_BUILD[@]}"; then
