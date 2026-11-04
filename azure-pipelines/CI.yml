@@ -73,6 +73,9 @@ variables:
     value: 'Release'
   - name: isTagDuplicate
     value: 'false'
+    # Sonar JS/TS analyzer Node heap (MB). Raise if analyze OOMs; keep below ~70% of agent RAM (JVM + publish also need memory).
+  - name: sonarNodeMaxSpaceMb
+    value: '16384'
   - name: orgUrl
     value: 'http://azure.sadgan.int/WebApp'
   - name: project
@@ -1309,6 +1312,7 @@ stages:
         isBranchDevelop: $(isBranchDevelop)
         isBranchDevOps: $(isBranchDevOps)
         COMMIT_HASH: $(gitPull.COMMIT_HASH)
+        sonarNodeMaxSpaceMb: $(sonarNodeMaxSpaceMb)
         ${{ if eq(variables['Build.Reason'], 'Schedule') }}:
           RUN_SONARQUBE: 'YES'
         ${{ else }}:
@@ -1413,6 +1417,7 @@ stages:
         isBranchDevelop: $(isBranchDevelop)
         isBranchDevOps: $(isBranchDevOps)
         COMMIT_HASH: $(gitPull.COMMIT_HASH)
+        sonarNodeMaxSpaceMb: $(sonarNodeMaxSpaceMb)
         ${{ if eq(variables['Build.Reason'], 'Schedule') }}:
           RUN_SONARQUBE: 'YES'
         ${{ else }}:
