@@ -118,6 +118,9 @@ steps:
           done
         done
         for p in "${DISCOVERED[@]}"; do
+          if [ "$(basename "$p")" = "Sadgan.Shared.Tests.csproj" ] && [ "$INCLUDE_SHARED" != "true" ] && [ "$INCLUDE_SHARED" != "True" ]; then
+            continue
+          fi
           found=0
           for q in "${TEST_PROJECTS[@]}"; do
             if [ "$p" = "$q" ]; then found=1; break; fi
@@ -207,6 +210,11 @@ steps:
       fi
       if ! invoke_dotnet_test "$proj" "$name" "$COVER_FORMAT" true "$collect_coverage" "${extra[@]}"; then
         echo "##vso[task.logissue type=error]Test project failed: $name"
+        trx="$RESULTS_DIR/${name}.trx"
+        if [ -f "$trx" ]; then
+          echo "Failed tests (from $trx):"
+          grep -E 'outcome="Failed"|testName=' "$trx" 2>/dev/null | head -40 || true
+        fi
         return 1
       fi
       if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; } && [ "$COVER_FORMAT" = "opencover" ] && { [ "$EMIT_COBERTURA_AZURE" = "true" ] || [ "$EMIT_COBERTURA_AZURE" = "True" ]; } && [ "$collect_coverage" = "true" ]; then
