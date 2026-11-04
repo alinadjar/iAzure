@@ -12,6 +12,10 @@ parameters:
 - name: RUN_SONARQUBE
   type: string
   default: 'NO'  
+# Node heap for Sonar JS/TS analysis (MB). Must match NODE_OPTIONS on SonarQubeAnalyze. Not unlimited — bounded by agent RAM.
+- name: sonarNodeMaxSpaceMb
+  type: string
+  default: '16384'
 
 steps:
 - task: Bash@3
@@ -349,6 +353,7 @@ steps:
       projectName: 'Sadgan.Erp.Panel'  
       extraProperties: |
         sonar.branch.name=${{ parameters.BRANCH }}
+        sonar.javascript.node.maxspace=${{ parameters.sonarNodeMaxSpaceMb }}
         sonar.javascript.node.maxspace=8192
         sonar.cs.opencover.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.opencover.xml
         sonar.cs.vstest.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/**/*.trx
@@ -432,7 +437,7 @@ steps:
     env:
       PATH: $(DOTNET_PATH)
       DOTNET_ROOT: /opt/net_sdk_10
-      NODE_OPTIONS: --max-old-space-size=8192
+      NODE_OPTIONS: --max-old-space-size=${{ parameters.sonarNodeMaxSpaceMb }}
     inputs:
       SonarQube: 'SonarQube-Sadgan'
 
