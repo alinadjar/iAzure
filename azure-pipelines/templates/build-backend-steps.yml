@@ -267,13 +267,13 @@ steps:
       projectName: 'SadganErpApi'
       extraProperties: |
         sonar.branch.name=${{ parameters.BRANCH }}
-        sonar.javascript.node.maxspace=${{ parameters.sonarNodeMaxSpaceMb }}
-        sonar.javascript.node.maxspace=8192
+        sonar.javascript.enabled=false        
         sonar.cs.opencover.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/coverage/**/coverage.opencover.xml
         sonar.cs.vstest.reportsPaths=$(System.DefaultWorkingDirectory)/TestResults/**/*.trx
         sonar.exclusions=**/CICD/**,**/Dockerfile,**/Dockerfile.*,**/appsettings.json,**/appsettings.*.json,**/*.yaml,**/*.yml,**/*.ps1,**/Sadgan.Erp.Panel/**,**/Sadgan.Erp.Client.Core/**,**/bin/**,**/obj/**,**/SeedSnapshots/**,**/Migrations/**,**/Designer.cs,**/node_modules/**
         sonar.sca.exclusions=**/bin/**,**/obj/**
         sonar.test.exclusions=**/bin/**,**/obj/**
+         # sonar.javascript.node.maxspace=${{ parameters.sonarNodeMaxSpaceMb }}      
 
   - template: dotnet-backend-tests.yml
     parameters:
@@ -357,7 +357,7 @@ steps:
       DOTNET_ROOT: /opt/net_sdk_10
       NODE_OPTIONS: --max-old-space-size=${{ parameters.sonarNodeMaxSpaceMb }}
     inputs:
-      SonarQube: 'SonarQube-Sadgan'
+      SonarQube: 'svc_sonarqube'
 
   - task: SonarQubePublish@8
     displayName: 'SonarQube Publish (Backend)'
@@ -366,7 +366,7 @@ steps:
       PATH: $(DOTNET_PATH)
       DOTNET_ROOT: /opt/net_sdk_10
     inputs:
-      SonarQube: 'SonarQube-Sadgan'
+      SonarQube: 'svc_sonarqube'
       pollingTimeoutSec: '300'    
 
   - bash: |
