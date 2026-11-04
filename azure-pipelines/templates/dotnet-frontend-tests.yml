@@ -158,7 +158,8 @@ steps:
         mkdir -p "$cover_out"
         args+=(/p:CollectCoverage=true /p:CoverletOutputFormat="$cover_fmt" /p:CoverletOutput="$cover_out" '/p:Include=[Sadgan*]*')
       fi
-      echo "dotnet test $test_name (${cover_fmt}, trx=${write_trx}, coverage=${collect}) ..."
+      # echo "dotnet test $test_name (${cover_fmt}, trx=${write_trx}, coverage=${collect}) ..."
+      echo dotnet test "${args[@]}"
       dotnet test "${args[@]}"
     }
     # mode is "test" or "build". ServerTests is the only project that receives UseMockHttp.
