@@ -8,9 +8,6 @@ parameters:
 - name: publishCodeCoverage
   type: string
   default: 'false'
-- name: includeSadganSharedTests
-  type: string
-  default: 'false'
 - name: testProjects
   type: string
   default: sln
@@ -36,7 +33,6 @@ steps:
     coverageFormat: cobertura
     runNodeSetup: 'true'
     nodeVersion: ${{ parameters.nodeVersion }}
-    includeSadganSharedTests: ${{ parameters.includeSadganSharedTests }}
     testProjects: ${{ parameters.testProjects }}
 
 
