@@ -21,12 +21,9 @@ parameters:
 - name: testProjects
   type: string
   default: sln
-  # sln = discover test csproj from Sadgan.Erp.Panel.sln (default)
+  # sln = every MockTests / ServerTests / *Tests.csproj in Sadgan.Erp.Panel.sln (same set as VS Test Explorer for those projects)
   # panel-only | client-and-panel
-- name: includeSadganSharedTests
-  type: string
-  default: 'false'
-  # sln only: set true to also run Sadgan.Shared.Tests from the solution
+
 
 steps:
 - ${{ if or(eq(parameters.runNodeSetup, 'true'), eq(parameters.runNodeSetup, 'True')) }}:
@@ -67,7 +64,6 @@ steps:
     COVERAGE="${{ parameters.collectCoverage }}"
     COVER_FORMAT="${{ parameters.coverageFormat }}"
     EMIT_COBERTURA_AZURE="${{ parameters.emitCoberturaForAzure }}"
-    INCLUDE_SHARED="${{ parameters.includeSadganSharedTests }}"
     TEST_SCOPE="${{ parameters.testProjects }}"
     XUNIT_SETTINGS="$(Agent.TempDirectory)/xunit-serial.runsettings.xml"
     cat > "$XUNIT_SETTINGS" <<'EOF'
@@ -98,18 +94,25 @@ steps:
         TEST_PROJECTS=("$MOCK_PROJ" "$SERVER_PROJ" "$PANEL_PROJ")
         ;;
       sln|Sln|SLN)
-        # All MockTests / ServerTests / *Tests.csproj entries in Sadgan.Erp.Panel.sln (add projects in sln only).
-        # Sadgan.Erp.Panel.WebApp.UITest is a Blazor host (UITest.csproj), not an xUnit project, so it is not matched.
-        mapfile -t DISCOVERED < <(grep -E '(MockTests|ServerTests|\.Tests)\.csproj"' "$SLN" | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' | tr '\\' '/' | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done | sort -u)
+        # Parse Sadgan.Erp.Panel.sln: MockTests, ServerTests, and *Tests.csproj (not *.UITest.csproj).
+        # Run order: Mock → Server → Panel → Shared → any other matches (Panel pre-builds Mock when needed).
+        mapfile -t DISCOVERED < <(grep -E '(MockTests|ServerTests|\.Tests)\.csproj"' "$SLN" | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' | tr '\\' '/' | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done)
         if [ "${#DISCOVERED[@]}" -eq 0 ]; then
           echo "##vso[task.logissue type=error]No test projects found in $SLN"
           exit 1
         fi
-        PREFERRED_BASENAMES=(Sadgan.Shared.Client.MockTests.csproj Sadgan.Shared.Client.ServerTests.csproj Sadgan.Erp.Panel.Api.Tests.csproj Sadgan.Shared.Tests.csproj)
-        for base in "${PREFERRED_BASENAMES[@]}"; do
-          if [ "$base" = "Sadgan.Shared.Tests.csproj" ] && [ "$INCLUDE_SHARED" != "true" ] && [ "$INCLUDE_SHARED" != "True" ]; then
-            continue
-          fi
+        # Dedupe while keeping first occurrence (solution file order).
+        DEDUPED=()
+        for p in "${DISCOVERED[@]}"; do
+          found=0
+          for q in "${DEDUPED[@]}"; do
+            if [ "$p" = "$q" ]; then found=1; break; fi
+          done
+          if [ "$found" -eq 0 ]; then DEDUPED+=("$p"); fi
+        done
+        DISCOVERED=("${DEDUPED[@]}")
+        RUN_ORDER=(Sadgan.Shared.Client.MockTests.csproj Sadgan.Shared.Client.ServerTests.csproj Sadgan.Erp.Panel.Api.Tests.csproj Sadgan.Shared.Tests.csproj)
+        for base in "${RUN_ORDER[@]}"; do
           for p in "${DISCOVERED[@]}"; do
             if [ "$(basename "$p")" = "$base" ]; then
               TEST_PROJECTS+=("$p")
@@ -118,9 +121,6 @@ steps:
           done
         done
         for p in "${DISCOVERED[@]}"; do
-          if [ "$(basename "$p")" = "Sadgan.Shared.Tests.csproj" ] && [ "$INCLUDE_SHARED" != "true" ] && [ "$INCLUDE_SHARED" != "True" ]; then
-            continue
-          fi
           found=0
           for q in "${TEST_PROJECTS[@]}"; do
             if [ "$p" = "$q" ]; then found=1; break; fi
@@ -216,6 +216,13 @@ steps:
           grep -E 'outcome="Failed"|testName=' "$trx" 2>/dev/null | head -40 || true
         fi
         return 1
+      fi
+      trx="$RESULTS_DIR/${name}.trx"
+      if [ -f "$trx" ]; then
+        total="$(grep -o 'total=\"[0-9]*\"' "$trx" | head -1 | grep -o '[0-9]*' || true)"
+        passed="$(grep -o 'passed=\"[0-9]*\"' "$trx" | head -1 | grep -o '[0-9]*' || true)"
+        failed="$(grep -o 'failed=\"[0-9]*\"' "$trx" | head -1 | grep -o '[0-9]*' || true)"
+        echo "TRX summary $name: total=${total:-?} passed=${passed:-?} failed=${failed:-?}"
       fi
       if { [ "$COVERAGE" = "true" ] || [ "$COVERAGE" = "True" ]; } && [ "$COVER_FORMAT" = "opencover" ] && { [ "$EMIT_COBERTURA_AZURE" = "true" ] || [ "$EMIT_COBERTURA_AZURE" = "True" ]; } && [ "$collect_coverage" = "true" ]; then
         echo "Second pass: Cobertura for Azure DevOps (no extra TRX) ..."
