@@ -2,6 +2,9 @@ parameters:
 - name: buildConfiguration
   type: string
   default: Debug
+- name: publishCodeCoverage
+  type: string
+  default: 'false'
 
 steps:
 - template: pr-test-clone.yml
@@ -19,7 +22,45 @@ steps:
 - template: dotnet-backend-tests.yml
   parameters:
     buildConfiguration: ${{ parameters.buildConfiguration }}
-    collectCoverage: 'false'
+    collectCoverage: ${{ parameters.publishCodeCoverage }}
+    emitCoberturaForAzure: ${{ parameters.publishCodeCoverage }}
+
+- ${{ if or(eq(parameters.publishCodeCoverage, 'true'), eq(parameters.publishCodeCoverage, 'True')) }}:
+  - bash: |
+      set -euo pipefail
+      ROOT="$(System.DefaultWorkingDirectory)/TestResults"
+      echo "Searching for Cobertura under $ROOT ..."
+      find "$ROOT" -type f \( -name 'coverage.cobertura.xml' -o -name '*.cobertura.xml' \) -ls || true
+      mapfile -t FILES < <(find "$ROOT" -type f -name 'coverage.cobertura.xml' 2>/dev/null || true)
+      if [ "${#FILES[@]}" -eq 0 ]; then
+        echo "##vso[task.logissue type=warning]No coverage.cobertura.xml found. Ensure SadganErp.Api.sln test projects ran with Coverlet."
+        echo "##vso[task.setvariable variable=publishPrCodeCoverage]false"
+        exit 0
+      fi
+      echo "##vso[task.setvariable variable=publishPrCodeCoverage]true"
+      echo "##vso[task.setvariable variable=coberturaSummaryFile]${FILES[0]}"
+      echo "##vso[task.setvariable variable=disable.coverage.autogenerate]true"
+      echo "Using summary file: ${FILES[0]}"
+      ls -lh "${FILES[0]}" || true
+    displayName: 'Locate Cobertura coverage file'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
+
+  - task: PublishCodeCoverageResults@1
+    displayName: 'Publish code coverage (Cobertura summary)'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'), eq(variables['publishPrCodeCoverage'], 'true'))
+    env:
+      DISABLE_COVERAGE_AUTOGENERATE: 'true'
+      PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    inputs:
+      codeCoverageTool: Cobertura
+      summaryFileLocation: '$(coberturaSummaryFile)'
+      pathToSources: '$(System.DefaultWorkingDirectory)'
+
+  - bash: |
+      set -euo pipefail
+      rm -rf "$(System.DefaultWorkingDirectory)/TestResults/coverage"
+    displayName: 'Free agent disk after coverage publish'
+    condition: and(succeededOrFailed(), eq(variables['dotnetTestsExecuted'], 'true'))
 
 - task: PublishTestResults@2
   displayName: 'Publish test results'
