@@ -33,12 +33,15 @@ steps:
 
     if [ "$IS_PR" = true ]; then
       PR_ID="$(System.PullRequest.PullRequestId)"
+      SOURCE_BRANCH="${SYSTEM_PULLREQUEST_SOURCEBRANCH#refs/heads/}"
+      SOURCE_COMMIT="${SYSTEM_PULLREQUEST_SOURCECOMMITID:-}"
       TARGET_BRANCH="${SYSTEM_PULLREQUEST_TARGETBRANCH#refs/heads/}"
-      echo "PR #$PR_ID → target: $TARGET_BRANCH | triggering repo: $APP_REPO"
+      echo "PR #$PR_ID | source: $SOURCE_BRANCH | target: $TARGET_BRANCH | triggering repo: $APP_REPO"
       if [ "$TARGET_BRANCH" != "dev" ] && [[ ! "$TARGET_BRANCH" =~ ^wit/ ]]; then
         echo "Unsupported PR target branch: $TARGET_BRANCH (expected dev or wit/*)"
         exit 1
       fi
+      # Shared libraries / Client.Core baseline for PR validation (app repo uses PR source below).
       SHARED_BRANCH="dev"
     else
       echo "Non-PR run (Build.Reason=$BUILD_REASON): cloning @ branch $SHARED_BRANCH"
@@ -54,20 +57,32 @@ steps:
       git clone --branch "$branch_name" "$BASE_URL/SadganShared/_git/$repo_path" "$target_dir"
     }
 
-    clone_app_pr_merge() {
+    clone_app_pr_source() {
       local repo_name="$1"
       local target_dir="$2"
 
-      echo "Cloning SadganErp/$repo_name and checking out PR merge commit ..."
+      echo "Cloning SadganErp/$repo_name @ PR source branch ($SOURCE_BRANCH), not target ($TARGET_BRANCH) ..."
       rm -rf "$target_dir"
       git clone "$BASE_URL/SadganErp/_git/$repo_name" "$target_dir"
       cd "$target_dir"
-      if ! git fetch origin "refs/pull/${PR_ID}/merge"; then
-        echo "Could not fetch refs/pull/${PR_ID}/merge (merge conflicts or policy). Failing so PR cannot complete."
-        exit 1
+      if [ -n "$SOURCE_COMMIT" ]; then
+        echo "Checking out PR source commit: $SOURCE_COMMIT"
+        if ! git fetch origin "$SOURCE_COMMIT"; then
+          echo "Could not fetch source commit $SOURCE_COMMIT"
+          exit 1
+        fi
+        git checkout FETCH_HEAD
+      elif ! git fetch origin "refs/heads/${SOURCE_BRANCH}"; then
+        echo "Could not fetch refs/heads/${SOURCE_BRANCH}; trying refs/pull/${PR_ID}/source ..."
+        if ! git fetch origin "refs/pull/${PR_ID}/source"; then
+          echo "Could not fetch PR source (branch or refs/pull/${PR_ID}/source). Failing PR validation."
+          exit 1
+        fi
+        git checkout FETCH_HEAD
+      else
+        git checkout FETCH_HEAD
       fi
-      git checkout FETCH_HEAD
-      echo "App commit under test: $(git rev-parse --short HEAD)"
+      echo "App commit under test (PR source): $(git rev-parse --short HEAD) on branch $SOURCE_BRANCH"
       cd "$WORK_ROOT"
     }
 
@@ -93,7 +108,7 @@ steps:
           echo "Frontend PR test must run from Sadgan.Erp.Panel repository (got $APP_REPO)."
           exit 1
         fi
-        clone_app_pr_merge "Sadgan.Erp.Panel" "$WORK_ROOT/SadganErp/Sadgan.Erp.Panel"
+        clone_app_pr_source "Sadgan.Erp.Panel" "$WORK_ROOT/SadganErp/Sadgan.Erp.Panel"
       else
         clone_app_branch "Sadgan.Erp.Panel" "$SHARED_BRANCH" "$WORK_ROOT/SadganErp/Sadgan.Erp.Panel"
       fi
@@ -106,14 +121,14 @@ steps:
           echo "Backend PR test must run from SadganErpApi repository (got $APP_REPO)."
           exit 1
         fi
-        clone_app_pr_merge "SadganErpApi" "$WORK_ROOT/SadganErp/SadganErpApi"
+        clone_app_pr_source "SadganErpApi" "$WORK_ROOT/SadganErp/SadganErpApi"
       else
         clone_app_branch "SadganErpApi" "$SHARED_BRANCH" "$WORK_ROOT/SadganErp/SadganErpApi"
       fi
     fi
 
     echo "Checkout complete."
-  displayName: 'Clone repos (PR merge or branch tip)'
+  displayName: 'Clone repos (PR source branch or branch tip)'
   env:
     GIT_PAT: $(GIT_PAT)
     GIT_CONFIG_GLOBAL: $(GIT_CONFIG_GLOBAL)
