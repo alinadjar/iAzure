@@ -96,7 +96,7 @@ steps:
       sln|Sln|SLN)
         # Parse Sadgan.Erp.Panel.sln: MockTests, ServerTests, and *Tests.csproj (not *.UITest.csproj).
         # Run order: Mock → Server → Panel → Shared → any other matches (Panel pre-builds Mock when needed).
-        mapfile -t DISCOVERED < <(grep -E '(MockTests|ServerTests|\.Tests)\.csproj"' "$SLN" | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' | tr '\\' '/' | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done)
+        mapfile -t DISCOVERED < <(grep -E '(MockTests|ServerTests|\.Tests|\.UITests?)\.csproj"' "$SLN" | sed -E 's/.*", "([^"]+\.csproj)".*/\1/' | tr '\\' '/' | while read -r rel; do realpath -m "$PANEL_DIR/$rel"; done)
         if [ "${#DISCOVERED[@]}" -eq 0 ]; then
           echo "##vso[task.logissue type=error]No test projects found in $SLN"
           exit 1
