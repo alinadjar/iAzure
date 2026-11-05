@@ -41,20 +41,49 @@ steps:
         echo "Unsupported PR target branch: $TARGET_BRANCH (expected dev or wit/*)"
         exit 1
       fi
-      # Shared libraries / Client.Core baseline for PR validation (app repo uses PR source below).
-      SHARED_BRANCH="dev"
+      DEPENDENCY_FALLBACK_BRANCH="dev"
     else
       echo "Non-PR run (Build.Reason=$BUILD_REASON): cloning @ branch $SHARED_BRANCH"
     fi
 
+    # On PR: use PR source branch name on each dependency repo when that branch exists; else dev.
+    pick_clone_branch() {
+      local remote_url="$1"
+      local repo_label="$2"
+      if [ "$IS_PR" != true ]; then
+        echo "$SHARED_BRANCH"
+        return 0
+      fi
+      if git ls-remote --heads "$remote_url" "refs/heads/${SOURCE_BRANCH}" | grep -q .; then
+        echo "$SOURCE_BRANCH"
+        return 0
+      fi
+      echo "##vso[task.logissue type=warning]${repo_label}: no branch ${SOURCE_BRANCH} — cloning ${DEPENDENCY_FALLBACK_BRANCH} instead."
+      echo "$DEPENDENCY_FALLBACK_BRANCH"
+    }
+
     clone_shared() {
-      local branch_name="$1"
-      local repo_path="$2"
-      local target_dir="$3"
+      local repo_path="$1"
+      local target_dir="$2"
+      local remote="$BASE_URL/SadganShared/_git/$repo_path"
+      local branch_name
+      branch_name="$(pick_clone_branch "$remote" "SadganShared/$repo_path")"
 
       echo "Cloning SadganShared/$repo_path @ $branch_name ..."
       rm -rf "$target_dir"
-      git clone --branch "$branch_name" "$BASE_URL/SadganShared/_git/$repo_path" "$target_dir"
+      git clone --branch "$branch_name" "$remote" "$target_dir"
+    }
+
+    clone_erp_dependency() {
+      local repo_name="$1"
+      local target_dir="$2"
+      local remote="$BASE_URL/SadganErp/_git/$repo_name"
+      local branch_name
+      branch_name="$(pick_clone_branch "$remote" "SadganErp/$repo_name")"
+
+      echo "Cloning SadganErp/$repo_name @ $branch_name ..."
+      rm -rf "$target_dir"
+      git clone --branch "$branch_name" "$remote" "$target_dir"
     }
 
     clone_app_pr_source() {
@@ -97,12 +126,12 @@ steps:
       echo "App commit under test: $(git -C "$target_dir" rev-parse --short HEAD)"
     }
 
-    clone_shared "$SHARED_BRANCH" "1_Configs" "$WORK_ROOT/SadganShared/1_Configs"
-    clone_shared "$SHARED_BRANCH" "2_SharedLibrary" "$WORK_ROOT/SadganShared/2_SharedLibrary"
+    clone_shared "1_Configs" "$WORK_ROOT/SadganShared/1_Configs"
+    clone_shared "2_SharedLibrary" "$WORK_ROOT/SadganShared/2_SharedLibrary"
 
     if [ "${{ parameters.profile }}" = "frontend" ]; then
-      clone_shared "$SHARED_BRANCH" "3_ClientLibrary" "$WORK_ROOT/SadganShared/3_ClientLibrary"
-      clone_shared "$SHARED_BRANCH" "4_ServerLibrary" "$WORK_ROOT/SadganShared/4_ServerLibrary"
+      clone_shared "3_ClientLibrary" "$WORK_ROOT/SadganShared/3_ClientLibrary"
+      clone_shared "4_ServerLibrary" "$WORK_ROOT/SadganShared/4_ServerLibrary"
       if [ "$IS_PR" = true ]; then
         if [ "$APP_REPO" != "Sadgan.Erp.Panel" ]; then
           echo "Frontend PR test must run from Sadgan.Erp.Panel repository (got $APP_REPO)."
@@ -112,10 +141,9 @@ steps:
       else
         clone_app_branch "Sadgan.Erp.Panel" "$SHARED_BRANCH" "$WORK_ROOT/SadganErp/Sadgan.Erp.Panel"
       fi
-      rm -rf "$WORK_ROOT/SadganErp/Sadgan.Erp.Client.Core"
-      git clone --branch "$SHARED_BRANCH" "$BASE_URL/SadganErp/_git/Sadgan.Erp.Client.Core" "$WORK_ROOT/SadganErp/Sadgan.Erp.Client.Core"
+      clone_erp_dependency "Sadgan.Erp.Client.Core" "$WORK_ROOT/SadganErp/Sadgan.Erp.Client.Core"
     else
-      clone_shared "$SHARED_BRANCH" "4_ServerLibrary" "$WORK_ROOT/SadganShared/4_ServerLibrary"
+      clone_shared "4_ServerLibrary" "$WORK_ROOT/SadganShared/4_ServerLibrary"
       if [ "$IS_PR" = true ]; then
         if [ "$APP_REPO" != "SadganErpApi" ]; then
           echo "Backend PR test must run from SadganErpApi repository (got $APP_REPO)."
